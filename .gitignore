@@ -1,0 +1,26 @@
+# dependencies
+node_modules/
+
+# environment / secrets
+.env
+.env.*
+!.env.example
+
+# build output
+dist/
+build/
+
+# uploads (user-generated files must never be committed) - folders are kept via .gitkeep
+server/uploads/public/items/*
+server/uploads/public/manuals/*
+server/uploads/private/lender-docs/*
+!server/uploads/**/.gitkeep
+
+# logs / OS / editor
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/

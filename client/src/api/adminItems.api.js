@@ -3,4 +3,4 @@
 import api from './axios';
 
 /** GET /api/admin-items - Req 23 - All item listings on the platform (paginated) */
-export const listAllItems = (params) => api.get(`/admin-items`, { params }).then((r) => r.data);
+export const listAllItems = (params) => api.get('/admin-items', { params }).then((r) => r.data);

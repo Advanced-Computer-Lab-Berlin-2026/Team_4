@@ -4,22 +4,32 @@
  * Mounted at /api/notices (see routes/notices.routes.js). Conventions: see docs/TEAM_WORKFLOW.md
  */
 const asyncHandler = require('../utils/asyncHandler');
-const ApiError = require('../utils/ApiError');
+const Notice = require('../models/Notice');
 
 /**
  * GET /api/notices - Req 42 - any logged-in user
- * Notice board (newest first)
- * TODO: implement
+ * Notice board (pinned first, then newest first)
  */
 exports.listNotices = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('listNotices');
+  const notices = await Notice.find()
+    .sort({ pinned: -1, createdAt: -1 })
+    .populate('postedBy', 'name username');
+  res.json({ notices });
 });
 
 /**
  * POST /api/notices - Req 41 - admin
  * Post a community notice
- * TODO: implement
  */
 exports.createNotice = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('createNotice');
+  const { title, body, pinned = false } = req.body;
+  const notice = await Notice.create({
+    title,
+    body,
+    pinned,
+    postedBy: req.user._id,
+  });
+  await notice.populate('postedBy', 'name username');
+
+  res.status(201).json({ notice });
 });

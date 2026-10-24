@@ -3,13 +3,13 @@
 import api from './axios';
 
 /** GET /api/favorites - Req 38 - My favorites with item data */
-export const listFavorites = (params) => api.get(`/favorites`, { params }).then((r) => r.data);
+export const listFavorites = () => api.get('/favorites').then((r) => r.data);
 
 /** GET /api/favorites/ids - Req 37 - Only item ids (for heart-button state) */
-export const listFavoriteIds = (params) => api.get(`/favorites/ids`, { params }).then((r) => r.data);
+export const listFavoriteIds = () => api.get('/favorites/ids').then((r) => r.data);
 
 /** POST /api/favorites/:itemId - Req 37 - Add to favorites */
-export const addFavorite = (itemId, data) => api.post(`/favorites/${itemId}`, data).then((r) => r.data);
+export const addFavorite = (itemId) => api.post(`/favorites/${itemId}`).then((r) => r.data);
 
 /** DELETE /api/favorites/:itemId - Req 38 - Remove from favorites */
 export const removeFavorite = (itemId) => api.delete(`/favorites/${itemId}`).then((r) => r.data);

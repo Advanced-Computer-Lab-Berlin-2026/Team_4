@@ -1,7 +1,7 @@
 // FOUNDATION (maintained by Member 1). Provides the logged-in user to the whole app.
 //   const { user, isAdmin, isVerifiedLender, login, logout, refreshUser } = useAuth();
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import api from '../api/axios';
+import * as authApi from '../api/auth.api';
 
 const AuthContext = createContext(null);
 
@@ -11,8 +11,8 @@ export function AuthProvider({ children }) {
 
   const refreshUser = useCallback(async () => {
     try {
-      const { data } = await api.get('/auth/me');
-      setUser(data.user);
+      const { user } = await authApi.me();
+      setUser(user);
     } catch {
       setUser(null);
     } finally {
@@ -24,13 +24,14 @@ export function AuthProvider({ children }) {
 
   // login/logout call Member 1's endpoints; the UI forms live in pages/auth/*
   const login = useCallback(async (username, password) => {
-    const { data } = await api.post('/auth/login', { username, password });
-    setUser(data.user);
-    return data.user;
+    const { user } = await authApi.login({ username, password });
+    setUser(user);
+    return user;
   }, []);
 
   const logout = useCallback(async () => {
-    try { await api.post('/auth/logout'); } finally { setUser(null); }
+    await authApi.logout();
+    setUser(null);
   }, []);
 
   const value = useMemo(() => ({

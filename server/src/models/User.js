@@ -13,15 +13,18 @@ const { ROLES, LENDER_STATUS, USER_STATUS, TRUST_SCORE_DEFAULT } = require('../c
 
 const { Schema } = mongoose;
 
+// Admin accounts require only username and password (Req 6).
+function memberRequired() { return this.role !== ROLES.ADMIN; }
+
 const userSchema = new Schema(
   {
     username: { type: String, required: true, unique: true, trim: true, lowercase: true, minlength: 3, maxlength: 30, match: [/^[a-z0-9_.]+$/, 'Username may only contain letters, numbers, _ and .'] },
     name: { type: String, required: true, trim: true, maxlength: 100 },
-    email: { type: String, required: true, unique: true, trim: true, lowercase: true, match: [/^\S+@\S+\.\S+$/, 'Invalid email address'] },
-    phone: { type: String, required: true, unique: true, trim: true, match: [/^\+?[0-9\s-]{7,15}$/, 'Invalid phone number'] },
+    email: { type: String, required: memberRequired, unique: true, sparse: true, trim: true, lowercase: true, match: [/^\S+@\S+\.\S+$/, 'Invalid email address'] },
+    phone: { type: String, required: memberRequired, unique: true, sparse: true, trim: true, match: [/^\+?[0-9\s-]{7,15}$/, 'Invalid phone number'] },
     address: {
-      street: { type: String, required: true, trim: true },
-      city: { type: String, required: true, trim: true },
+      street: { type: String, required: memberRequired, trim: true },
+      city: { type: String, required: memberRequired, trim: true },
       state: { type: String, trim: true },
       postalCode: { type: String, trim: true },
       country: { type: String, trim: true, default: 'Egypt' },

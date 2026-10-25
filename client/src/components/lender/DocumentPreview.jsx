@@ -7,6 +7,8 @@ import { getErrorMessage } from '../../api/axios';
 import './lender.css';
 
 export const DOC_LABELS = { id_document: 'ID document', proof_of_address: 'Proof of address' };
+// mid-sentence form ("Upload your ID document and proof of address")
+export const DOC_NOUNS = { id_document: 'ID document', proof_of_address: 'proof of address' };
 
 export const formatSize = (bytes = 0) =>
   bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;

@@ -7,7 +7,7 @@ import Alert from '../../components/common/Alert';
 import Spinner from '../../components/common/Spinner';
 import StatusBadge from '../../components/common/StatusBadge';
 import DocumentUploader from '../../components/lender/DocumentUploader';
-import { DOC_LABELS } from '../../components/lender/DocumentPreview';
+import { DOC_LABELS, DOC_NOUNS } from '../../components/lender/DocumentPreview';
 import { getErrorMessage } from '../../api/axios';
 import { getMyApplication, submitApplication } from '../../api/lenderApplications.api';
 import { useAuth } from '../../context/AuthContext';
@@ -77,8 +77,9 @@ export default function LenderApplyPage() {
       )}
       {status === 'rejected' && (
         <Alert variant="error">
-          Your application was rejected{application.rejectionReason ? `: ${application.rejectionReason}` : '.'} You can
-          replace your documents and submit again.
+          Your application was rejected.
+          {application.rejectionReason && <> Reason: <strong>{application.rejectionReason}</strong>.</>} You can replace
+          your documents and submit again.
         </Alert>
       )}
       {editable && (
@@ -111,7 +112,7 @@ export default function LenderApplyPage() {
             {submitting ? 'Submitting...' : status === 'rejected' ? 'Resubmit application' : 'Submit application'}
           </button>
           {missing.length > 0 && (
-            <div className="field-hint">Upload your {missing.map((t) => DOC_LABELS[t].toLowerCase()).join(' and ')} to submit.</div>
+            <div className="field-hint">Upload your {missing.map((t) => DOC_NOUNS[t]).join(' and ')} to submit.</div>
           )}
         </div>
       )}

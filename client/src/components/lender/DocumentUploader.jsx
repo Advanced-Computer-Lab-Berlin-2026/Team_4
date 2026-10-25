@@ -7,7 +7,7 @@ import { getErrorMessage } from '../../api/axios';
 import { uploadDocument, removeDocument, previewDocument } from '../../api/lenderApplications.api';
 import { ALLOWED_FILE_TYPES, MAX_UPLOAD_MB } from '../../utils/validators';
 import { formatDateTime } from '../../utils/format';
-import DocumentPreview, { formatSize } from './DocumentPreview';
+import DocumentPreview, { DOC_NOUNS, formatSize } from './DocumentPreview';
 import './lender.css';
 
 export default function DocumentUploader({ type, label, documents = [], onUploaded, onRemoved, disabled = false }) {
@@ -39,7 +39,7 @@ export default function DocumentUploader({ type, label, documents = [], onUpload
   };
 
   const handleRemove = async () => {
-    if (!window.confirm(`Remove your ${label.toLowerCase()}?`)) return;
+    if (!window.confirm(`Remove your ${DOC_NOUNS[type] || label}?`)) return;
     setRemoving(true);
     setError('');
     try {

@@ -72,7 +72,7 @@ export default function FavoriteButton({ itemId }) {
   };
 
   return (
-    <span>
+    <>
       <button
         type="button"
         className="btn btn-small"
@@ -81,11 +81,11 @@ export default function FavoriteButton({ itemId }) {
         aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
         aria-pressed={isFavorite}
         title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-        style={{ minWidth: '2.5rem', padding: '.25rem .5rem', fontSize: '1.25rem', lineHeight: 1 }}
+        aria-busy={loading || busy}
       >
         {isFavorite ? '\u2665' : '\u2661'}
       </button>
       {error && <span role="alert" className="field-error">{error}</span>}
-    </span>
+    </>
   );
 }

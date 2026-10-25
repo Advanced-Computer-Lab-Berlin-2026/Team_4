@@ -44,7 +44,7 @@ export default function NoticeBoardPage() {
         <p className="muted">There are no community notices yet.</p>
       )}
       {!error && notices.length > 0 && (
-        <div style={{ display: 'grid', gap: '1rem' }}>
+        <div className="grid">
           {notices.map((notice) => <NoticeCard key={notice._id} notice={notice} />)}
         </div>
       )}

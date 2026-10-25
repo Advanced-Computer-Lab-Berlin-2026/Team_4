@@ -33,6 +33,8 @@ export default function FavoritesPage() {
   }, [loadFavorites]);
 
   const handleRemove = async (itemId) => {
+    if (!window.confirm('Remove this item from your favorites?')) return;
+
     setRemovingItemId(itemId);
     setError('');
     setSuccess('');

@@ -8,7 +8,7 @@ import Alert from '../../components/common/Alert';
 import Pagination from '../../components/common/Pagination';
 import Spinner from '../../components/common/Spinner';
 import StatusBadge from '../../components/common/StatusBadge';
-import { formatDateTime } from '../../utils/format';
+import { formatDateTime, formatMoney } from '../../utils/format';
 
 export default function AdminItemsPage() {
   const [result, setResult] = useState({ items: [], total: 0, page: 1, pages: 1 });
@@ -59,6 +59,7 @@ export default function AdminItemsPage() {
                   <th scope="col">Item</th>
                   <th scope="col">Owner</th>
                   <th scope="col">Category</th>
+                  <th scope="col">Deposit</th>
                   <th scope="col">Status</th>
                   <th scope="col">Created</th>
                 </tr>
@@ -71,6 +72,7 @@ export default function AdminItemsPage() {
                     </td>
                     <td>{item.owner?.name || item.owner?.username || 'Unknown'}</td>
                     <td>{item.category?.name || 'Unknown'}</td>
+                    <td>{formatMoney(item.depositAmount)}</td>
                     <td>
                       <div className="row">
                         {item.isArchived && <StatusBadge status="archived" />}

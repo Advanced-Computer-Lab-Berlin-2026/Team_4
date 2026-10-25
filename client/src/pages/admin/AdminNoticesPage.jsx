@@ -41,37 +41,41 @@ export default function AdminNoticesPage() {
       <Alert variant="error">{error}</Alert>
       <Alert variant="success">{success}</Alert>
       <form className="form-card" onSubmit={handleSubmit}>
-        <FormField label="Title">
-          <input
-            type="text"
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            maxLength={150}
-            required
-          />
-        </FormField>
-        <FormField label="Notice">
-          <textarea
-            value={body}
-            onChange={(event) => setBody(event.target.value)}
-            maxLength={5000}
-            required
-          />
-        </FormField>
-        <label className="row" style={{ marginBottom: '1rem' }}>
-          <input
-            type="checkbox"
-            checked={pinned}
-            onChange={(event) => setPinned(event.target.checked)}
-          />
-          Pin this notice to the top of the board
-        </label>
-        <button type="submit" className="btn" disabled={submitting}>
-          {submitting ? 'Posting...' : 'Post notice'}
-        </button>
+        <div className="card">
+          <div className="card-body">
+            <FormField label="Title">
+              <input
+                type="text"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                maxLength={150}
+                required
+              />
+            </FormField>
+            <FormField label="Body">
+              <textarea
+                value={body}
+                onChange={(event) => setBody(event.target.value)}
+                maxLength={5000}
+                required
+              />
+            </FormField>
+            <label className="row field">
+              <input
+                type="checkbox"
+                checked={pinned}
+                onChange={(event) => setPinned(event.target.checked)}
+              />
+              Pin this notice to the top of the board
+            </label>
+            <button type="submit" className="btn" disabled={submitting}>
+              {submitting ? 'Posting...' : 'Post notice'}
+            </button>
+          </div>
+        </div>
       </form>
       {createdNotice && (
-        <section style={{ marginTop: '1.5rem' }}>
+        <section className="field">
           <h2>Posted notice</h2>
           <NoticeCard notice={createdNotice} />
         </section>

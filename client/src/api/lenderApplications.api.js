@@ -6,10 +6,20 @@ import api from './axios';
 export const getMyApplication = (params) => api.get(`/lender-applications/mine`, { params }).then((r) => r.data);
 
 /** POST /api/lender-applications/documents - Req 3 - Upload a document (multipart: type + file) */
-export const uploadDocument = (data) => api.post(`/lender-applications/documents`, data).then((r) => r.data); // multipart: pass a FormData
+export const uploadDocument = (type, file, onProgress) => {
+  const data = new FormData();
+  data.append('type', type); // must come before the file so multer sees it in req.body
+  data.append('file', file);
+  return api
+    .post(`/lender-applications/documents`, data, {
+      onUploadProgress: onProgress && ((e) => e.total && onProgress(Math.round((e.loaded * 100) / e.total))),
+    })
+    .then((r) => r.data);
+};
 
-/** GET /api/lender-applications/documents/:docId - Req 3 - Owner previews one of their own documents */
-export const previewDocument = (docId) => api.get(`/lender-applications/documents/${docId}`).then((r) => r.data);
+/** GET /api/lender-applications/documents/:docId - Req 3 - Owner previews one of their own documents. Resolves to a Blob. */
+export const previewDocument = (docId) =>
+  api.get(`/lender-applications/documents/${docId}`, { responseType: 'blob' }).then((r) => r.data);
 
 /** DELETE /api/lender-applications/documents/:docId - Req 3 - Remove an uploaded document */
 export const removeDocument = (docId) => api.delete(`/lender-applications/documents/${docId}`).then((r) => r.data);

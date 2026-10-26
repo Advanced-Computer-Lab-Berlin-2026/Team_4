@@ -51,8 +51,8 @@ router.put('/:id', protect, requireVerifiedLender, itemIdParam, itemFieldRules(t
 router.post('/:id/photos', protect, requireVerifiedLender, itemIdParam, validate, c.loadMyItem, uploadItemPhotos, c.addPhotos); // Req 13, 14
 router.delete('/:id/photos/:photoId', protect, requireVerifiedLender, itemIdParam,
   param('photoId').isMongoId().withMessage('Invalid photo id'), validate, c.removePhoto); // Req 14
-router.patch('/:id/archive', protect, requireVerifiedLender, c.archiveItem); // Req 15
-router.patch('/:id/unarchive', protect, requireVerifiedLender, c.unarchiveItem); // Req 15
+router.patch('/:id/archive', protect, requireVerifiedLender, itemIdParam, validate, c.archiveItem); // Req 15
+router.patch('/:id/unarchive', protect, requireVerifiedLender, itemIdParam, validate, c.unarchiveItem); // Req 15
 
 // If a request fails after photos were saved to disk, delete them so no orphan files are left.
 // Also turns multer's vague "Unexpected field" (more than 8 photos in one upload) into a clear message.

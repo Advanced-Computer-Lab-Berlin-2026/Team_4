@@ -179,19 +179,37 @@ exports.removePhoto = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Flip isArchived in one atomic step (only if it is currently the opposite), so double clicks can't conflict.
+ * Nothing is deleted: photos, history and anything that references the item stay (Req 15).
+ */
+const setArchived = async (req, archive) => {
+  const update = archive
+    ? { $set: { isArchived: true, archivedAt: new Date() } }
+    : { $set: { isArchived: false }, $unset: { archivedAt: 1 } };
+  const item = await Item.findOneAndUpdate(
+    { _id: req.params.id, owner: req.user._id, isArchived: !archive },
+    update,
+    { new: true },
+  ).populate('category', 'name slug');
+  if (!item) {
+    await findMyItem(req); // 404 if it is not my item
+    throw ApiError.conflict(archive ? 'Item is already archived' : 'Item is not archived');
+  }
+  return item;
+};
+
+/**
  * PATCH /api/items/:id/archive - Req 15 - verified lender
- * Archive (hidden from search, history kept)
- * TODO: implement
+ * Archive: hidden from search (Item.publicFilter), reservation history kept.
  */
 exports.archiveItem = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('archiveItem');
+  res.json({ item: await setArchived(req, true) });
 });
 
 /**
  * PATCH /api/items/:id/unarchive - Req 15 - verified lender
- * Unarchive
- * TODO: implement
+ * Unarchive: the item shows up in search again.
  */
 exports.unarchiveItem = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('unarchiveItem');
+  res.json({ item: await setArchived(req, false) });
 });

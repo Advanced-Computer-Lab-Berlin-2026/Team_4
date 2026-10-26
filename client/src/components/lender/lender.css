@@ -1,0 +1,31 @@
+/* Member 3 - lender application + admin review. Tokens only (docs/UI_README.md). */
+.lender-doc-list { display: grid; gap: 1rem; }
+
+.lender-doc-file { display: flex; flex-wrap: wrap; gap: .25rem .75rem; align-items: baseline; margin: .5rem 0; word-break: break-word; }
+
+.lender-doc-preview { margin-top: .5rem; }
+.lender-doc-preview .alert { margin-top: .5rem; }
+
+.lender-doc-frame {
+  margin-top: .75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.lender-doc-frame img { display: block; width: 100%; max-height: 70vh; object-fit: contain; }
+.lender-doc-frame iframe { display: block; width: 100%; height: 70vh; border: 0; }
+
+.lender-upload-input { margin: .5rem 0 .25rem; max-width: 100%; }
+
+.lender-progress { width: 100%; height: .5rem; }
+
+.lender-facts { display: grid; grid-template-columns: minmax(7rem, max-content) 1fr; gap: .4rem 1rem; margin: 0; }
+.lender-facts dt { font-weight: 600; }
+.lender-facts dd { margin: 0; word-break: break-word; }
+
+.lender-section { margin-bottom: 1rem; }
+
+@media (min-width: 900px) {
+  .lender-doc-list.lender-doc-list-2 { grid-template-columns: 1fr 1fr; }
+}

@@ -5,6 +5,47 @@
  */
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
+const Item = require('../models/Item');
+const Category = require('../models/Category');
+const fs = require('fs');
+const { fileInfo } = require('../middleware/upload');
+
+/** Only these fields can be set by the lender (owner, archive and moderation fields never come from the body). */
+const pickItemFields = (body) => {
+  const fields = {};
+  ['title', 'description', 'category', 'depositAmount', 'conditionNotes'].forEach((k) => {
+    if (body[k] !== undefined) fields[k] = body[k];
+  });
+  return fields;
+};
+
+const assertActiveCategory = async (id) => {
+  const category = await Category.findOne({ _id: id, isActive: true });
+  if (!category) throw ApiError.badRequest('Choose a valid category', [{ field: 'category', message: 'Choose a valid category' }]);
+};
+
+/** The upload middleware trusts the file name/type label; also check the file really starts like a JPG or PNG. */
+const looksLikeImage = (file) => {
+  const head = Buffer.alloc(8);
+  const fd = fs.openSync(file.path, 'r');
+  try { fs.readSync(fd, head, 0, 8, 0); } finally { fs.closeSync(fd); }
+  const isPng = head.equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  const isJpg = head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff;
+  return isPng || isJpg;
+};
+
+const assertRealImages = (files) => {
+  const bad = files.find((f) => !looksLikeImage(f));
+  if (bad) {
+    const message = `"${bad.originalname}" is not a valid JPG or PNG image`;
+    throw ApiError.badRequest(message, [{ field: 'photos', message }]);
+  }
+};
+
+const toPhoto = (file) => {
+  const { url, path, originalName } = fileInfo(file);
+  return { url, path, originalName };
+};
 
 /**
  * GET /api/items/mine - Req 21 - verified lender
@@ -17,11 +58,21 @@ exports.listMyItems = asyncHandler(async (req, res) => {
 
 /**
  * POST /api/items - Req 13 - verified lender
- * Create a listing (multipart: fields + photos[])
- * TODO: implement
+ * Create a listing (multipart: fields + photos[]). Fields are validated in items.routes.js.
+ * Requires 1-8 photos. Photos already saved are cleaned up by the routes file if anything fails.
  */
 exports.createItem = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('createItem');
+  const files = req.files || [];
+  if (files.length === 0) { // more than 8 is already rejected by the upload middleware
+    throw ApiError.badRequest('Add at least one photo', [{ field: 'photos', message: 'Add at least one photo' }]);
+  }
+  assertRealImages(files);
+  const fields = pickItemFields(req.body);
+  await assertActiveCategory(fields.category);
+
+  const item = await Item.create({ ...fields, owner: req.user._id, photos: files.map(toPhoto) });
+  await item.populate('category', 'name slug');
+  res.status(201).json({ item });
 });
 
 /**

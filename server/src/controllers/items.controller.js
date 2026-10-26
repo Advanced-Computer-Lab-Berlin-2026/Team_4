@@ -103,11 +103,19 @@ exports.getMyItem = asyncHandler(async (req, res) => {
 
 /**
  * PUT /api/items/:id - Req 14 - verified lender
- * Edit details, deposit amount, category
- * TODO: implement
+ * Edit details, deposit amount, category (JSON). Partial updates: only the fields sent are changed.
+ * Owner, archive, moderation, photos and Member 6's pickup/rules/manual are ignored here.
  */
 exports.updateItem = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('updateItem');
+  const fields = pickItemFields(req.body || {});
+  if (Object.keys(fields).length === 0) throw ApiError.badRequest('Nothing to update');
+  const item = await findMyItem(req);
+  if (fields.category) await assertActiveCategory(fields.category);
+
+  item.set(fields);
+  await item.save();
+  await item.populate('category', 'name slug');
+  res.json({ item });
 });
 
 /**

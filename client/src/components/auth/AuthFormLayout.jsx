@@ -1,6 +1,5 @@
-// AuthFormLayout - Owner: Member 1 - Requirements: 1, 4
-// Props: { title, children } — shared card layout for login/register
-export default function AuthFormLayout(props) {
-  void props;
-  return <div className="muted">TODO AuthFormLayout (Member 1)</div>;
+export default function AuthFormLayout({ title, children }) {
+  return <div className="container"><section className="card form-card"><div className="card-body">
+    <h1>{title}</h1>{children}
+  </div></section></div>;
 }

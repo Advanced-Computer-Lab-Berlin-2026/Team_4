@@ -9,6 +9,14 @@ const Item = require('../models/Item');
 const Category = require('../models/Category');
 const fs = require('fs');
 const { fileInfo } = require('../middleware/upload');
+const { parsePagination, paginated } = require('../utils/pagination');
+
+/** Load one of the current lender's items (archived included). Another lender's item is a 404, so we don't reveal it exists. */
+const findMyItem = async (req) => {
+  const item = await Item.findOne({ _id: req.params.id, owner: req.user._id }).populate('category', 'name slug');
+  if (!item) throw ApiError.notFound('Item not found');
+  return item;
+};
 
 /** Only these fields can be set by the lender (owner, archive and moderation fields never come from the body). */
 const pickItemFields = (body) => {
@@ -49,11 +57,20 @@ const toPhoto = (file) => {
 
 /**
  * GET /api/items/mine - Req 21 - verified lender
- * All items owned by the current lender (incl. archived)
- * TODO: implement
+ * All items owned by the current lender (incl. archived), newest first.
+ * Query: status=all|active|archived (default all), page, limit (default 12, max 50).
  */
 exports.listMyItems = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('listMyItems');
+  const filter = { owner: req.user._id };
+  if (req.query.status === 'active') filter.isArchived = false;
+  if (req.query.status === 'archived') filter.isArchived = true;
+
+  const pg = parsePagination(req.query);
+  const [items, total] = await Promise.all([
+    Item.find(filter).sort({ createdAt: -1, _id: -1 }).skip(pg.skip).limit(pg.limit).populate('category', 'name slug'),
+    Item.countDocuments(filter),
+  ]);
+  res.json(paginated(items, total, pg));
 });
 
 /**
@@ -77,11 +94,11 @@ exports.createItem = asyncHandler(async (req, res) => {
 
 /**
  * GET /api/items/:id - Req 14 - verified lender
- * One of my items for the edit form
- * TODO: implement
+ * One of my items for the edit form (archived included)
  */
 exports.getMyItem = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('getMyItem');
+  const item = await findMyItem(req);
+  res.json({ item });
 });
 
 /**

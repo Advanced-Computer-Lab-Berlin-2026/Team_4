@@ -1,6 +1,6 @@
 // ITEMS ROUTES - Owner: Member 5 - mounted automatically at /api/items
 const router = require('express').Router();
-const { body } = require('express-validator');
+const { body, param, query } = require('express-validator');
 const c = require('../controllers/items.controller');
 const { protect } = require('../middleware/auth');
 const { requireVerifiedLender } = require('../middleware/roles');
@@ -32,9 +32,15 @@ const itemFieldRules = [
     .trim().isLength({ max: 2000 }).withMessage('Condition notes can be up to 2000 characters'),
 ];
 
-router.get('/mine', protect, requireVerifiedLender, c.listMyItems); // Req 21
+const itemIdParam = param('id').isMongoId().withMessage('Invalid item id');
+const listQueryRules = [
+  query('status').optional().custom((v) => isText(v) && ['all', 'active', 'archived'].includes(v))
+    .withMessage('status must be all, active or archived'),
+];
+
+router.get('/mine', protect, requireVerifiedLender, listQueryRules, validate, c.listMyItems); // Req 21
 router.post('/', protect, requireVerifiedLender, uploadItemPhotos, itemFieldRules, validate, c.createItem); // Req 13
-router.get('/:id', protect, requireVerifiedLender, c.getMyItem); // Req 14
+router.get('/:id', protect, requireVerifiedLender, itemIdParam, validate, c.getMyItem); // Req 14
 router.put('/:id', protect, requireVerifiedLender, c.updateItem); // Req 14
 router.post('/:id/photos', protect, requireVerifiedLender, uploadItemPhotos, c.addPhotos); // Req 13, 14
 router.delete('/:id/photos/:photoId', protect, requireVerifiedLender, c.removePhoto); // Req 14

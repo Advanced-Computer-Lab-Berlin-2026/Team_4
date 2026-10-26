@@ -8,7 +8,9 @@ const ApiError = require('../utils/ApiError');
 const Item = require('../models/Item');
 const Category = require('../models/Category');
 const fs = require('fs');
-const { fileInfo } = require('../middleware/upload');
+const { fileInfo, removeFile } = require('../middleware/upload');
+
+const MAX_PHOTOS = 8; // per item, across all uploads (decision B)
 const { parsePagination, paginated } = require('../utils/pagination');
 
 /** Load one of the current lender's items (archived included). Another lender's item is a 404, so we don't reveal it exists. */
@@ -118,22 +120,62 @@ exports.updateItem = asyncHandler(async (req, res) => {
   res.json({ item });
 });
 
+/** Route middleware: 404 unless :id is one of my items. Used before uploads so nothing is saved for other items. */
+exports.loadMyItem = asyncHandler(async (req, res, next) => {
+  await findMyItem(req);
+  next();
+});
+
 /**
  * POST /api/items/:id/photos - Req 13, 14 - verified lender
- * Add photos to an existing listing
- * TODO: implement
+ * Add photos to an existing listing (multipart: photos[]). Max 8 photos per item in total.
+ * Photos already saved are cleaned up by the routes file if anything fails.
  */
 exports.addPhotos = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('addPhotos');
+  const files = req.files || [];
+  if (files.length === 0) {
+    throw ApiError.badRequest('Add at least one photo', [{ field: 'photos', message: 'Add at least one photo' }]);
+  }
+  assertRealImages(files);
+
+  // Atomic: only push if the item will still have at most 8 photos (safe against two uploads at once).
+  const roomFilter = { [`photos.${MAX_PHOTOS - files.length}`]: { $exists: false } };
+  const item = await Item.findOneAndUpdate(
+    { _id: req.params.id, owner: req.user._id, ...roomFilter },
+    { $push: { photos: { $each: files.map(toPhoto) } } },
+    { new: true, runValidators: true },
+  ).populate('category', 'name slug');
+  if (!item) {
+    const current = await findMyItem(req);
+    const left = Math.max(MAX_PHOTOS - current.photos.length, 0);
+    const message = `An item can have up to ${MAX_PHOTOS} photos. You can add ${left} more.`;
+    throw ApiError.badRequest(message, [{ field: 'photos', message }]);
+  }
+  res.json({ item });
 });
 
 /**
  * DELETE /api/items/:id/photos/:photoId - Req 14 - verified lender
- * Remove one photo
- * TODO: implement
+ * Remove one photo and delete its file. The last photo can't be removed (an item needs at least one).
  */
 exports.removePhoto = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('removePhoto');
+  const { id, photoId } = req.params;
+  // Atomic: only pull if the item has this photo AND at least 2 photos (safe against two deletes at once).
+  const before = await Item.findOneAndUpdate(
+    { _id: id, owner: req.user._id, 'photos._id': photoId, 'photos.1': { $exists: true } },
+    { $pull: { photos: { _id: photoId } } },
+    { new: false },
+  );
+  if (!before) {
+    const current = await findMyItem(req); // 404 if not mine
+    if (!current.photos.some((p) => String(p._id) === photoId)) throw ApiError.notFound('Photo not found');
+    throw ApiError.badRequest('An item must keep at least one photo. Add another photo before removing this one.');
+  }
+
+  const removed = before.photos.find((p) => String(p._id) === photoId);
+  if (removed.path && removed.path.startsWith('public/items/')) removeFile(removed.path); // never the shared placeholder
+  const item = await findMyItem(req);
+  res.json({ item });
 });
 
 /**

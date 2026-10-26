@@ -47,8 +47,10 @@ router.get('/mine', protect, requireVerifiedLender, listQueryRules, validate, c.
 router.post('/', protect, requireVerifiedLender, uploadItemPhotos, itemFieldRules(), validate, c.createItem); // Req 13
 router.get('/:id', protect, requireVerifiedLender, itemIdParam, validate, c.getMyItem); // Req 14
 router.put('/:id', protect, requireVerifiedLender, itemIdParam, itemFieldRules(true), validate, c.updateItem); // Req 14
-router.post('/:id/photos', protect, requireVerifiedLender, uploadItemPhotos, c.addPhotos); // Req 13, 14
-router.delete('/:id/photos/:photoId', protect, requireVerifiedLender, c.removePhoto); // Req 14
+// Ownership is checked BEFORE the upload, so no files are saved for someone else's item.
+router.post('/:id/photos', protect, requireVerifiedLender, itemIdParam, validate, c.loadMyItem, uploadItemPhotos, c.addPhotos); // Req 13, 14
+router.delete('/:id/photos/:photoId', protect, requireVerifiedLender, itemIdParam,
+  param('photoId').isMongoId().withMessage('Invalid photo id'), validate, c.removePhoto); // Req 14
 router.patch('/:id/archive', protect, requireVerifiedLender, c.archiveItem); // Req 15
 router.patch('/:id/unarchive', protect, requireVerifiedLender, c.unarchiveItem); // Req 15
 

@@ -17,15 +17,18 @@ const isText = (v) => typeof v === 'string';
 const MONEY_REGEX = /^\d{1,7}(\.\d{1,2})?$/;
 const MAX_DEPOSIT = 1000000;
 
+// Count length the same way the database does (an emoji counts as 2), so the friendly message always comes first.
+const len = (min, max) => (v) => v.length >= min && v.length <= max;
+
 // Create: title, description, category and deposit are required. Edit (partial = true): every field is optional,
 // but any field that IS sent must pass the same rule (e.g. a title can't be changed to empty).
 const itemFieldRules = (partial = false) => {
   const field = (name) => (partial ? body(name).optional() : body(name));
   return [
     field('title').custom(isText).withMessage('Title is required').bail()
-      .trim().isLength({ min: 1, max: 120 }).withMessage('Title is required (up to 120 characters)'),
+      .trim().custom(len(1, 120)).withMessage('Title is required (up to 120 characters)'),
     field('description').custom(isText).withMessage('Description is required').bail()
-      .trim().isLength({ min: 1, max: 4000 }).withMessage('Description is required (up to 4000 characters)'),
+      .trim().custom(len(1, 4000)).withMessage('Description is required (up to 4000 characters)'),
     field('category').custom(isText).withMessage('Category is required').bail()
       .trim().isMongoId().withMessage('Choose a valid category'),
     field('depositAmount').custom((v) => isText(v) || typeof v === 'number').withMessage('Deposit amount is required').bail()
@@ -33,7 +36,7 @@ const itemFieldRules = (partial = false) => {
       .withMessage(`Deposit must be a number from 0 to ${MAX_DEPOSIT} with at most 2 decimals`).bail()
       .customSanitizer((v) => Number(String(v).trim())),
     body('conditionNotes').optional().custom(isText).withMessage('Condition notes must be text').bail()
-      .trim().isLength({ max: 2000 }).withMessage('Condition notes can be up to 2000 characters'),
+      .trim().custom(len(0, 2000)).withMessage('Condition notes can be up to 2000 characters'),
   ];
 };
 

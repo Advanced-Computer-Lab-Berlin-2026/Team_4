@@ -9,11 +9,25 @@
  */
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
+const mongoose = require('mongoose');
+const User = require('../models/User');
 const LenderApplication = require('../models/LenderApplication');
 const { fileInfo, absolutePath, removeFile } = require('../middleware/upload');
 const { APPLICATION_DOC_TYPES, LENDER_STATUS } = require('../config/constants');
 
 const EDITABLE = ['draft', 'rejected'];
+const assertNotVerified = (user) => {
+  if (user.lenderStatus === LENDER_STATUS.VERIFIED) {
+    throw ApiError.conflict('You are already a verified lender');
+  }
+};
+const saveApplication = async (application) => {
+  try { return await application.save(); }
+  catch (err) {
+    if (err.name === 'VersionError') throw ApiError.conflict('Application changed. Refresh and try again');
+    throw err;
+  }
+};
 
 const assertEditable = (application) => {
   if (application && !EDITABLE.includes(application.status)) {
@@ -49,6 +63,7 @@ exports.uploadDocument = asyncHandler(async (req, res) => {
   if (!req.file) throw ApiError.badRequest('Please choose a file to upload');
   const { type } = req.body;
   try {
+    assertNotVerified(req.user);
     if (!APPLICATION_DOC_TYPES.includes(type)) {
       throw ApiError.badRequest(`Document type must be one of: ${APPLICATION_DOC_TYPES.join(', ')}`);
     }
@@ -58,12 +73,12 @@ exports.uploadDocument = asyncHandler(async (req, res) => {
 
     const previous = application.documents.find((d) => d.type === type);
     if (previous) {
-      removeFile(previous.path);
       previous.deleteOne();
     }
     const { originalName, storedName, path, mimeType, size, uploadedAt } = fileInfo(req.file);
     application.documents.push({ type, originalName, storedName, path, mimeType, size, uploadedAt });
-    await application.save();
+    await saveApplication(application);
+    if (previous) removeFile(previous.path);
     res.status(201).json({ application });
   } catch (err) {
     removeFile(fileInfo(req.file).path); // don't leave orphaned private files on disk
@@ -89,9 +104,10 @@ exports.previewDocument = asyncHandler(async (req, res) => {
 exports.removeDocument = asyncHandler(async (req, res) => {
   const { application, doc } = await findOwnDocument(req);
   assertEditable(application);
-  removeFile(doc.path);
+  const oldPath = doc.path;
   doc.deleteOne();
-  await application.save();
+  await saveApplication(application);
+  removeFile(oldPath);
   res.json({ application });
 });
 
@@ -100,25 +116,28 @@ exports.removeDocument = asyncHandler(async (req, res) => {
  * Submit the application (requires ID + proof of address)
  */
 exports.submitApplication = asyncHandler(async (req, res) => {
-  const application = await LenderApplication.findOne({ user: req.user._id });
-  if (!application) throw ApiError.badRequest('Upload your ID and proof of address before submitting');
-  assertEditable(application);
-
-  const missing = APPLICATION_DOC_TYPES.filter((t) => !application.documents.some((d) => d.type === t));
-  if (missing.length) {
-    const labels = { id_document: 'an ID document', proof_of_address: 'a proof of address' };
-    throw ApiError.badRequest(`Please upload ${missing.map((t) => labels[t] || t).join(' and ')}`);
-  }
-
-  application.status = 'pending';
-  application.submittedAt = new Date();
-  application.reviewedBy = undefined;
-  application.reviewedAt = undefined;
-  application.rejectionReason = undefined;
-  await application.save();
-
-  req.user.lenderStatus = LENDER_STATUS.PENDING;
-  await req.user.save();
-
-  res.json({ application, lenderStatus: req.user.lenderStatus });
+  assertNotVerified(req.user);
+  const application = await mongoose.connection.transaction(async (session) => {
+    const user = await User.findById(req.user._id).session(session);
+    if (!user) throw ApiError.notFound('User not found');
+    assertNotVerified(user);
+    const application = await LenderApplication.findOne({ user: user._id }).session(session);
+    if (!application) throw ApiError.badRequest('Upload your ID and proof of address before submitting');
+    assertEditable(application);
+    const missing = APPLICATION_DOC_TYPES.filter((type) => !application.documents.some((doc) => doc.type === type));
+    if (missing.length) {
+      const labels = { id_document: 'an ID document', proof_of_address: 'a proof of address' };
+      throw ApiError.badRequest(`Please upload ${missing.map((type) => labels[type]).join(' and ')}`);
+    }
+    application.status = 'pending';
+    application.submittedAt = new Date();
+    application.reviewedBy = undefined;
+    application.reviewedAt = undefined;
+    application.rejectionReason = undefined;
+    await application.save({ session });
+    user.lenderStatus = LENDER_STATUS.PENDING;
+    await user.save({ session });
+    return application;
+  });
+  res.json({ application, lenderStatus: LENDER_STATUS.PENDING });
 });

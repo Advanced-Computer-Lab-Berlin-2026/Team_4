@@ -1,7 +1,7 @@
 // DocumentPreview - Owner: Member 3 - Requirements: 3, 8
 // Props: { doc, load } — `load()` resolves to a Blob from an authenticated endpoint.
 // Private documents are never exposed by a public URL, so we fetch them and show/download a blob: URL.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Alert from '../common/Alert';
 import { getErrorMessage } from '../../api/axios';
 import './lender.css';
@@ -14,17 +14,31 @@ export const formatSize = (bytes = 0) =>
   bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 
 export default function DocumentPreview({ doc, load }) {
+  return <DocumentPreviewContent key={doc._id} doc={doc} load={load} />;
+}
+
+function DocumentPreviewContent({ doc, load }) {
   const [url, setUrl] = useState('');
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => () => url && URL.revokeObjectURL(url), [url]);
+  const active = useRef(false);
+  const blobUrl = useRef('');
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+      if (blobUrl.current) URL.revokeObjectURL(blobUrl.current);
+    };
+  }, []);
 
   const getUrl = async () => {
     if (url) return url;
     const blob = await load();
+    if (!active.current) return null;
     const next = URL.createObjectURL(blob);
+    blobUrl.current = next;
     setUrl(next);
     return next;
   };
@@ -32,14 +46,16 @@ export default function DocumentPreview({ doc, load }) {
   const run = async (fn) => {
     setBusy(true);
     setError('');
-    try { await fn(); } catch (err) { setError(getErrorMessage(err)); } finally { setBusy(false); }
+    try { await fn(); } catch (err) { if (active.current) setError(getErrorMessage(err)); } finally { if (active.current) setBusy(false); }
   };
 
-  const toggle = () => (open ? setOpen(false) : run(async () => { await getUrl(); setOpen(true); }));
+  const toggle = () => (open ? setOpen(false) : run(async () => { if (await getUrl()) setOpen(true); }));
 
   const download = () => run(async () => {
     const a = document.createElement('a');
-    a.href = await getUrl();
+    const downloadUrl = await getUrl();
+    if (!downloadUrl) return;
+    a.href = downloadUrl;
     a.download = doc.originalName || 'document';
     a.click();
   });

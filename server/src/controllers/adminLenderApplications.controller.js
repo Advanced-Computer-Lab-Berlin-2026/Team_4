@@ -8,6 +8,7 @@
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
 const LenderApplication = require('../models/LenderApplication');
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const { absolutePath } = require('../middleware/upload');
 const { parsePagination, paginated } = require('../utils/pagination');
@@ -81,22 +82,29 @@ exports.downloadDocument = asyncHandler(async (req, res) => {
  */
 exports.decideApplication = asyncHandler(async (req, res) => {
   const { decision, reason } = req.body;
-  const application = await findSubmitted(req.params.id);
-  if (application.status !== 'pending') {
-    throw ApiError.conflict(`This application has already been ${application.status}`);
-  }
-
-  const approve = decision === 'approve';
-  application.status = approve ? 'approved' : 'rejected';
-  application.rejectionReason = approve ? undefined : reason.trim();
-  application.reviewedBy = req.user._id;
-  application.reviewedAt = new Date();
-  await application.save();
-
-  await User.updateOne(
-    { _id: application.user },
-    { lenderStatus: approve ? LENDER_STATUS.VERIFIED : LENDER_STATUS.REJECTED }
-  );
+  const application = await mongoose.connection.transaction(async (session) => {
+    // A transaction retries write conflicts. Each retry checks the latest pending state.
+    const application = await LenderApplication.findOne({
+      _id: req.params.id, status: { $in: REVIEWABLE },
+    }).session(session);
+    if (!application) throw ApiError.notFound('Application not found');
+    if (application.status !== 'pending') {
+      throw ApiError.conflict(`This application has already been ${application.status}`);
+    }
+    const approve = decision === 'approve';
+    application.status = approve ? 'approved' : 'rejected';
+    application.rejectionReason = approve ? undefined : reason.trim();
+    application.reviewedBy = req.user._id;
+    application.reviewedAt = new Date();
+    await application.save({ session });
+    const result = await User.updateOne(
+      { _id: application.user },
+      { lenderStatus: approve ? LENDER_STATUS.VERIFIED : LENDER_STATUS.REJECTED },
+      { session }
+    );
+    if (result.matchedCount !== 1) throw ApiError.notFound('Applicant no longer exists');
+    return application;
+  });
 
   await application.populate([
     { path: 'user', select: APPLICANT_FIELDS },

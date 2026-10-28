@@ -1,15 +1,17 @@
-import { defineConfig } from 'vite';
+import { fileURLToPath } from 'node:url';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// In dev, the browser talks only to :5173; /api and /uploads are proxied to the Express server.
-// => same origin => no CORS headaches, and the httpOnly auth cookie "just works".
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    port: 5173,
-    proxy: {
-      '/api': 'http://localhost:5001',
-      '/uploads': 'http://localhost:5001',
+// Read the backend port at startup. Secrets are not exposed to the client bundle.
+export default defineConfig(({ mode }) => {
+  const serverEnv = loadEnv(mode, fileURLToPath(new URL('../server', import.meta.url)), '');
+  const port = parseInt(process.env.PORT || serverEnv.PORT, 10) || 5000;
+  const target = `http://localhost:${port}`;
+  return {
+    plugins: [react()],
+    server: {
+      port: 5173,
+      proxy: { '/api': target, '/uploads': target },
     },
-  },
+  };
 });

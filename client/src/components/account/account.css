@@ -1,0 +1,7 @@
+/* Member 2 - account pages (password, profile, wallet). Page-specific styles only. */
+.pw-tools { margin: -.75rem 0 .75rem; text-align: right; }
+.pw-rules { list-style: none; padding: 0; margin: -.25rem 0 1rem; font-size: .88rem; color: var(--muted); }
+.pw-rules li.ok { color: #11623a; }
+
+.wallet-balance { font-size: 2.25rem; font-weight: 700; margin: .25rem 0; }
+.readonly-list { margin: 0 0 1rem; } .readonly-list dt { font-weight: 600; } .readonly-list dd { margin: 0 0 .5rem; color: var(--muted); }

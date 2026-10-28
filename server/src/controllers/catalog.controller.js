@@ -81,7 +81,7 @@ exports.getItem = asyncHandler(async (req, res) => {
 
   const doc = await Item.findOne(Item.publicFilter({ _id: id }))
     .select('title description conditionNotes depositAmount photos category owner pickup rules manual createdAt')
-    .populate('category', 'name slug icon')
+    .populate({ path: 'category', select: 'name slug icon', match: { isActive: true } })
     .populate('owner', 'name')
     .lean();
   if (!doc || !doc.category) throw ApiError.notFound('Item not found');

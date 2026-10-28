@@ -1,6 +1,7 @@
 // AdminUserDetailPage page - Owner: Member 4
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { getErrorMessage } from '../../api/axios';
 import { getUser } from '../../api/adminUsers.api';
 
 export default function AdminUserDetailPage() {
@@ -11,17 +12,22 @@ export default function AdminUserDetailPage() {
     const [error, setError] = useState('');
 
     useEffect(() => {
+        let ignore = false;
+        setLoading(true);
+        setError('');
+        setUser(null);
         const loadDetails = async () => {
             try {
                 const res = await getUser(id);
-                setUser(res.data);
+                if (!ignore) setUser(res.data);
             } catch (err) {
-                setError('Failed to fetch user details.');
+                if (!ignore) setError(getErrorMessage(err));
             } finally {
-                setLoading(false);
+                if (!ignore) setLoading(false);
             }
         };
         loadDetails();
+        return () => { ignore = true; };
     }, [id]);
 
     if (loading) return <div style={{ padding: '2rem' }}>Loading user details...</div>;
@@ -29,7 +35,7 @@ export default function AdminUserDetailPage() {
     if (!user) return <div style={{ padding: '2rem' }}>User not found.</div>;
 
     return (
-        <div style={{ padding: '2rem', maxWidth: '800px', margin: '0 auto' }}>
+        <div style={{ padding: '2rem', maxWidth: '800px', margin: '0 auto', overflowWrap: 'anywhere' }}>
             <button
                 onClick={() => navigate(-1)}
                 style={{ marginBottom: '1.5rem', padding: '6px 12px', background: '#6c757d', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
@@ -45,7 +51,7 @@ export default function AdminUserDetailPage() {
                 <p><strong>Username:</strong> {user.username}</p>
                 <p><strong>Email Address:</strong> {user.email}</p>
                 <p><strong>Phone Number:</strong> {user.phone || 'N/A'}</p>
-                <p><strong>Home Address:</strong> {user.address || 'N/A'}</p>
+                <p><strong>Home Address:</strong> {[user.address?.street, user.address?.city, user.address?.state, user.address?.postalCode, user.address?.country].filter(Boolean).join(', ') || 'N/A'}</p>
                 <p><strong>System Role:</strong> {user.role}</p>
                 <p><strong>Lender Status:</strong> {user.lenderStatus || 'Standard'}</p>
                 <p><strong>Account Status:</strong> <span style={{ color: user.status === 'suspended' ? 'red' : 'green', fontWeight: 'bold' }}>{user.status || 'active'}</span></p>

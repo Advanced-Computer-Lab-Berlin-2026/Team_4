@@ -1,7 +1,7 @@
 // UserTable component - Owner: Member 4
 import React from 'react';
 
-export default function UserTable({ users, onToggleStatus, onDelete, onViewDetails }) {
+export default function UserTable({ users, onToggleStatus, onDelete, onViewDetails, busy = false, currentUserId }) {
   return (
       <div className="table-responsive" style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
@@ -39,6 +39,7 @@ export default function UserTable({ users, onToggleStatus, onDelete, onViewDetai
                     <td style={{ padding: '12px', display: 'flex', gap: '8px' }}>
                       <button
                           type="button"
+                          disabled={busy}
                           onClick={() => onViewDetails(user)}
                           style={{ padding: '4px 8px', background: '#17a2b8', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
                       >
@@ -46,6 +47,7 @@ export default function UserTable({ users, onToggleStatus, onDelete, onViewDetai
                       </button>
                       <button
                           type="button"
+                          disabled={busy || user.role === 'admin'}
                           onClick={() => onToggleStatus(user._id, user.status)}
                           style={{ padding: '4px 8px', background: user.status === 'suspended' ? '#28a745' : '#ffc107', color: '#000', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
                       >
@@ -53,6 +55,7 @@ export default function UserTable({ users, onToggleStatus, onDelete, onViewDetai
                       </button>
                       <button
                           type="button"
+                          disabled={busy || user._id === currentUserId}
                           onClick={() => onDelete(user._id)}
                           style={{ padding: '4px 8px', background: '#dc3545', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
                       >

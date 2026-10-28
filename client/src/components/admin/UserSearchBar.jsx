@@ -14,14 +14,17 @@ export default function UserSearchBar({ value = {}, onChange }) {
         {/* Name / Username Search */}
         <input
             type="text"
+            aria-label="Search users"
+            maxLength={100}
             placeholder="Search by name, username, or email..."
             value={value.q || ''}
             onChange={(e) => handleInputChange('q', e.target.value)}
-            style={{ padding: '8px 12px', flex: '1 1 250px', borderRadius: '4px', border: '1px solid #ccc' }}
+            style={{ padding: '8px 12px', flex: '1 1 250px', minWidth: 0, maxWidth: '100%', borderRadius: '4px', border: '1px solid #ccc' }}
         />
 
         {/* Role Filter */}
         <select
+            aria-label="Role"
             value={value.role || ''}
             onChange={(e) => handleInputChange('role', e.target.value)}
             style={{ padding: '8px 12px', borderRadius: '4px', border: '1px solid #ccc' }}
@@ -34,6 +37,7 @@ export default function UserSearchBar({ value = {}, onChange }) {
 
         {/* Lender Status Filter */}
         <select
+            aria-label="Lender status"
             value={value.lenderStatus || ''}
             onChange={(e) => handleInputChange('lenderStatus', e.target.value)}
             style={{ padding: '8px 12px', borderRadius: '4px', border: '1px solid #ccc' }}
@@ -41,11 +45,13 @@ export default function UserSearchBar({ value = {}, onChange }) {
           <option value="">All Lender Statuses</option>
           <option value="verified">Verified Lender</option>
           <option value="pending">Pending</option>
-          <option value="unverified">Unverified</option>
+          <option value="none">Not applied</option>
+          <option value="rejected">Rejected</option>
         </select>
 
         {/* Account Status Filter */}
         <select
+            aria-label="Account status"
             value={value.status || ''}
             onChange={(e) => handleInputChange('status', e.target.value)}
             style={{ padding: '8px 12px', borderRadius: '4px', border: '1px solid #ccc' }}

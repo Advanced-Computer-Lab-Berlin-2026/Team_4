@@ -16,16 +16,27 @@ const Item = require('../models/Item');
 exports.listFavorites = asyncHandler(async (req, res) => {
   const favorites = await Favorite.find({ user: req.user._id })
     .sort({ createdAt: -1 })
-    .populate({
-      path: 'item',
-      match: Item.publicFilter(),
-      populate: [
-        { path: 'owner', select: 'name username' },
-        { path: 'category', select: 'name slug' },
-      ],
-    });
+    .lean();
 
-  res.json({ favorites: favorites.filter((favorite) => favorite.item) });
+  const itemIds = favorites.map((favorite) => favorite.item);
+  const publicItems = await Item.find(
+    Item.publicFilter({ _id: { $in: itemIds } })
+  )
+    .populate('owner', 'name username')
+    .populate('category', 'name slug')
+    .lean();
+
+  const itemsById = new Map(
+    publicItems.map((item) => [item._id.toString(), item])
+  );
+
+  const result = favorites.map((favorite) => ({
+    ...favorite,
+    itemId: favorite.item.toString(),
+    item: itemsById.get(favorite.item.toString()) || null,
+  }));
+
+  res.json({ favorites: result });
 });
 
 /**

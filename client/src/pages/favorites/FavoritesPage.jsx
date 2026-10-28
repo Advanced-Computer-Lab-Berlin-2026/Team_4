@@ -40,7 +40,7 @@ export default function FavoritesPage() {
     setSuccess('');
     try {
       await removeFavorite(itemId);
-      setFavorites((current) => current.filter((favorite) => favorite.item?._id !== itemId));
+      setFavorites((current) => current.filter((favorite) => favorite.itemId !== itemId));
       setSuccess('Item removed from your favorites.');
     } catch (err) {
       setError(getErrorMessage(err));
@@ -70,22 +70,39 @@ export default function FavoritesPage() {
         </div>
       ) : favorites.length > 0 ? (
         <div className="grid">
-          {favorites.map(({ _id, item }) => (
-            <ItemCard
-              key={_id}
-              item={item}
-              actions={
-                <button
-                  type="button"
-                  className="btn btn-danger btn-small"
-                  onClick={() => handleRemove(item._id)}
-                  disabled={removingItemId === item._id}
-                >
-                  {removingItemId === item._id ? 'Removing...' : 'Remove'}
-                </button>
-              }
-            />
-          ))}
+          {favorites.map(({ _id, item, itemId }) =>
+            item ? (
+              <ItemCard
+                key={_id}
+                item={item}
+                actions={
+                  <button
+                    type="button"
+                    className="btn btn-danger btn-small"
+                    onClick={() => handleRemove(itemId)}
+                    disabled={removingItemId === itemId}
+                  >
+                    {removingItemId === itemId ? 'Removing...' : 'Remove'}
+                  </button>
+                }
+              />
+            ) : (
+              <article className="card" key={_id}>
+                <div className="card-body">
+                  <h3>Unavailable item</h3>
+                  <p className="muted">This item is no longer publicly available.</p>
+                  <button
+                    type="button"
+                    className="btn btn-danger btn-small"
+                    onClick={() => handleRemove(itemId)}
+                    disabled={removingItemId === itemId}
+                  >
+                    {removingItemId === itemId ? 'Removing...' : 'Remove'}
+                  </button>
+                </div>
+              </article>
+            )
+          )}
         </div>
       ) : null}
     </div>

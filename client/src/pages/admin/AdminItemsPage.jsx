@@ -65,10 +65,17 @@ export default function AdminItemsPage() {
                 </tr>
               </thead>
               <tbody>
-                {result.items.map((item) => (
-                  <tr key={item._id}>
+                {result.items.map((item) => {
+                  const isPublic = !item.isArchived && item.moderationStatus === 'ok';
+
+                  return (
+                    <tr key={item._id}>
                     <td>
-                      <Link to={`/catalog/${item._id}`}>{item.title}</Link>
+                      {isPublic ? (
+                        <Link to={`/catalog/${item._id}`}>{item.title}</Link>
+                      ) : (
+                        item.title
+                      )}
                     </td>
                     <td>{item.owner?.name || item.owner?.username || 'Unknown'}</td>
                     <td>{item.category?.name || 'Unknown'}</td>
@@ -80,8 +87,9 @@ export default function AdminItemsPage() {
                       </div>
                     </td>
                     <td>{formatDateTime(item.createdAt)}</td>
-                  </tr>
-                ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -1,43 +1,70 @@
-/**
- * ADMINUSERS CONTROLLER - Owner: Member 4 (Admin User Management)
- * Requirements: 7, 22, 28, 29, 39
- * Mounted at /api/admin-users (see routes/adminUsers.routes.js). Conventions: see docs/TEAM_WORKFLOW.md
- */
+// server/src/controllers/adminUsers.controller.js
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
+const User = require('../models/User');
 
 /**
  * GET /api/admin-users - Req 28, 29 - admin
  * List/search users (q=name, role, lenderStatus, status, page)
- * TODO: implement
  */
 exports.listUsers = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('listUsers');
+  const { q, role, lenderStatus, status, page = 1, limit = 10 } = req.query;
+  const query = {};
+
+  if (q) {
+    query.$or = [
+      { name: { $regex: q, $options: 'i' } },
+      { username: { $regex: q, $options: 'i' } },
+      { email: { $regex: q, $options: 'i' } }
+    ];
+  }
+  if (role) query.role = role;
+  if (lenderStatus) query.lenderStatus = lenderStatus;
+  if (status) query.status = status;
+
+  const pageNum = parseInt(page, 10);
+  const limitNum = parseInt(limit, 10);
+  const skip = (pageNum - 1) * limitNum;
+
+  const users = await User.find(query)
+      .select('-password')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
+
+  const total = await User.countDocuments(query);
+
+  res.status(200).json({
+    success: true,
+    count: users.length,
+    total,
+    totalPages: Math.ceil(total / limitNum) || 1,
+    currentPage: pageNum,
+    data: users,
+  });
 });
 
-/**
- * GET /api/admin-users/:id - Req 22 - admin
- * Basic information for one user
- * TODO: implement
- */
 exports.getUser = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('getUser');
+  const user = await User.findById(req.params.id).select('-password');
+  if (!user) throw ApiError.notFound('User not found');
+  res.status(200).json({ success: true, data: user });
 });
 
-/**
- * PATCH /api/admin-users/:id/status - Req 39 - admin
- * Suspend or reinstate an account
- * TODO: implement
- */
 exports.setUserStatus = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('setUserStatus');
+  const { status, isSuspended } = req.body;
+  const newStatus = typeof isSuspended === 'boolean' ? (isSuspended ? 'suspended' : 'active') : status;
+
+  const user = await User.findById(req.params.id);
+  if (!user) throw ApiError.notFound('User not found');
+
+  user.status = newStatus;
+  await user.save();
+  res.status(200).json({ success: true, data: user });
 });
 
-/**
- * DELETE /api/admin-users/:id - Req 7 - admin
- * Remove a member/lender/admin (+ cascade cleanup)
- * TODO: implement
- */
 exports.removeUser = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('removeUser');
+  const user = await User.findById(req.params.id);
+  if (!user) throw ApiError.notFound('User not found');
+  await user.deleteOne();
+  res.status(200).json({ success: true, message: 'User removed successfully' });
 });

@@ -17,7 +17,6 @@ const findOwnedItem = async (itemId, ownerId) => {
 /**
  * PUT /api/item-policies/:itemId/pickup - Req 30 - verified lender
  * Set pickup location + instructions
- * TODO: implement
  */
 exports.setPickup = asyncHandler(async (req, res) => {
   const location = String(req.body.location || '').trim();
@@ -48,7 +47,6 @@ exports.setPickup = asyncHandler(async (req, res) => {
 /**
  * PUT /api/item-policies/:itemId/rules - Req 31 - verified lender
  * Set maxBorrowDays / minTrustScore
- * TODO: implement
  */
 exports.setRules = asyncHandler(async (req, res) => {
   const maxBorrowDaysRaw = req.body.maxBorrowDays;
@@ -64,8 +62,8 @@ exports.setRules = asyncHandler(async (req, res) => {
   }
 
   const minTrustScore = minTrustScoreRaw === undefined || minTrustScoreRaw === null || minTrustScoreRaw === ''
-    ? 0
-    : Number(minTrustScoreRaw);
+      ? 0
+      : Number(minTrustScoreRaw);
   if (!Number.isInteger(minTrustScore) || minTrustScore < 0 || minTrustScore > 100) {
     errors.push({ field: 'minTrustScore', message: 'Minimum trust score must be a whole number from 0 to 100' });
   }
@@ -80,41 +78,45 @@ exports.setRules = asyncHandler(async (req, res) => {
 /**
  * POST /api/item-policies/:itemId/manual - Req 32 - verified lender
  * Upload usage manual (multipart: file)
- * TODO: implement
  */
 exports.uploadManual = asyncHandler(async (req, res) => {
   if (!req.file) throw ApiError.badRequest('Manual file is required');
 
+  const info = fileInfo(req.file);
   let item;
+  let previousPath;
+
   try {
     item = await findOwnedItem(req.params.itemId, req.user._id);
+    previousPath = item.manual?.path;
+    item.manual = {
+      url: info.url,
+      path: info.path,
+      originalName: info.originalName,
+      mimeType: info.mimeType,
+      uploadedAt: info.uploadedAt,
+    };
+    await item.save();
   } catch (err) {
-    removeFile(fileInfo(req.file).path);
+    // The new upload is not referenced by a successful save. Keep the old file.
+    removeFile(info.path);
     throw err;
   }
 
-  if (item.manual?.path) removeFile(item.manual.path);
-  const info = fileInfo(req.file);
-  item.manual = {
-    url: info.url,
-    path: info.path,
-    originalName: info.originalName,
-    mimeType: info.mimeType,
-    uploadedAt: info.uploadedAt,
-  };
-  await item.save();
+  // Only remove the previous manual after its replacement has been saved.
+  if (previousPath && previousPath !== info.path) removeFile(previousPath);
   res.status(201).json({ item });
 });
 
 /**
  * DELETE /api/item-policies/:itemId/manual - Req 32 - verified lender
  * Remove the manual
- * TODO: implement
  */
 exports.removeManual = asyncHandler(async (req, res) => {
   const item = await findOwnedItem(req.params.itemId, req.user._id);
-  if (item.manual?.path) removeFile(item.manual.path);
+  const previousPath = item.manual?.path;
   item.set('manual', undefined);
   await item.save();
+  if (previousPath) removeFile(previousPath);
   res.json({ item });
 });

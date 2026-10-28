@@ -27,7 +27,7 @@ const schema = new Schema(
     reviewedAt: Date,
     rejectionReason: String,
   },
-  { timestamps: true }
+  { timestamps: true, optimisticConcurrency: true }
 );
 
 module.exports = mongoose.model('LenderApplication', schema);

@@ -3,7 +3,7 @@
 import api from './axios';
 
 /** GET /api/notices - Req 42 - Notice board (newest first) */
-export const listNotices = (params) => api.get(`/notices`, { params }).then((r) => r.data);
+export const listNotices = () => api.get('/notices').then((r) => r.data);
 
 /** POST /api/notices - Req 41 - Post a community notice */
-export const createNotice = (data) => api.post(`/notices`, data).then((r) => r.data);
+export const createNotice = (data) => api.post('/notices', data).then((r) => r.data);

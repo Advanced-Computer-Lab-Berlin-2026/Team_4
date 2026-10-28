@@ -5,39 +5,68 @@
  */
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
+const mongoose = require('mongoose');
+const Favorite = require('../models/Favorite');
+const Item = require('../models/Item');
 
 /**
  * GET /api/favorites - Req 38 - member
  * My favorites with item data
- * TODO: implement
  */
 exports.listFavorites = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('listFavorites');
+  const favorites = await Favorite.find({ user: req.user._id })
+    .sort({ createdAt: -1 })
+    .populate({
+      path: 'item',
+      match: Item.publicFilter(),
+      populate: [
+        { path: 'owner', select: 'name username' },
+        { path: 'category', select: 'name slug' },
+      ],
+    });
+
+  res.json({ favorites: favorites.filter((favorite) => favorite.item) });
 });
 
 /**
  * GET /api/favorites/ids - Req 37 - member
  * Only item ids (for heart-button state)
- * TODO: implement
  */
 exports.listFavoriteIds = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('listFavoriteIds');
+  const favorites = await Favorite.find({ user: req.user._id }).select('item -_id').lean();
+  res.json({ ids: favorites.map((favorite) => favorite.item.toString()) });
 });
 
 /**
  * POST /api/favorites/:itemId - Req 37 - member
  * Add to favorites
- * TODO: implement
  */
 exports.addFavorite = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('addFavorite');
+  const { itemId } = req.params;
+  if (!mongoose.isValidObjectId(itemId)) throw ApiError.badRequest('Invalid item id');
+
+  const item = await Item.findOne(Item.publicFilter({ _id: itemId })).select('_id');
+  if (!item) throw ApiError.notFound('Item not found');
+
+  const favorite = await Favorite.findOneAndUpdate(
+    { user: req.user._id, item: item._id },
+    { $setOnInsert: { user: req.user._id, item: item._id } },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  );
+
+  res.status(201).json({ favorite });
 });
 
 /**
  * DELETE /api/favorites/:itemId - Req 38 - member
  * Remove from favorites
- * TODO: implement
  */
 exports.removeFavorite = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('removeFavorite');
+  const { itemId } = req.params;
+  if (!mongoose.isValidObjectId(itemId)) throw ApiError.badRequest('Invalid item id');
+
+  const favorite = await Favorite.findOneAndDelete({ user: req.user._id, item: itemId });
+  if (!favorite) throw ApiError.notFound('Favorite not found');
+
+  res.json({ message: 'Favorite removed' });
 });

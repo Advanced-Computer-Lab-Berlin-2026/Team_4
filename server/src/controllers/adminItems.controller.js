@@ -4,13 +4,24 @@
  * Mounted at /api/admin-items (see routes/adminItems.routes.js). Conventions: see docs/TEAM_WORKFLOW.md
  */
 const asyncHandler = require('../utils/asyncHandler');
-const ApiError = require('../utils/ApiError');
+const Item = require('../models/Item');
+const { parsePagination, paginated } = require('../utils/pagination');
 
 /**
  * GET /api/admin-items - Req 23 - admin
- * All item listings on the platform (paginated)
- * TODO: implement
+ * All item listings on the platform, including archived and moderated items (paginated)
  */
 exports.listAllItems = asyncHandler(async (req, res) => {
-  throw ApiError.notImplemented('listAllItems');
+  const pagination = parsePagination(req.query, { defaultLimit: 12, maxLimit: 50 });
+  const [items, total] = await Promise.all([
+    Item.find()
+      .sort({ createdAt: -1 })
+      .skip(pagination.skip)
+      .limit(pagination.limit)
+      .populate('owner', 'name username')
+      .populate('category', 'name slug'),
+    Item.countDocuments(),
+  ]);
+
+  res.json(paginated(items, total, pagination));
 });

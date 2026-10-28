@@ -1,0 +1,31 @@
+/* Member 7 - catalog feature styles. Tokens only (see docs/UI_README.md). */
+.catalog-toolbar { display: grid; gap: .75rem; margin-bottom: 1rem; }
+.catalog-toolbar .field { margin-bottom: 0; }
+@media (min-width: 640px) { .catalog-toolbar { grid-template-columns: 2fr 1fr 1fr; align-items: end; } }
+
+.catalog-search { display: flex; gap: .5rem; }
+.catalog-search input { flex: 1; min-width: 0; }
+
+.catalog-summary { margin: 0 0 .75rem; }
+.catalog-empty { padding: 2rem 1rem; text-align: center; }
+
+.catalog-gallery { margin-bottom: 1rem; }
+.catalog-gallery-main { aspect-ratio: 4 / 3; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.catalog-gallery-main img { width: 100%; height: 100%; object-fit: contain; }
+.catalog-gallery-thumbs { display: flex; gap: .5rem; margin-top: .5rem; overflow-x: auto; padding-bottom: .25rem; }
+.catalog-thumb { flex: 0 0 auto; width: 72px; height: 56px; padding: 0; border: 2px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); cursor: pointer; }
+.catalog-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.catalog-thumb[aria-current='true'] { border-color: var(--primary); }
+
+.catalog-details { display: grid; gap: 1rem; }
+@media (min-width: 900px) { .catalog-details { grid-template-columns: 3fr 2fr; align-items: start; } }
+.catalog-facts { margin: 0; display: grid; gap: .6rem; }
+.catalog-facts dt { color: var(--muted); font-size: .92rem; }
+.catalog-facts dd { margin: 0; font-weight: 600; }
+.catalog-text { white-space: pre-line; overflow-wrap: anywhere; }
+
+.catalog-hero { padding: 1.5rem 0 1rem; }
+.catalog-hero p { max-width: 60ch; }
+.catalog-section { margin-top: 1.75rem; }
+.catalog-category-tile { text-align: center; }
+.catalog-category-icon { font-size: 1.8rem; }

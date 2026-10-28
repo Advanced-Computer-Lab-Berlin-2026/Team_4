@@ -4,10 +4,12 @@ const { Schema } = mongoose;
 
 const schema = new Schema(
   {
-    user: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    // One document per user makes OTP replacement/cooldown updates concurrency-safe.
+    user: { type: Schema.Types.ObjectId, ref: 'User', required: true, unique: true, index: true },
     email: { type: String, required: true, lowercase: true, trim: true },
     otpHash: { type: String, required: true },
     expiresAt: { type: Date, required: true, index: { expires: 0 } }, // TTL index
+    lastSentAt: { type: Date, required: true, default: Date.now },
     attempts: { type: Number, default: 0 }, // lock after 5 wrong tries
     usedAt: Date,
   },

@@ -1,6 +1,103 @@
 // ItemManualTab - Owner: Member 6 - Requirements: 32
-// Props: { item, onSaved } — upload / replace / remove manual
-export default function ItemManualTab(props) {
-  void props;
-  return <div className="muted">TODO ItemManualTab (Member 6)</div>;
+// Props: { item, onSaved } - upload / replace / remove manual
+import { useState } from 'react';
+import { getErrorMessage } from '../../../api/axios';
+import { removeManual, uploadManual } from '../../../api/itemPolicies.api';
+import Alert from '../../common/Alert';
+
+export default function ItemManualTab({ item, onSaved }) {
+  const [file, setFile] = useState(null);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [submitting, setSubmitting] = useState('');
+
+  if (!item?._id) return <Alert variant="info">Save the item details before uploading a usage manual.</Alert>;
+
+  const handleUpload = async (event) => {
+    event.preventDefault();
+    if (!file) {
+      setError('Choose a PDF, JPG, JPEG or PNG manual to upload.');
+      return;
+    }
+
+    setSubmitting('upload');
+    setError('');
+    setSuccess('');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const data = await uploadManual(item._id, formData);
+      onSaved?.(data.item);
+      setFile(null);
+      event.target.reset();
+      setSuccess('Usage manual uploaded.');
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setSubmitting('');
+    }
+  };
+
+  const handleRemove = async () => {
+    if (!window.confirm('Remove this usage manual?')) return;
+
+    setSubmitting('remove');
+    setError('');
+    setSuccess('');
+    try {
+      const data = await removeManual(item._id);
+      onSaved?.(data.item);
+      setSuccess('Usage manual removed.');
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setSubmitting('');
+    }
+  };
+
+  return (
+    <div className="card">
+      <div className="card-body">
+        <h2>Usage manual</h2>
+        <p className="muted">Upload one manual so borrowers can review safe setup and operating steps before reserving.</p>
+        <Alert variant="error">{error}</Alert>
+        <Alert variant="success">{success}</Alert>
+
+        {item.manual?.url ? (
+          <p>
+            <strong>Current manual:</strong>{' '}
+            <a href={item.manual.url} target="_blank" rel="noreferrer">
+              {item.manual.originalName || 'Open manual'}
+            </a>
+          </p>
+        ) : (
+          <p className="muted">No usage manual has been uploaded yet.</p>
+        )}
+
+        <form onSubmit={handleUpload}>
+          <div className="field">
+            <label htmlFor="manual-file">Manual file</label>
+            <input
+              id="manual-file"
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+              onChange={(event) => setFile(event.target.files?.[0] || null)}
+            />
+            <div className="field-hint">Accepted types: PDF, JPG, JPEG or PNG. Max size: 5 MB.</div>
+          </div>
+          {file && <p className="muted">Selected: {file.name}</p>}
+          <div className="row">
+            <button className="btn" type="submit" disabled={submitting === 'upload'}>
+              {submitting === 'upload' ? 'Uploading...' : item.manual?.url ? 'Replace manual' : 'Upload manual'}
+            </button>
+            {item.manual?.url && (
+              <button className="btn btn-danger" type="button" onClick={handleRemove} disabled={submitting === 'remove'}>
+                {submitting === 'remove' ? 'Removing...' : 'Remove manual'}
+              </button>
+            )}
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 }

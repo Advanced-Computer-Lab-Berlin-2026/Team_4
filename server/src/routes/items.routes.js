@@ -8,6 +8,7 @@ const { uploadItemPhotos, removeFile, fileInfo } = require('../middleware/upload
 const validate = require('../middleware/validate');
 const multer = require('multer');
 const ApiError = require('../utils/ApiError');
+const Item = require('../models/Item');
 
 const MAX_PHOTOS_PER_UPLOAD = 8; // same limit as uploadItemPhotos in middleware/upload.js
 
@@ -59,8 +60,17 @@ router.patch('/:id/unarchive', protect, requireVerifiedLender, itemIdParam, vali
 
 // If a request fails after photos were saved to disk, delete them so no orphan files are left.
 // Also turns multer's vague "Unexpected field" (more than 8 photos in one upload) into a clear message.
-router.use((err, req, res, next) => {
-  (req.files || []).forEach((f) => removeFile(fileInfo(f).path));
+router.use(async (err, req, res, next) => {
+  const paths = (req.files || []).map((file) => fileInfo(file).path);
+  if (paths.length) {
+    try {
+      // A write may have succeeded before a subsequent populate/read failed.
+      // Delete only unreferenced uploads; on database uncertainty preserve files.
+      const items = await Item.find({ 'photos.path': { $in: paths } }).select('photos.path').lean();
+      const referenced = new Set(items.flatMap((item) => item.photos.map((photo) => photo.path)));
+      paths.filter((path) => !referenced.has(path)).forEach(removeFile);
+    } catch { /* Never destroy possibly committed photos when the database is unavailable. */ }
+  }
   if (err instanceof multer.MulterError && err.code === 'LIMIT_UNEXPECTED_FILE' && err.field === 'photos') {
     return next(ApiError.badRequest(`You can add up to ${MAX_PHOTOS_PER_UPLOAD} photos`, [{ field: 'photos', message: `You can add up to ${MAX_PHOTOS_PER_UPLOAD} photos` }]));
   }

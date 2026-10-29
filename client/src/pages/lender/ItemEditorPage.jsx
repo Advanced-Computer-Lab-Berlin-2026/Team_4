@@ -43,10 +43,18 @@ export default function ItemEditorPage() {
   }, [location.state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!id) { setItem(null); return; } // e.g. going from an edit page to /new: start empty
-    setLoading(true);
+    let ignore = false;
+    setItem(null);
     setError('');
-    getMyItem(id).then((d) => setItem(d.item)).catch((e) => setError(getErrorMessage(e))).finally(() => setLoading(false));
+    setLoading(!!id);
+    setTab('details');
+    if (id) {
+      getMyItem(id)
+        .then((d) => { if (!ignore) setItem(d.item); })
+        .catch((e) => { if (!ignore) setError(getErrorMessage(e)); })
+        .finally(() => { if (!ignore) setLoading(false); });
+    }
+    return () => { ignore = true; };
   }, [id]);
 
   const handleSaved = (saved) => {

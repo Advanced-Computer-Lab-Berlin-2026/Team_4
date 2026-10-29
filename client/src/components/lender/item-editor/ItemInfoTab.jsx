@@ -3,7 +3,8 @@
 //   item = null  -> create form: fields + photos are sent together in one request.
 //   item = {...} -> edit form: Save sends only the changed fields; photos are added/removed right away.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { createPortal } from 'react-dom';
+import { Link, useBlocker } from 'react-router-dom';
 import { createItem, updateItem, addPhotos, removePhoto } from '../../../api/items.api';
 import { listCategories } from '../../../api/categories.api';
 import { getErrorMessage, getFieldErrors } from '../../../api/axios';
@@ -23,7 +24,6 @@ const MAX_DEPOSIT = 1000000;
 const IMAGE_TYPES = ['image/jpeg', 'image/png'];
 const IMAGE_EXT = /\.(jpe?g|png)$/i;
 const FIELDS = ['title', 'description', 'category', 'depositAmount', 'conditionNotes'];
-const LEAVE_MESSAGE = 'Leave without saving? Your changes will be lost.';
 
 const toForm = (item) => ({
   title: item?.title || '',
@@ -72,6 +72,7 @@ function Counter({ value, max }) {
 export default function ItemInfoTab({ item, onSaved }) {
   const isEdit = !!item;
   const formRef = useRef(null);
+  const savedNavigation = useRef(false);
 
   const [form, setForm] = useState(() => toForm(item));
   const [errors, setErrors] = useState({});
@@ -96,6 +97,10 @@ export default function ItemInfoTab({ item, onSaved }) {
   const dirty = isEdit ? changed.length > 0 : changed.length > 0 || newPhotos.length > 0;
   const photoCount = isEdit ? item.photos.length : newPhotos.length;
   const busy = saving || !!photoBusy;
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    dirty && !savedNavigation.current &&
+    (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search)
+  );
 
   useEffect(() => {
     listCategories()
@@ -105,7 +110,7 @@ export default function ItemInfoTab({ item, onSaved }) {
   }, []);
 
   // When we switch from "new" to a saved item, start the form from the saved values.
-  useEffect(() => { setForm(toForm(item)); }, [item?._id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { savedNavigation.current = false; setForm(toForm(item)); }, [item?._id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Warn before closing / reloading the tab with unsaved changes.
   useEffect(() => {
@@ -113,24 +118,6 @@ export default function ItemInfoTab({ item, onSaved }) {
     const warn = (e) => { e.preventDefault(); e.returnValue = ''; };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty]);
-
-  // Warn before following ANY link in the app (navbar, footer, "Back to my items") with unsaved changes.
-  // The click is checked on the whole page before it reaches the link; Cancel stops it, so the page doesn't change.
-  // (The browser's own Back arrow is not a click, so it can't be caught here.)
-  useEffect(() => {
-    if (!dirty) return undefined;
-    const onClick = (e) => {
-      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; // new tab etc.
-      const link = e.target.closest?.('a[href]');
-      if (!link || (link.target && link.target !== '_self') || link.hasAttribute('download')) return;
-      const to = new URL(link.href, window.location.href);
-      if (to.origin !== window.location.origin) return; // other websites: the browser's own warning handles it
-      if (to.pathname === window.location.pathname && to.search === window.location.search) return; // same page
-      if (!window.confirm(LEAVE_MESSAGE)) { e.preventDefault(); e.stopPropagation(); }
-    };
-    document.addEventListener('click', onClick, true);
-    return () => document.removeEventListener('click', onClick, true);
   }, [dirty]);
 
   // Free the preview images when they are removed or the page closes.
@@ -252,6 +239,7 @@ export default function ItemInfoTab({ item, onSaved }) {
         const d = await createItem(fd);
         newPhotos.forEach((p) => URL.revokeObjectURL(p.url));
         setNewPhotos([]);
+        savedNavigation.current = true; // successful creation must not block its edit redirect
         onSaved(d.item); // the page then opens the edit URL of the new item
       }
     } catch (err) {
@@ -271,6 +259,26 @@ export default function ItemInfoTab({ item, onSaved }) {
 
   return (
     <form ref={formRef} className="card item-editor-form" onSubmit={onSubmit} noValidate>
+      {blocker.state === 'blocked' && createPortal(
+        <div className="item-leave-overlay">
+          <div className="card item-leave-dialog" role="alertdialog" aria-modal="true" aria-labelledby="item-leave-title" aria-describedby="item-leave-message"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') { e.preventDefault(); blocker.reset(); }
+              if (e.key === 'Tab') {
+                const buttons = e.currentTarget.querySelectorAll('button');
+                if (e.shiftKey && document.activeElement === buttons[0]) { e.preventDefault(); buttons[1].focus(); }
+                else if (!e.shiftKey && document.activeElement === buttons[1]) { e.preventDefault(); buttons[0].focus(); }
+              }
+            }}>
+            <h2 id="item-leave-title">Leave without saving?</h2>
+            <p id="item-leave-message">Your unsaved changes will be lost.</p>
+            <div className="row">
+              <button type="button" className="btn btn-secondary" autoFocus onClick={() => blocker.reset()}>Stay and keep editing</button>
+              <button type="button" className="btn btn-danger" onClick={() => blocker.proceed()}>Leave without saving</button>
+            </div>
+          </div>
+        </div>, document.body
+      )}
       <div className="card-body">
         <FormField label="Title" error={errors.title}>
           <input type="text" value={form.title} onChange={setField('title')} autoComplete="off" />

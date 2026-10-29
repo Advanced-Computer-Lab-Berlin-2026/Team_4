@@ -7,7 +7,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
 const Item = require('../models/Item');
 const Category = require('../models/Category');
-const fs = require('fs');
+const sharp = require('sharp');
 const { fileInfo, removeFile } = require('../middleware/upload');
 
 const MAX_PHOTOS = 8; // per item, across all uploads (decision B)
@@ -34,21 +34,18 @@ const assertActiveCategory = async (id) => {
   if (!category) throw ApiError.badRequest('Choose a valid category', [{ field: 'category', message: 'Choose a valid category' }]);
 };
 
-/** The upload middleware trusts the file name/type label; also check the file really starts like a JPG or PNG. */
-const looksLikeImage = (file) => {
-  const head = Buffer.alloc(8);
-  const fd = fs.openSync(file.path, 'r');
-  try { fs.readSync(fd, head, 0, 8, 0); } finally { fs.closeSync(fd); }
-  const isPng = head.equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  const isJpg = head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff;
-  return isPng || isJpg;
-};
-
-const assertRealImages = (files) => {
-  const bad = files.find((f) => !looksLikeImage(f));
-  if (bad) {
-    const message = `"${bad.originalname}" is not a valid JPG or PNG image`;
-    throw ApiError.badRequest(message, [{ field: 'photos', message }]);
+/** Decode every image, not just its header, before accepting it as a listing photo. */
+const assertRealImages = async (files) => {
+  for (const file of files) {
+    try {
+      const image = sharp(file.path, { failOn: 'warning', limitInputPixels: 25000000 });
+      const metadata = await image.metadata();
+      if (!['jpeg', 'png'].includes(metadata.format) || (metadata.pages || 1) > 1) throw new Error('Unsupported image');
+      await image.raw().toBuffer(); // force pixel decoding so truncated/corrupt data is rejected
+    } catch {
+      const message = `"${file.originalname}" must be a complete JPG or PNG image (up to 25 megapixels)`;
+      throw ApiError.badRequest(message, [{ field: 'photos', message }]);
+    }
   }
 };
 
@@ -85,7 +82,7 @@ exports.createItem = asyncHandler(async (req, res) => {
   if (files.length === 0) { // more than 8 is already rejected by the upload middleware
     throw ApiError.badRequest('Add at least one photo', [{ field: 'photos', message: 'Add at least one photo' }]);
   }
-  assertRealImages(files);
+  await assertRealImages(files);
   const fields = pickItemFields(req.body);
   await assertActiveCategory(fields.category);
 
@@ -136,7 +133,7 @@ exports.addPhotos = asyncHandler(async (req, res) => {
   if (files.length === 0) {
     throw ApiError.badRequest('Add at least one photo', [{ field: 'photos', message: 'Add at least one photo' }]);
   }
-  assertRealImages(files);
+  await assertRealImages(files);
 
   // Atomic: only push if the item will still have at most 8 photos (safe against two uploads at once).
   const roomFilter = { [`photos.${MAX_PHOTOS - files.length}`]: { $exists: false } };
@@ -168,11 +165,11 @@ exports.removePhoto = asyncHandler(async (req, res) => {
   );
   if (!before) {
     const current = await findMyItem(req); // 404 if not mine
-    if (!current.photos.some((p) => String(p._id) === photoId)) throw ApiError.notFound('Photo not found');
+    if (!current.photos.some((p) => p._id.equals(photoId))) throw ApiError.notFound('Photo not found');
     throw ApiError.badRequest('An item must keep at least one photo. Add another photo before removing this one.');
   }
 
-  const removed = before.photos.find((p) => String(p._id) === photoId);
+  const removed = before.photos.find((p) => p._id.equals(photoId));
   if (removed.path && removed.path.startsWith('public/items/')) removeFile(removed.path); // never the shared placeholder
   const item = await findMyItem(req);
   res.json({ item });

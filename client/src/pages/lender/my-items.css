@@ -1,0 +1,10 @@
+/* My items (Member 5) - feature styles built only from the global tokens. */
+.my-items-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: 1rem; }
+.my-items-header h1 { margin: 0; }
+.my-items-count { margin: 0 0 .75rem; }
+.my-items-meta { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; }
+.my-items-note { flex-basis: 100%; margin: 0; }
+.my-items-empty { padding: 1.5rem 0; }
+.my-items-empty .muted { margin: 0 0 .75rem; }
+.my-items-error { margin-bottom: 1rem; }
+.my-items-loading { opacity: .6; }

@@ -23,8 +23,20 @@ exports.getCategory = asyncHandler(async (req, res) => {
 /**
  * PATCH /api/categories/:id/deposit-multiplier - Req 40 - admin
  * body: { depositMultiplier }  (number >= 1, e.g. 1.5 for power tools)
- * TODO(M6): validate, update, return { category }.
  */
-exports.setDepositMultiplier = asyncHandler(async () => {
-  throw ApiError.notImplemented('setDepositMultiplier');
+exports.setDepositMultiplier = asyncHandler(async (req, res) => {
+  const depositMultiplier = Number(req.body.depositMultiplier);
+
+  if (!Number.isFinite(depositMultiplier) || depositMultiplier < 1 || depositMultiplier > 10) {
+    throw ApiError.badRequest('Deposit multiplier must be a number from 1 to 10', [
+      { field: 'depositMultiplier', message: 'Deposit multiplier must be a number from 1 to 10' },
+    ]);
+  }
+
+  const category = await Category.findById(req.params.id);
+  if (!category) throw ApiError.notFound('Category not found');
+
+  category.depositMultiplier = Math.round(depositMultiplier * 100) / 100;
+  await category.save();
+  res.json({ category });
 });

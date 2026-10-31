@@ -25,7 +25,12 @@ exports.getCategory = asyncHandler(async (req, res) => {
  * body: { depositMultiplier }  (number >= 1, e.g. 1.5 for power tools)
  */
 exports.setDepositMultiplier = asyncHandler(async (req, res) => {
-  const depositMultiplier = Number(req.body.depositMultiplier);
+  const raw = req.body.depositMultiplier;
+  if ((typeof raw !== 'number' && typeof raw !== 'string') ||
+      (typeof raw === 'string' && !/^\d+(?:\.\d+)?$/.test(raw.trim()))) {
+    throw ApiError.badRequest('Deposit multiplier must be a number');
+  }
+  const depositMultiplier = Number(raw);
 
   if (!Number.isFinite(depositMultiplier) || depositMultiplier < 1 || depositMultiplier > 10) {
     throw ApiError.badRequest('Deposit multiplier must be a number from 1 to 10', [

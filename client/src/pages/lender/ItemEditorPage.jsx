@@ -18,11 +18,11 @@ import ItemPickupRulesTab from '../../components/lender/item-editor/ItemPickupRu
 import ItemManualTab from '../../components/lender/item-editor/ItemManualTab';
 import '../../components/lender/item-editor/item-editor.css';
 
-// keepMounted: the Details tab stays mounted (just hidden) so switching tabs never loses what was typed.
+// Keep each tab mounted so switching tabs preserves unsaved fields and selected files.
 const TABS = [
   { key: 'details', label: 'Details', Component: ItemInfoTab, needsItem: false, keepMounted: true },
-  { key: 'pickup', label: 'Pickup & rules', Component: ItemPickupRulesTab, needsItem: true },
-  { key: 'manual', label: 'Usage manual', Component: ItemManualTab, needsItem: true },
+  { key: 'pickup', label: 'Pickup & rules', Component: ItemPickupRulesTab, needsItem: true, keepMounted: true },
+  { key: 'manual', label: 'Usage manual', Component: ItemManualTab, needsItem: true, keepMounted: true },
 ];
 
 export default function ItemEditorPage() {
@@ -97,7 +97,7 @@ export default function ItemEditorPage() {
         ))}
       </div>
       {TABS.filter((t) => t.key === tab || t.keepMounted).map(({ key, Component }) => (
-        <div key={key} role="tabpanel" id={`item-panel-${key}`} aria-labelledby={`item-tab-${key}`} hidden={key !== tab}>
+        <div key={`${item?._id || 'new'}-${key}`} role="tabpanel" id={`item-panel-${key}`} aria-labelledby={`item-tab-${key}`} hidden={key !== tab}>
           <Component item={item} onSaved={handleSaved} />
         </div>
       ))}

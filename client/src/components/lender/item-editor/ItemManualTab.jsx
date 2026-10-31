@@ -1,11 +1,12 @@
 // ItemManualTab - Owner: Member 6 - Requirements: 32
 // Props: { item, onSaved } - upload / replace / remove manual
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { getErrorMessage } from '../../../api/axios';
 import { removeManual, uploadManual } from '../../../api/itemPolicies.api';
 import Alert from '../../common/Alert';
 
 export default function ItemManualTab({ item, onSaved }) {
+  const busyRef = useRef(false);
   const [file, setFile] = useState(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -15,11 +16,14 @@ export default function ItemManualTab({ item, onSaved }) {
 
   const handleUpload = async (event) => {
     event.preventDefault();
+    if (busyRef.current) return;
     if (!file) {
       setError('Choose a PDF, JPG, JPEG or PNG manual to upload.');
       return;
     }
 
+    busyRef.current = true;
+    const formElement = event.currentTarget || event.target;
     setSubmitting('upload');
     setError('');
     setSuccess('');
@@ -29,17 +33,19 @@ export default function ItemManualTab({ item, onSaved }) {
       const data = await uploadManual(item._id, formData);
       onSaved?.(data.item);
       setFile(null);
-      event.target.reset();
+      formElement.reset();
       setSuccess('Usage manual uploaded.');
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
+      busyRef.current = false;
       setSubmitting('');
     }
   };
 
   const handleRemove = async () => {
-    if (!window.confirm('Remove this usage manual?')) return;
+    if (busyRef.current || !window.confirm('Remove this usage manual?')) return;
+    busyRef.current = true;
 
     setSubmitting('remove');
     setError('');
@@ -51,6 +57,7 @@ export default function ItemManualTab({ item, onSaved }) {
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
+      busyRef.current = false;
       setSubmitting('');
     }
   };
@@ -80,6 +87,7 @@ export default function ItemManualTab({ item, onSaved }) {
             <input
               id="manual-file"
               type="file"
+              disabled={!!submitting}
               accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
               onChange={(event) => setFile(event.target.files?.[0] || null)}
             />
@@ -87,11 +95,11 @@ export default function ItemManualTab({ item, onSaved }) {
           </div>
           {file && <p className="muted">Selected: {file.name}</p>}
           <div className="row">
-            <button className="btn" type="submit" disabled={submitting === 'upload'}>
+            <button className="btn" type="submit" disabled={!!submitting}>
               {submitting === 'upload' ? 'Uploading...' : item.manual?.url ? 'Replace manual' : 'Upload manual'}
             </button>
             {item.manual?.url && (
-              <button className="btn btn-danger" type="button" onClick={handleRemove} disabled={submitting === 'remove'}>
+              <button className="btn btn-danger" type="button" onClick={handleRemove} disabled={!!submitting}>
                 {submitting === 'remove' ? 'Removing...' : 'Remove manual'}
               </button>
             )}

@@ -13,3 +13,4 @@ export const setUserStatus = (id, data) => api.patch(`/admin-users/${id}/status`
 
 /** DELETE /api/admin-users/:id - Req 7 - Remove a member/lender/admin (+ cascade cleanup) */
 export const removeUser = (id) => api.delete(`/admin-users/${id}`).then((r) => r.data);
+

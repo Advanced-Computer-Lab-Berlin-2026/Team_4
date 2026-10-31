@@ -1,6 +1,6 @@
 // AdminUsersPage — Member 4 — Requirements 7, 28, 29, 39.
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { listUsers, setUserStatus, removeUser } from '../../api/adminUsers.api';
 import { getErrorMessage } from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
@@ -9,9 +9,31 @@ import UserSearchBar from '../../components/admin/UserSearchBar';
 import UserTable from '../../components/admin/UserTable';
 
 export default function AdminUsersPage() {
-  const [searchParams, setSearchParams] = useState({ q: '', role: '', lenderStatus: '', status: '' });
+  // Keep list state in the URL so detail navigation, Back and reload preserve it.
+  const [urlParams, setUrlParams] = useSearchParams();
+  const searchParams = useMemo(() => ({
+    q: urlParams.get('q') || '',
+    role: urlParams.get('role') || '',
+    lenderStatus: urlParams.get('lenderStatus') || '',
+    status: urlParams.get('status') || '',
+  }), [urlParams]);
+  const rawPage = urlParams.get('page') || '1';
+  const page = /^[1-9]\d*$/.test(rawPage) && Number.isSafeInteger(Number(rawPage)) && Number(rawPage) <= 1000000
+    ? Number(rawPage) : 1;
+  const setPage = useCallback((nextPage) => {
+    setUrlParams(previous => {
+      const next = new URLSearchParams(previous);
+      if (nextPage > 1) next.set('page', String(nextPage));
+      else next.delete('page');
+      return next;
+    }, { replace: true });
+  }, [setUrlParams]);
+  const setFilters = (filters) => {
+    const next = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => { if (value) next.set(key, value); });
+    setUrlParams(next, { replace: true }); // new filters start at page 1
+  };
   const [data, setData] = useState({ data: [], total: 0, totalPages: 1 });
-  const [page, setPage] = useState(1);
   const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -32,7 +54,7 @@ export default function AdminUsersPage() {
       .catch(err => { if (!ignore) setError(getErrorMessage(err)); })
       .finally(() => { if (!ignore) setLoading(false); });
     return () => { ignore = true; };
-  }, [searchParams, page, revision]);
+  }, [searchParams, page, revision, setPage]);
 
   const mutate = async (action) => {
     setBusy(true);
@@ -52,7 +74,7 @@ export default function AdminUsersPage() {
   return (
     <div className="container" style={{ paddingBlock: '2rem' }}>
       <h1>Admin User Management</h1>
-      <UserSearchBar value={searchParams} onChange={value => { setPage(1); setSearchParams(value); }} />
+      <UserSearchBar value={searchParams} onChange={setFilters} />
       {error && <p role="alert" style={{ color: '#b91c1c' }}>{error}</p>}
       {loading ? <p role="status">Loading registered users...</p> : (
         <>

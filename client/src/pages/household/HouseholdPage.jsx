@@ -1,7 +1,7 @@
 // MY HOUSEHOLD - Owner: Member 8 - Requirements: 24, 25, 26, 27
 // Route: /household   Access: member   (already registered in src/routes/routeConfig.jsx - do NOT edit that file)
 // API calls: src/api/*.api.js   Shared UI: src/components/common/*
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { listLinks } from '../../api/household.api';
 import { getErrorMessage } from '../../api/axios';
@@ -159,24 +159,35 @@ const HOUSEHOLD_STYLES = `
 export default function HouseholdPage() {
   const { user } = useAuth();
   const currentUserId = user?._id || user?.id;
+  return <HouseholdContent key={currentUserId || 'guest'} user={user} currentUserId={currentUserId} />;
+}
+
+function HouseholdContent({ user, currentUserId }) {
+  const requestVersion = useRef(0);
+  const mounted = useRef(false);
   const [links, setLinks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const fetchHouseholdLinks = useCallback(async () => {
+    if (!mounted.current) return;
+    const version = ++requestVersion.current;
+    setLoading(true);
     try {
       setError('');
       const data = await listLinks();
-      setLinks(data.links || data.items || []);
+      if (mounted.current && version === requestVersion.current) setLinks(data.links || data.items || []);
     } catch (err) {
-      setError(getErrorMessage(err));
+      if (mounted.current && version === requestVersion.current) setError(getErrorMessage(err));
     } finally {
-      setLoading(false);
+      if (mounted.current && version === requestVersion.current) setLoading(false);
     }
   }, [currentUserId]);
 
   useEffect(() => {
+    mounted.current = true;
     fetchHouseholdLinks();
+    return () => { mounted.current = false; requestVersion.current += 1; };
   }, [fetchHouseholdLinks]);
 
   const formattedAddress = user?.address

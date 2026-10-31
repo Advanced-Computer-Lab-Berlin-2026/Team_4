@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { sendRequest } from '../../api/household.api';
 import { getErrorMessage } from '../../api/axios';
-import { isValidEmail, isValidPhone } from '../../utils/validators';
+import { isValidEmail } from '../../utils/validators';
 import FormField from '../common/FormField';
 
 const RELATIONS = [
@@ -41,7 +41,7 @@ export default function LinkRequestForm({ onSent }) {
       if (!isValidEmail(trimmed)) {
         errs.contact = 'Enter a valid email address.';
       }
-    } else if (!isValidPhone(trimmed)) {
+    } else if (!/^\+?\d{7,15}$/.test(trimmed.replace(/[\s-]/g, ''))) {
       errs.contact = 'Enter a valid phone number (7–15 digits).';
     }
 
@@ -65,7 +65,7 @@ export default function LinkRequestForm({ onSent }) {
       relation,
       ...(trimmed.includes('@')
         ? { email: trimmed.toLowerCase() }
-        : { phone: trimmed }),
+        : { phone: trimmed.replace(/[\s-]/g, '') }),
     };
 
     try {

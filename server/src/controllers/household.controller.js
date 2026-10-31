@@ -106,11 +106,25 @@ exports.sendRequest = asyncHandler(async (req, res) => {
   // Look up target user by email or phone
   const lookupOr = [];
   if (rawEmail) lookupOr.push({ email: rawEmail });
-  if (rawPhone) lookupOr.push({ phone: rawPhone });
+  if (rawPhone) {
+    // Ignore presentation separators in both the input and legacy stored values.
+    // Preserve the international + prefix; do not guess country codes.
+    const phone = rawPhone.replace(/[\s-]/g, '');
+    if (!/^\+?\d{7,15}$/.test(phone)) {
+      throw ApiError.badRequest('Enter a valid phone number (7–15 digits).');
+    }
+    const prefix = phone.startsWith('+') ? '\\+' : '';
+    const digits = phone.replace(/^\+/, '').split('').join('[\\s-]*');
+    lookupOr.push({ phone: new RegExp(`^[\\s-]*${prefix}[\\s-]*${digits}[\\s-]*$`) });
+  }
 
-  const recipientUser = await User.findOne(
+  const recipients = await User.find(
     lookupOr.length === 1 ? lookupOr[0] : { $or: lookupOr }
-  );
+  ).limit(2);
+  if (recipients.length > 1) {
+    throw ApiError.conflict('This contact matches multiple accounts. Use the member’s email address instead.');
+  }
+  const recipientUser = recipients[0];
 
   if (!recipientUser || recipientUser.role !== ROLES.MEMBER) {
     throw ApiError.notFound('No member account found with that email or phone number.');
@@ -202,20 +216,43 @@ exports.respondToRequest = asyncHandler(async (req, res) => {
   }
 
   if (link.status !== 'pending') {
-    throw ApiError.badRequest(`This request has already been ${link.status}.`);
+    throw ApiError.conflict(`This request has already been ${link.status}.`);
   }
 
-  link.status = nextStatus;
-  link.respondedAt = new Date();
-  await link.save();
+  if (nextStatus === 'accepted') {
+    const [requester, recipient] = await Promise.all([
+      User.findById(link.requester), User.findById(link.recipient),
+    ]);
+    if (!requester || !recipient || requester.role !== ROLES.MEMBER || recipient.role !== ROLES.MEMBER ||
+        requester.status !== USER_STATUS.ACTIVE || recipient.status !== USER_STATUS.ACTIVE) {
+      throw ApiError.conflict('Both household members must have active member accounts.');
+    }
+    if (!isSameAddress(requester.address, recipient.address)) {
+      throw ApiError.badRequest('Household links are only allowed between members living at the same home address.');
+    }
+  }
 
-  await link.populate([
+  // Compare-and-set: only one decision can consume a pending request.
+  // Query updates do not run the model's document validation hook.
+  const update = { $set: { status: nextStatus, respondedAt: new Date() } };
+  if (nextStatus === 'accepted') {
+    update.$set.activeKey = [String(link.requester), String(link.recipient)].sort().join('_');
+  } else {
+    update.$unset = { activeKey: 1 };
+  }
+  const updated = await HouseholdLink.findOneAndUpdate(
+    { _id: link._id, recipient: req.user._id, status: 'pending' },
+    update, { new: true, runValidators: true },
+  );
+  if (!updated) throw ApiError.conflict('This request was already answered or removed.');
+
+  await updated.populate([
     { path: 'requester', select: USER_PUBLIC_FIELDS },
     { path: 'recipient', select: USER_PUBLIC_FIELDS },
   ]);
 
   res.json({
-    link,
+    link: updated,
     message:
       nextStatus === 'accepted'
         ? 'Household link request accepted.'

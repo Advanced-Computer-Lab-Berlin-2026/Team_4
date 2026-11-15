@@ -350,4 +350,48 @@ describe('reviews API (Req 89, 90, 91, 97)', { skip: !process.env.TEST_MONGO_URI
     assert.equal((await call(`/reviews/${existing._id}`, { user: borrower, method: 'PATCH', body: { rating: 1 } })).status, 404);
     assert.equal((await Review.findById(existing._id).lean()).rating, 4);
   });
+
+  // ---- trust profiles (Req 91, 98) - reuses the reservations and reviews created above
+  const PROFILE_KEYS = ['stats', 'trustScore', 'user'];
+  const USER_KEYS = ['_id', 'isVerifiedLender', 'memberSince', 'name', 'username'];
+
+  test('trust profile is public and contains no private details', async () => {
+    const { status, data } = await call(`/trust-profiles/${lender._id}`); // no login: item details shows it to guests
+    assert.equal(status, 200);
+    assert.deepEqual(Object.keys(data.profile).sort(), PROFILE_KEYS);
+    assert.deepEqual(Object.keys(data.profile.user).sort(), USER_KEYS);
+    assert.equal(data.profile.user.isVerifiedLender, true);
+    assert.equal(data.profile.stats.ratingAverage, 4);
+    assert.equal(data.profile.stats.ratingCount, 1);
+    assert.ok(!JSON.stringify(data).includes('@example.com'), 'email must not leak');
+    assert.equal((await call('/trust-profiles/not-an-id')).status, 400);
+    assert.equal((await call(`/trust-profiles/${new mongoose.Types.ObjectId()}`)).status, 404);
+  });
+
+  test('own trust profile at /me (members only)', async () => {
+    assert.equal((await call('/trust-profiles/me')).status, 401);
+    assert.equal((await call('/trust-profiles/me', { user: admin })).status, 403);
+    const { status, data } = await call('/trust-profiles/me', { user: borrower });
+    assert.equal(status, 200);
+    assert.equal(String(data.profile.user._id), String(borrower._id));
+    assert.deepEqual(Object.keys(data.profile).sort(), PROFILE_KEYS);
+    // Set when the lender's review of the borrower triggered a recalculation above.
+    assert.equal(data.profile.stats.completedReservations, 2);
+  });
+
+  test('admin recalculation repairs a wrong stored score (Req 98)', async () => {
+    await User.updateOne({ _id: borrower._id }, { $set: { trustScore: 99, 'stats.completedReservations': 42 } });
+    assert.equal((await call(`/trust-profiles/${borrower._id}/recalculate`, { method: 'POST' })).status, 401);
+    assert.equal((await call(`/trust-profiles/${borrower._id}/recalculate`, { user: borrower, method: 'POST' })).status, 403);
+    const { status, data } = await call(`/trust-profiles/${borrower._id}/recalculate`, { user: admin, method: 'POST' });
+    assert.equal(status, 200);
+    // History: 2 completed reservations - `done` returned a day after its due date (late), `old` on time -
+    // and one review from the lender (5 or 2 stars, whichever won the simultaneous-request test above).
+    const { rating } = await Review.findOne({ reviewee: borrower._id }).lean();
+    const expected = trust.computeTrust({ completed: 2, returns: 2, onTimeReturns: 1, ratingSum: rating, ratingCount: 1 }).trustScore;
+    assert.equal(data.profile.trustScore, expected);
+    assert.equal(data.profile.stats.completedReservations, 2);
+    assert.equal((await User.findById(borrower._id).lean()).trustScore, expected);
+    assert.equal((await call(`/trust-profiles/${new mongoose.Types.ObjectId()}/recalculate`, { user: admin, method: 'POST' })).status, 404);
+  });
 });

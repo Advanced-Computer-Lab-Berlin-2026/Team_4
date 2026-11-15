@@ -43,20 +43,20 @@ Conventions are the same as Sprint 1 ([`docs/API_CONTRACT.md`](../API_CONTRACT.m
 `Item.tags` already exists in `Item.js` (`[String]`, trimmed, lower case). Sprint 2 makes it editable through the existing Sprint 1 endpoints.
 
 **Rules (proposed):**
-- **1 to 10 tags per item.** At least one is **required when creating** an item. When editing, `tags` is optional, but if it is sent it must still contain 1–10 tags.
+- **0 to 10 tags per item, optional** on create and edit. When editing, a sent `tags` list replaces the whole list; an empty list clears it.
 - **Each tag:** 1–30 characters after trimming. Letters (any language), numbers, spaces and hyphens only.
 - Saved in lower case. Duplicates are removed silently (`"Cordless"` and `"cordless"` become one tag).
-- Older items with no tags keep working; they just have nothing for Member 7 to match beyond the category.
+- Items without tags (including all items created before Sprint 2) work exactly as before; Member 7 matches them by category only.
 
 **Endpoint changes (`/api/items`, Sprint 1, Member 5):**
 
 | Method | Path | Change |
 |---|---|---|
-| POST | `/api/items` | Multipart: repeat the field once per tag (`tags=cordless`, `tags=18v`). Required (1–10). |
-| PUT | `/api/items/:id` | JSON: `{ "tags": ["cordless", "18v"] }`. Optional; if sent, replaces the whole list. |
+| POST | `/api/items` | Multipart: repeat the field once per tag (`tags=cordless`, `tags=18v`). Optional (0–10). |
+| PUT | `/api/items/:id` | JSON: `{ "tags": ["cordless", "18v"] }`. Optional; if sent, replaces the whole list (`[]` clears it). |
 | GET | `/api/items/mine`, `/api/items/:id` | `item.tags` is included in every response (it already is, as an empty array, for old items). |
 
-**Errors:** `400` with `field: "tags"`, e.g. "Add at least one tag", "You can add up to 10 tags", "Tags can contain letters, numbers, spaces and hyphens (up to 30 characters)".
+**Errors:** `400` with `field: "tags"`, e.g. "You can add up to 10 tags", "Tags can contain letters, numbers, spaces and hyphens (up to 30 characters)".
 
 **UI:** in the Details tab of the item editor, the lender types a tag and presses Enter. Each tag shows as a removable grey badge.
 
@@ -345,7 +345,7 @@ None of these are in the requirement sheet. The project description allows the t
 
 | # | Decision | Choice |
 |---|---|---|
-| D1 | Tags | 1–10 per item, required on create; 1–30 characters; letters, numbers, spaces, hyphens |
+| D1 | Tags | Optional, up to 10 per item; 1–30 characters; letters, numbers, spaces, hyphens |
 | D2 | Borrow list | Any lenders; dates required; each item once; max 10; basic checks only; stale entries kept and marked |
 | D3 | Who can borrow | Any member including verified lenders; not admins; never your own item |
 | D4 | Reservation filters | All, pending, upcoming (= confirmed), active, completed, cancelled, rejected; from–to overlap |

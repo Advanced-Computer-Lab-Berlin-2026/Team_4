@@ -5,6 +5,7 @@
 const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 process.env.NODE_ENV = 'test';
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'member3-test-secret-not-for-production';
 const mongoose = require('mongoose');
 const trust = require('../../src/services/reviews/trust');
 
@@ -200,5 +201,153 @@ describe('recalculateTrust against the database', { skip: !process.env.TEST_MONG
     assert.equal((await trust.getTrustSummary(lender._id)).user.isVerifiedLender, true);
     await assert.rejects(trust.getTrustSummary('not-an-id'), (e) => e.status === 400);
     await assert.rejects(trust.getTrustSummary(new mongoose.Types.ObjectId()), (e) => e.status === 404);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+describe('reviews API (Req 89, 90, 91, 97)', { skip: !process.env.TEST_MONGO_URI && 'set TEST_MONGO_URI to run' }, () => {
+  const app = require('../../src/app');
+  const { signToken } = require('../../src/utils/tokens');
+  const User = require('../../src/models/User');
+  const Item = require('../../src/models/Item');
+  const Category = require('../../src/models/Category');
+  const Reservation = require('../../src/models/Reservation');
+  const Review = require('../../src/models/Review');
+  let server, base, admin, borrower, lender, outsider, item, done, active, old;
+
+  const daysAgo = (n) => new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+  const mkUser = async (username, extra = {}) => {
+    const u = new User({ username, name: `Name ${username}`, email: `${username}@example.com`, phone: `+2011${Math.floor(Math.random() * 1e7)}`, address: { street: '1 Test St', city: 'Cairo' }, ...extra });
+    await u.setPassword('Testing123!');
+    return u.save();
+  };
+  const call = async (path, { user, body, method = 'GET' } = {}) => {
+    const res = await fetch(`${base}/api${path}`, {
+      method,
+      headers: { ...(user ? { Authorization: `Bearer ${signToken(user._id)}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { status: res.status, data: await res.json().catch(() => null) };
+  };
+  const review = (user, reservation, rating = 5, comment) => call('/reviews', { user, method: 'POST', body: { reservationId: String(reservation._id), rating, comment } });
+
+  before(async () => {
+    await mongoose.connect(process.env.TEST_MONGO_URI, { dbName: `member3_reviews_${process.pid}` });
+    await Promise.all(Object.values(require('../../src/models')).map((m) => m.init()));
+    server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
+    base = `http://127.0.0.1:${server.address().port}`;
+    admin = await mkUser('rv_admin', { role: 'admin' });
+    borrower = await mkUser('rv_borrower');
+    lender = await mkUser('rv_lender', { lenderStatus: 'verified' });
+    outsider = await mkUser('rv_outsider');
+    const category = await Category.create({ name: 'Review tools', slug: 'review-tools' });
+    item = await Item.create({ owner: lender._id, title: 'Pressure washer', category: category._id, description: 'For tests', depositAmount: 300 });
+    const r = (fields) => Reservation.create({ item: item._id, borrower: borrower._id, lender: lender._id, startDate: daysAgo(10), endDate: daysAgo(3), ...fields });
+    done = await r({ status: 'completed', returnedAt: daysAgo(2) });
+    active = await r({ status: 'active' });
+    old = await r({ status: 'completed', returnedAt: daysAgo(20) });
+  });
+
+  after(async () => {
+    try {
+      if (server) await new Promise((resolve) => server.close(resolve));
+      for (const c of await mongoose.connection.db.collections()) {
+        await c.deleteMany({});
+        await c.drop().catch(() => {});
+      }
+    } finally {
+      await mongoose.disconnect();
+    }
+  });
+
+  test('requires login; admins cannot write reviews', async () => {
+    assert.equal((await call('/reviews/mine')).status, 401);
+    assert.equal((await call(`/reviews/user/${lender._id}`)).status, 401);
+    assert.equal((await review(admin, done)).status, 403);
+  });
+
+  test('validates rating, comment and reservation id', async () => {
+    for (const rating of [0, 6, 3.5, 'five']) assert.equal((await review(borrower, done, rating)).status, 400, `rating ${rating}`);
+    assert.equal((await review(borrower, done, 4, 'x'.repeat(1501))).status, 400);
+    assert.equal((await call('/reviews', { user: borrower, method: 'POST', body: { reservationId: 'nope', rating: 4 } })).status, 400);
+    assert.equal((await review(borrower, { _id: new mongoose.Types.ObjectId() })).status, 404);
+  });
+
+  test('only participants, only after completion, only within 14 days', async () => {
+    assert.equal((await review(outsider, done)).status, 403);
+    const notDone = await review(borrower, active);
+    assert.equal(notDone.status, 409);
+    assert.match(notDone.data.message, /after the reservation is completed/);
+    const expired = await review(borrower, old);
+    assert.equal(expired.status, 409);
+    assert.match(expired.data.message, /review window closed/);
+  });
+
+  test('pending list shows only reviewable reservations', async () => {
+    const { status, data } = await call('/reviews/pending', { user: borrower });
+    assert.equal(status, 200);
+    assert.deepEqual(data.items.map((i) => String(i.reservationId)), [String(done._id)]);
+    assert.equal(data.items[0].direction, 'borrower_to_lender');
+    assert.equal(data.items[0].otherParty.username, 'rv_lender');
+    assert.equal(data.items[0].item.title, 'Pressure washer');
+    assert.equal((await call('/reviews/pending', { user: outsider })).data.items.length, 0);
+  });
+
+  test('borrower reviews lender (Req 89): direction from the server, trust updated', async () => {
+    const { status, data } = await review(borrower, done, 4, '  Great washer, easy pickup.  ');
+    assert.equal(status, 201);
+    assert.equal(data.review.direction, 'borrower_to_lender');
+    assert.equal(data.review.reviewer.username, 'rv_borrower');
+    assert.equal(data.review.reviewee.username, 'rv_lender');
+    assert.equal(data.review.item.title, 'Pressure washer');
+    assert.equal(data.review.comment, 'Great washer, easy pickup.');
+    assert.equal(data.review.rating, 4);
+    const saved = await User.findById(lender._id).lean();
+    assert.equal(saved.stats.ratingCount, 1);
+    assert.equal(saved.stats.ratingSum, 4);
+  });
+
+  test('one review per author per reservation, even with simultaneous requests', async () => {
+    const again = await review(borrower, done, 1);
+    assert.equal(again.status, 409);
+    assert.match(again.data.message, /already reviewed/);
+    const both = await Promise.all([review(lender, done, 5, 'Careful borrower'), review(lender, done, 2)]);
+    assert.deepEqual(both.map((r) => r.status).sort(), [201, 409]);
+    assert.equal(await Review.countDocuments({ reservation: done._id }), 2);
+    assert.equal((await User.findById(borrower._id).lean()).stats.ratingCount, 1);
+  });
+
+  test('after reviewing, the reservation leaves the pending list', async () => {
+    assert.equal((await call('/reviews/pending', { user: borrower })).data.items.length, 0);
+    assert.equal((await call('/reviews/pending', { user: lender })).data.items.length, 0);
+  });
+
+  test('my reviews given and received (Req 97)', async () => {
+    const received = await call('/reviews/mine', { user: lender });
+    assert.equal(received.status, 200);
+    assert.equal(received.data.total, 1);
+    assert.equal(received.data.items[0].reviewer.username, 'rv_borrower');
+    assert.deepEqual(Object.keys(received.data).sort(), ['items', 'limit', 'page', 'pages', 'total']);
+    const given = await call('/reviews/mine?type=given', { user: lender });
+    assert.equal(given.data.total, 1);
+    assert.equal(given.data.items[0].reviewee.username, 'rv_borrower');
+    assert.equal((await call('/reviews/mine?type=everything', { user: lender })).status, 400);
+    assert.equal((await call('/reviews/mine', { user: outsider })).data.total, 0);
+  });
+
+  test('received reviews of another user (Req 91), without private details', async () => {
+    const { status, data } = await call(`/reviews/user/${lender._id}`, { user: outsider });
+    assert.equal(status, 200);
+    assert.equal(data.total, 1);
+    assert.deepEqual(Object.keys(data.items[0].reviewer).sort(), ['_id', 'name', 'username']);
+    assert.equal((await call(`/reviews/user/${new mongoose.Types.ObjectId()}`, { user: outsider })).status, 404);
+    assert.equal((await call('/reviews/user/not-an-id', { user: outsider })).status, 400);
+  });
+
+  test('reviews cannot be edited or deleted', async () => {
+    const [existing] = await Review.find({ reviewer: borrower._id }).lean();
+    assert.equal((await call(`/reviews/${existing._id}`, { user: borrower, method: 'DELETE' })).status, 404);
+    assert.equal((await call(`/reviews/${existing._id}`, { user: borrower, method: 'PATCH', body: { rating: 1 } })).status, 404);
+    assert.equal((await Review.findById(existing._id).lean()).rating, 4);
   });
 });

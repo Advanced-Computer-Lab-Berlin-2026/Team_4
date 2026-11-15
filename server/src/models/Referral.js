@@ -4,12 +4,14 @@ const { Schema } = mongoose;
 const schema = new Schema(
   {
     referrer: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    referee: { type: Schema.Types.ObjectId, ref: 'User' },        // set when the friend registers
+    referee: { type: Schema.Types.ObjectId, ref: 'User' },
     code: { type: String, required: true },
     status: { type: String, enum: ['sent', 'registered', 'converted'], default: 'sent' },
     creditAmount: { type: Number, default: 0 },
+    creditAmountMinor: { type: Number, default: 0 },
     convertedAt: Date,
   },
   { timestamps: true }
 );
+schema.index({ referee: 1 }, { unique: true, sparse: true });
 module.exports = mongoose.model('Referral', schema);

@@ -6,19 +6,17 @@ if (env.SMTP_HOST) {
   transporter = nodemailer.createTransport({
     host: env.SMTP_HOST,
     port: env.SMTP_PORT,
+    secure: env.SMTP_PORT === 465,
     auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 20000,
   });
 }
 
-/**
- * sendEmail({ to, subject, text, html })
- * With no SMTP configured (typical in dev) the email is printed to the server console,
- * so you can read OTP codes without any mail setup.
- */
 async function sendEmail({ to, subject, text, html }) {
   if (!transporter) {
-    console.log(`\n[email:dev-console] To: ${to}\nSubject: ${subject}\n${text || html}\n`);
-    return { dev: true };
+    throw new Error('SMTP is not configured; email delivery is unavailable');
   }
   return transporter.sendMail({ from: env.EMAIL_FROM, to, subject, text, html });
 }

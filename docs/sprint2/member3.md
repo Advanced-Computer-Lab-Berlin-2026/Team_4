@@ -83,11 +83,10 @@ Conventions are the same as Sprint 1 ([`docs/API_CONTRACT.md`](../API_CONTRACT.m
   - `0` means "no forfeiture" and releases the whole deposit.
 - **Effect:**
   1. Records `decision.{forfeitAmount, note, decidedBy, decidedAt}`.
-  2. Calls Member 2's `settleForfeiture` (see §2.1).
-  3. Clears the reservation's open-damage flag.
-  4. Recalculates the borrower's trust score.
-  5. Emits `damage.decided`.
-- **Response `200`:** `{ report }`.
+  2. Calls Member 2's `settleForfeiture` (see §2.1). All steps run in one transaction: if settlement fails, the decision is rolled back and can be retried.
+  3. Recalculates the borrower's trust score.
+  4. Emits `damage.decided`.
+- **Response `200`:** `{ report }`. Returns `501` until Member 2's payment service exists (`services/damage/settlement.js`), so nothing pretends money moved.
 - **Errors:**
   - `409` if the report isn't `open`.
   - `400` if the amount is outside 0 to the held deposit.
@@ -337,7 +336,6 @@ None of these values are in the requirement sheet. They are the proposals used a
 | To | Request | Needed for |
 |---|---|---|
 | **Member 1** | `Reservation.conditionPhotos.{pickup,return}[]`: give each photo an `_id` and add `uploadedBy`, `originalName`, `mimeType`, `size` (keep `path`, `takenAt`; drop the public `url`) | Req 79, 80 |
-| **Member 1** | An open-damage flag on `Reservation`, e.g. `damage: { report: ObjectId, open: Boolean }`, or approval for Member 3 to set it with a field-level update | Req 61, Member 5's Req 60 |
 | **Member 1** | A `completedAt` timestamp on `Reservation` (review window and trust); and the "on time" rule for comparing `returnedAt` with `endDate` (timezone, whether `endDate` is inclusive) | Req 89, 90, 98 |
 | **Member 1** | `uploadConditionPhotos` preset in `middleware/upload.js`: field `photos`, JPG/PNG, at most 5 files, `MAX_UPLOAD_MB`, saved to `private/condition-photos` | Req 79 |
 | **Member 1** | Approval for Member 3's trust service to update only `User.trustScore` and `User.stats.*` | Req 98 |

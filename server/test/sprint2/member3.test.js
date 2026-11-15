@@ -395,3 +395,266 @@ describe('reviews API (Req 89, 90, 91, 97)', { skip: !process.env.TEST_MONGO_URI
     assert.equal((await call(`/trust-profiles/${new mongoose.Types.ObjectId()}/recalculate`, { user: admin, method: 'POST' })).status, 404);
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+describe('damage reports API (Req 61, 62, 63, 64, 80)', { skip: !process.env.TEST_MONGO_URI && 'set TEST_MONGO_URI to run' }, () => {
+  const app = require('../../src/app');
+  const { signToken } = require('../../src/utils/tokens');
+  const ApiError = require('../../src/utils/ApiError');
+  const settlement = require('../../src/services/damage/settlement');
+  const damage = require('../../src/services/damage/damage');
+  const User = require('../../src/models/User');
+  const Item = require('../../src/models/Item');
+  const Category = require('../../src/models/Category');
+  const Reservation = require('../../src/models/Reservation');
+  const DamageReport = require('../../src/models/DamageReport');
+  let server, base, admin, admin2, lender, otherLender, borrower, outsider, item;
+  const res = {}; // reservations by scenario
+  const reports = {}; // report ids by scenario
+
+  // Fake Member 2 payment service: records every money call (without the session) and can fail on demand.
+  const moneyCalls = [];
+  let failNext = null;
+  const fakePayments = {
+    async settleForfeiture({ session, ...args }) { if (failNext) { const e = failNext; failNext = null; throw e; } moneyCalls.push({ fn: 'settleForfeiture', ...args }); },
+    async refundToWallet({ session, ...args }) { if (failNext) { const e = failNext; failNext = null; throw e; } moneyCalls.push({ fn: 'refundToWallet', ...args }); },
+  };
+  const callsFor = (key) => moneyCalls.filter((c) => c.idempotencyKey === key);
+
+  const hoursAgo = (n) => new Date(Date.now() - n * 60 * 60 * 1000);
+  const mkUser = async (username, extra = {}) => {
+    const u = new User({ username, name: `Name ${username}`, email: `${username}@example.com`, phone: `+2012${Math.floor(Math.random() * 1e7)}`, address: { street: '1 Test St', city: 'Cairo' }, ...extra });
+    await u.setPassword('Testing123!');
+    return u.save();
+  };
+  const call = async (path, { user, body, method = 'GET' } = {}) => {
+    const r = await fetch(`${base}/api${path}`, {
+      method,
+      headers: { ...(user ? { Authorization: `Bearer ${signToken(user._id)}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { status: r.status, data: await r.json().catch(() => null) };
+  };
+  const report = (user, reservation, description = 'Cracked handle and a missing drill bit.') =>
+    call('/damage-reports', { user, method: 'POST', body: { reservationId: String(reservation._id), description } });
+  const decide = (user, id, forfeitAmount, note = 'Photos show a cracked handle') => call(`/damage-reports/${id}/decision`, { user, method: 'PATCH', body: { forfeitAmount, note } });
+  const dispute = (user, id, reason = 'The crack was there at pickup, see my photo.') => call(`/damage-reports/${id}/dispute`, { user, method: 'POST', body: { reason } });
+  const resolve = (user, id, finalForfeitAmount, note = 'Partly pre-existing') => call(`/damage-reports/${id}/resolution`, { user, method: 'PATCH', body: { finalForfeitAmount, note } });
+
+  before(async () => {
+    await mongoose.connect(process.env.TEST_MONGO_URI, { dbName: `member3_damage_${process.pid}` });
+    await Promise.all(Object.values(require('../../src/models')).map((m) => m.init()));
+    server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
+    base = `http://127.0.0.1:${server.address().port}`;
+    admin = await mkUser('dm_admin', { role: 'admin' });
+    admin2 = await mkUser('dm_admin2', { role: 'admin' });
+    lender = await mkUser('dm_lender', { lenderStatus: 'verified' });
+    otherLender = await mkUser('dm_other_lender', { lenderStatus: 'verified' });
+    borrower = await mkUser('dm_borrower');
+    outsider = await mkUser('dm_outsider');
+    const category = await Category.create({ name: 'Damage tools', slug: 'damage-tools' });
+    item = await Item.create({ owner: lender._id, title: 'Angle grinder', category: category._id, description: 'For tests', depositAmount: 400 });
+    const mk = (fields) => Reservation.create({
+      item: item._id, borrower: borrower._id, lender: lender._id, startDate: hoursAgo(200), endDate: hoursAgo(10),
+      status: 'completed', returnedAt: hoursAgo(5), deposit: { amount: 400, status: 'held' }, ...fields,
+    });
+    res.main = await mk({ conditionPhotos: { pickup: [{ url: '/x', path: 'private/condition-photos/secret.jpg', takenAt: hoursAgo(200) }], return: [] } });
+    res.zero = await mk({});
+    res.noPayments = await mk({});
+    res.race = await mk({});
+    res.oldDecision = await mk({});
+    res.notReturned = await mk({ status: 'active', returnedAt: null });
+    res.tooLate = await mk({ returnedAt: hoursAgo(72) });
+    res.released = await mk({ deposit: { amount: 400, status: 'released' } });
+  });
+
+  after(async () => {
+    settlement.setSettlementProvider(null);
+    try {
+      if (server) await new Promise((resolve) => server.close(resolve));
+      for (const c of await mongoose.connection.db.collections()) {
+        await c.deleteMany({});
+        await c.drop().catch(() => {});
+      }
+    } finally {
+      await mongoose.disconnect();
+    }
+  });
+
+  test('without Member 2 payment service, a decision fails visibly (501) and changes nothing', async () => {
+    settlement.setSettlementProvider(null);
+    const created = await report(lender, res.noPayments);
+    assert.equal(created.status, 201);
+    const r = await decide(admin, created.data.report._id, 100);
+    assert.equal(r.status, 501);
+    assert.match(r.data.message, /not implemented/);
+    const saved = await DamageReport.findById(created.data.report._id).lean();
+    assert.equal(saved.status, 'open');
+    assert.equal(saved.decision?.decidedAt, undefined);
+    settlement.setSettlementProvider(fakePayments); // the rest of the suite uses the fake
+  });
+
+  test('only the verified lender of a returned reservation can report (Req 61)', async () => {
+    assert.equal((await report(null, res.main)).status, 401);
+    assert.equal((await report(borrower, res.main)).status, 403); // not a verified lender
+    assert.equal((await report(admin, res.main)).status, 403);
+    const other = await report(otherLender, res.main);
+    assert.equal(other.status, 403);
+    assert.match(other.data.message, /Only the lender/);
+  });
+
+  test('validates the report and enforces return, 48-hour window and held deposit', async () => {
+    assert.equal((await report(lender, res.main, 'short')).status, 400);
+    assert.equal((await call('/damage-reports', { user: lender, method: 'POST', body: { reservationId: 'x', description: 'Long enough description' } })).status, 400);
+    assert.equal((await report(lender, { _id: new mongoose.Types.ObjectId() })).status, 404);
+    assert.match((await report(lender, res.notReturned)).data.message, /after the item has been returned/);
+    assert.match((await report(lender, res.tooLate)).data.message, /within 48 hours/);
+    assert.match((await report(lender, res.released)).data.message, /no longer held/);
+  });
+
+  test('lender opens a report; one per reservation; Member 5 sees the open case', async () => {
+    assert.equal(await damage.hasOpenDamageCase(res.main._id), false);
+    const { status, data } = await report(lender, res.main);
+    assert.equal(status, 201);
+    reports.main = data.report._id;
+    assert.equal(data.report.status, 'open');
+    assert.equal(data.report.item.title, 'Angle grinder');
+    assert.equal(data.report.reportedBy.username, 'dm_lender');
+    assert.equal(data.report.borrower.username, 'dm_borrower');
+    assert.deepEqual(data.report.reservation.deposit, { amount: 400, status: 'held' });
+    assert.equal((await report(lender, res.main)).status, 409);
+    assert.equal(await damage.hasOpenDamageCase(res.main._id), true);
+  });
+
+  test('participants and admins can view a report with photo metadata, never stored paths (Req 80)', async () => {
+    for (const user of [lender, borrower, admin]) {
+      const r = await call(`/damage-reports/${reports.main}`, { user });
+      assert.equal(r.status, 200, user.username);
+      assert.equal(r.data.report.photos.pickup.length, 1);
+      assert.ok(!JSON.stringify(r.data).includes('secret.jpg'), 'stored path must not leak');
+    }
+    assert.equal((await call(`/damage-reports/${reports.main}`, { user: outsider })).status, 404);
+    assert.equal((await call(`/damage-reports/${reports.main}`)).status, 401);
+    assert.equal((await call('/damage-reports/not-an-id', { user: admin })).status, 400);
+  });
+
+  test('lists: my reports by role, admin queue by status', async () => {
+    assert.equal((await call('/damage-reports/mine?role=lender', { user: lender })).data.total, 2);
+    assert.equal((await call('/damage-reports/mine?role=borrower', { user: lender })).data.total, 0);
+    assert.equal((await call('/damage-reports/mine', { user: borrower })).data.total, 2);
+    assert.equal((await call('/damage-reports/mine', { user: outsider })).data.total, 0);
+    assert.equal((await call('/damage-reports/mine?role=judge', { user: lender })).status, 400);
+    assert.equal((await call('/damage-reports', { user: lender })).status, 403);
+    const queue = await call('/damage-reports?status=open', { user: admin });
+    assert.equal(queue.status, 200);
+    assert.equal(queue.data.total, 2);
+    assert.equal((await call('/damage-reports?status=lost', { user: admin })).status, 400);
+  });
+
+  test('admin decision is bounded by the held deposit and validated (Req 62)', async () => {
+    assert.equal((await decide(borrower, reports.main, 100)).status, 403);
+    assert.equal((await decide(lender, reports.main, 100)).status, 403);
+    assert.equal((await decide(admin, reports.main, -5)).status, 400);
+    assert.equal((await decide(admin, reports.main, 100, '')).status, 400);
+    const tooMuch = await decide(admin, reports.main, 400.01);
+    assert.equal(tooMuch.status, 400);
+    assert.match(tooMuch.data.message, /cannot exceed the held deposit \(EGP 400\.00\)/);
+    assert.equal((await DamageReport.findById(reports.main).lean()).status, 'open');
+    assert.equal(moneyCalls.length, 0);
+  });
+
+  test('admin decides: money settled once, borrower trust updated, case no longer open', async () => {
+    const { status, data } = await decide(admin, reports.main, 150);
+    assert.equal(status, 200);
+    assert.equal(data.report.status, 'decided');
+    assert.equal(data.report.decision.forfeitAmount, 150);
+    assert.equal(data.report.decision.decidedBy.username, 'dm_admin');
+    assert.ok(data.report.disputeDeadline);
+    const settled = callsFor(`damage:${reports.main}:decision`);
+    assert.equal(settled.length, 1);
+    assert.equal(settled[0].fn, 'settleForfeiture');
+    assert.equal(settled[0].amountMinor, 15000); // EGP 150.00 in piastres
+    assert.equal(String(settled[0].reservationId), String(res.main._id));
+    assert.equal((await User.findById(borrower._id).lean()).stats.damageReports, 1);
+    assert.equal(await damage.hasOpenDamageCase(res.main._id), false);
+    const again = await decide(admin, reports.main, 10);
+    assert.equal(again.status, 409);
+    assert.equal(callsFor(`damage:${reports.main}:decision`).length, 1);
+  });
+
+  test('two admins deciding at the same moment: one wins, money moves once', async () => {
+    reports.race = (await report(lender, res.race)).data.report._id;
+    const results = await Promise.all([decide(admin, reports.race, 100), decide(admin2, reports.race, 300)]);
+    assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
+    assert.equal(callsFor(`damage:${reports.race}:decision`).length, 1);
+    const saved = await DamageReport.findById(reports.race).lean();
+    assert.equal(saved.decision.forfeitAmount, callsFor(`damage:${reports.race}:decision`)[0].amountMinor / 100);
+  });
+
+  test('if settlement fails, the decision rolls back and can be retried', async () => {
+    reports.zero = (await report(lender, res.zero)).data.report._id;
+    failNext = new ApiError(503, 'Payment service unavailable');
+    const failed = await decide(admin, reports.zero, 0);
+    assert.equal(failed.status, 503);
+    assert.equal((await DamageReport.findById(reports.zero).lean()).status, 'open');
+    const retried = await decide(admin, reports.zero, 0);
+    assert.equal(retried.status, 200);
+    assert.equal(callsFor(`damage:${reports.zero}:decision`)[0].amountMinor, 0);
+  });
+
+  test('borrower disputes within 7 days, once, and only if something was kept (Req 63)', async () => {
+    assert.equal((await dispute(lender, reports.main)).status, 403);
+    assert.equal((await dispute(admin, reports.main)).status, 403);
+    assert.equal((await dispute(outsider, reports.main)).status, 404);
+    assert.equal((await dispute(borrower, reports.main, 'too short')).status, 400);
+    assert.match((await dispute(borrower, reports.zero)).data.message, /nothing to dispute/);
+    const { status, data } = await dispute(borrower, reports.main);
+    assert.equal(status, 200);
+    assert.equal(data.report.status, 'disputed');
+    assert.match(data.report.dispute.reason, /crack was there at pickup/);
+    assert.equal((await dispute(borrower, reports.main)).status, 409);
+
+    reports.old = (await report(lender, res.oldDecision)).data.report._id;
+    assert.equal((await decide(admin, reports.old, 50)).status, 200);
+    await DamageReport.updateOne({ _id: reports.old }, { $set: { 'decision.decidedAt': hoursAgo(8 * 24) } });
+    assert.match((await dispute(borrower, reports.old)).data.message, /within 7 days/);
+  });
+
+  test('admin resolves: final amount never above the decision, only the difference refunded, once (Req 64)', async () => {
+    assert.equal((await resolve(borrower, reports.main, 100)).status, 403);
+    assert.match((await resolve(admin, reports.race, 50)).data.message, /not disputed/);
+    const tooHigh = await resolve(admin, reports.main, 150.01);
+    assert.equal(tooHigh.status, 400);
+    assert.match(tooHigh.data.message, /cannot exceed the original decision \(EGP 150\.00\)/);
+
+    const { status, data } = await resolve(admin, reports.main, 100);
+    assert.equal(status, 200);
+    assert.equal(data.report.status, 'resolved');
+    assert.equal(data.report.resolution.finalForfeitAmount, 100);
+    assert.equal(data.report.resolution.resolvedBy.username, 'dm_admin');
+    const refunds = callsFor(`damage:${reports.main}:resolution`);
+    assert.equal(refunds.length, 1);
+    assert.equal(refunds[0].fn, 'refundToWallet');
+    assert.equal(refunds[0].amountMinor, 5000);
+    assert.equal(String(refunds[0].userId), String(borrower._id));
+    assert.equal((await resolve(admin, reports.main, 0)).status, 409);
+    assert.equal(callsFor(`damage:${reports.main}:resolution`).length, 1);
+  });
+
+  test('resolving at the same amount refunds nothing; overturning to 0 clears the damage from trust', async () => {
+    const won = (await DamageReport.findById(reports.race).lean()).decision.forfeitAmount;
+    assert.equal((await dispute(borrower, reports.race)).status, 200);
+    assert.equal((await resolve(admin, reports.race, won)).status, 200);
+    assert.equal(callsFor(`damage:${reports.race}:resolution`).length, 0);
+
+    // Upheld so far: main (100), race (>0), old (50). Overturn a fresh one to 0 and check the count drops back.
+    const before = (await User.findById(borrower._id).lean()).stats.damageReports;
+    const extra = await Reservation.create({ item: item._id, borrower: borrower._id, lender: lender._id, startDate: hoursAgo(100), endDate: hoursAgo(10), status: 'completed', returnedAt: hoursAgo(1), deposit: { amount: 400, status: 'held' } });
+    const id = (await report(lender, extra)).data.report._id;
+    await decide(admin, id, 80);
+    assert.equal((await User.findById(borrower._id).lean()).stats.damageReports, before + 1);
+    await dispute(borrower, id);
+    await resolve(admin, id, 0);
+    assert.equal((await User.findById(borrower._id).lean()).stats.damageReports, before);
+  });
+});

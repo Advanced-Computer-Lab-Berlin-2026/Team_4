@@ -41,6 +41,27 @@ const itemFieldRules = (partial = false) => {
   ];
 };
 
+// ---- Tags (Sprint 2, for Member 7's alternatives - Req 92) ----
+// Optional on create and edit: 0-10 tags, each 1-30 characters of letters (any language), numbers, spaces and hyphens.
+// Multipart create sends one `tags` field per tag (a single tag arrives as a string); JSON edit sends a list.
+// Tags are cleaned (trimmed, single spaces, lower case, empty ones and duplicates removed) before they are checked.
+const MAX_TAGS = 10;
+const MAX_TAG_LENGTH = 30;
+const TAG_REGEX = /^[\p{L}\p{M}\p{N}](?:[\p{L}\p{M}\p{N} -]*[\p{L}\p{M}\p{N}])?$/u; // no leading/trailing space or hyphen
+const TAG_FORMAT_MESSAGE = `Tags can contain letters, numbers, spaces and hyphens (up to ${MAX_TAG_LENGTH} characters)`;
+const tagError = (message) => ApiError.badRequest(message, [{ field: 'tags', message }]);
+
+const normalizeTags = (req, res, next) => {
+  if (!req.body || req.body.tags === undefined) return next(); // not sent: the item's tags stay as they are
+  const raw = isText(req.body.tags) ? [req.body.tags] : req.body.tags;
+  if (!Array.isArray(raw) || !raw.every(isText)) return next(tagError('Tags must be a list of words'));
+  const tags = [...new Set(raw.map((t) => t.trim().replace(/\s+/g, ' ').toLowerCase()).filter(Boolean))];
+  if (tags.length > MAX_TAGS) return next(tagError(`You can add up to ${MAX_TAGS} tags`));
+  if (!tags.every((t) => t.length <= MAX_TAG_LENGTH && TAG_REGEX.test(t))) return next(tagError(TAG_FORMAT_MESSAGE));
+  req.body.tags = tags;
+  return next();
+};
+
 const itemIdParam = param('id').isMongoId().withMessage('Invalid item id');
 const listQueryRules = [
   query('status').optional().custom((v) => isText(v) && ['all', 'active', 'archived'].includes(v))
@@ -48,9 +69,9 @@ const listQueryRules = [
 ];
 
 router.get('/mine', protect, requireVerifiedLender, listQueryRules, validate, c.listMyItems); // Req 21
-router.post('/', protect, requireVerifiedLender, uploadItemPhotos, itemFieldRules(), validate, c.createItem); // Req 13
+router.post('/', protect, requireVerifiedLender, uploadItemPhotos, itemFieldRules(), validate, normalizeTags, c.createItem); // Req 13 (+ tags, Req 92)
 router.get('/:id', protect, requireVerifiedLender, itemIdParam, validate, c.getMyItem); // Req 14
-router.put('/:id', protect, requireVerifiedLender, itemIdParam, itemFieldRules(true), validate, c.updateItem); // Req 14
+router.put('/:id', protect, requireVerifiedLender, itemIdParam, itemFieldRules(true), validate, normalizeTags, c.updateItem); // Req 14 (+ tags, Req 92)
 // Ownership is checked BEFORE the upload, so no files are saved for someone else's item.
 router.post('/:id/photos', protect, requireVerifiedLender, itemIdParam, validate, c.loadMyItem, uploadItemPhotos, c.addPhotos); // Req 13, 14
 router.delete('/:id/photos/:photoId', protect, requireVerifiedLender, itemIdParam,

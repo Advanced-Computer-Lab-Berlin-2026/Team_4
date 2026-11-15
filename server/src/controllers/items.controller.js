@@ -23,7 +23,7 @@ const findMyItem = async (req) => {
 /** Only these fields can be set by the lender (owner, archive and moderation fields never come from the body). */
 const pickItemFields = (body) => {
   const fields = {};
-  ['title', 'description', 'category', 'depositAmount', 'conditionNotes'].forEach((k) => {
+  ['title', 'description', 'category', 'depositAmount', 'conditionNotes', 'tags'].forEach((k) => { // tags: already cleaned by the route
     if (body[k] !== undefined) fields[k] = body[k];
   });
   return fields;

@@ -75,7 +75,7 @@ Conventions are the same as Sprint 1 ([`docs/API_CONTRACT.md`](../API_CONTRACT.m
 - **Any lenders:** a list may mix items from different lenders. Checkout (Member 1, Req 49) still creates one reservation per item.
 - **Each item once.** To use different dates, the member changes the entry's dates (Req 48).
 - **At most 10 entries.**
-- **Dates are required when adding.** Start date is today (UTC) or later; the end date is on or after the start date. The length (`end − start + 1` days) must not exceed the item's `rules.maxBorrowDays` when the item has one.
+- **Dates are required when adding.** Start date is today (UTC) or later and **within 1 year** from today; the end date is on or after the start date. The length (`end − start + 1` days) must not exceed the item's `rules.maxBorrowDays` when the item has one, and **at most 365 days** when it has none. Both limits catch typos (e.g. 2062 for 2026) and follow Member 1's booking horizon once his contract sets one.
 - **Checks when adding or changing dates:** the item exists, is public (`Item.publicFilter()`), and isn't the member's own item. Availability is **not** checked here: the list is a draft and doesn't hold the item (plan p.22). Checkout re-checks everything. Once Member 1's `getAvailability` exists, entries show a warning if the dates are already booked.
 - **Stale entries are kept, not deleted.** When an item is archived or removed, or an entry's start date has passed, the entry stays in the list with a `problem` and is excluded from checkout until the member fixes or removes it.
 
@@ -92,7 +92,7 @@ Conventions are the same as Sprint 1 ([`docs/API_CONTRACT.md`](../API_CONTRACT.m
 - **Request:** `{ itemId, startDate, endDate }`.
 - **Response `201`:** `{ borrowList }`.
 - **Errors:**
-  - `400` for invalid or missing dates, a start date in the past, an end date before the start date, or a range longer than the item's maximum.
+  - `400` for invalid or missing dates, a start date in the past or more than 1 year ahead, an end date before the start date, or a range longer than the item's maximum (or 365 days).
   - `403` if it's your own item, or you are an admin.
   - `404` if the item doesn't exist or isn't available (archived/removed).
   - `409` if the item is already in your list, or the list already has 10 entries.
@@ -346,7 +346,7 @@ None of these are in the requirement sheet. The project description allows the t
 | # | Decision | Choice |
 |---|---|---|
 | D1 | Tags | Optional, up to 10 per item; 1–30 characters; letters, numbers, spaces, hyphens |
-| D2 | Borrow list | Any lenders; dates required; each item once; max 10; basic checks only; stale entries kept and marked |
+| D2 | Borrow list | Any lenders; dates required; each item once; max 10; basic checks only; stale entries kept and marked; start within 1 year, length at most 365 days when the item sets no maximum |
 | D3 | Who can borrow | Any member including verified lenders; not admins; never your own item |
 | D4 | Reservation filters | All, pending, upcoming (= confirmed), active, completed, cancelled, rejected; from–to overlap |
 | D5 | Order | Pending/upcoming/active soonest first; past most recent first |

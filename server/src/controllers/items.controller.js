@@ -9,6 +9,9 @@ const Item = require('../models/Item');
 const Category = require('../models/Category');
 const sharp = require('sharp');
 const { fileInfo, removeFile } = require('../middleware/upload');
+const Reservation = require('../models/Reservation'); // read only: open bookings block archiving (Sprint 2)
+// Bookings that are still open: a request waiting for an answer, booked but not picked up, or borrowed right now.
+const OPEN_BOOKING_STATUSES = ['pending', 'confirmed', 'active'];
 
 const MAX_PHOTOS = 8; // per item, across all uploads (decision B)
 const { parsePagination, paginated } = require('../utils/pagination');
@@ -180,6 +183,15 @@ exports.removePhoto = asyncHandler(async (req, res) => {
  * Nothing is deleted: photos, history and anything that references the item stay (Req 15).
  */
 const setArchived = async (req, archive) => {
+  if (archive) {
+    // Sprint 2: an item with open bookings can't be hidden, or borrowers would hold bookings for an item nobody can see.
+    const mine = await findMyItem(req); // 404 first, so another lender's bookings are never revealed
+    if (mine.isArchived) throw ApiError.conflict('Item is already archived');
+    const open = await Reservation.countDocuments({ item: mine._id, status: { $in: OPEN_BOOKING_STATUSES } });
+    if (open > 0) {
+      throw ApiError.conflict(`This item has ${open} open booking${open === 1 ? '' : 's'}. Archive it after ${open === 1 ? 'it finishes' : 'they finish'}.`);
+    }
+  }
   const update = archive
     ? { $set: { isArchived: true, archivedAt: new Date() } }
     : { $set: { isArchived: false }, $unset: { archivedAt: 1 } };

@@ -165,11 +165,11 @@ Read-only. Lists reservations where I am the **borrower**.
   "_id": "…", "status": "pending|confirmed|active|completed|cancelled|rejected",
   "startDate": "2026-12-01", "endDate": "2026-12-03", "days": 2,
   "item": { "_id": "…", "title": "…", "photo": "…", "category": { "name": "…" } },
-  "borrower": { "_id": "…", "name": "…" }, "lender": { "_id": "…", "name": "…" },
+  "borrower": { "_id": "…", "name": "…" }, "lender": { "_id": "…", "name": "…" }, "role": "borrower|lender",
   "deposit": { "amount": 400, "status": "held" },
   "fulfilment": { "method": "pickup|delivery", "deliveryStatus": "none" },
   "pickedUpAt": null, "returnedAt": null, "completedAt": null, "returnCondition": null, "lateFee": 0,
-  "rejectionReason": null,
+  "rejectionReason": null, "cancellation": null,
   "extension": { "requestId": null, "status": "none|pending|approved|rejected|cancelled|expired", "requestedEndDate": null, "decidedAt": null },
   "flags": { "approvalOverdue": false, "pickupMissed": false, "returnOverdue": false },
   "actions": { "approve": false, "reject": false, "pickup": false, "returnGood": false, "reportDamage": false,
@@ -181,6 +181,9 @@ Read-only. Lists reservations where I am the **borrower**.
 - `actions` says which buttons the **current user** may use right now. The server decides; the page only shows them.
 - `extension.status` and `flags` come from Member 1's `returnTiming.lifecycleFlags(reservation)`: a pending request whose deadline passed shows as `"expired"`; `approvalOverdue` (pending at the start date), `pickupMissed` (confirmed, never picked up by the end date), `returnOverdue` (active after the deadline). They are labels only: the stored status doesn't change (shared contract).
 - `extension.requestId` is sent back when cancelling, approving or rejecting a request.
+- `role` is the current user's side of this booking. `cancellation` is `{ at, reason }` for a cancelled booking, else `null`.
+- People are shown by name only (no email, phone or address). If the item was deleted, `item` is `null`.
+- **Errors:** `400` with the field for an unknown `status` (the filter word is `upcoming`, not `confirmed`), an invalid `from`/`to` date, or `to` before `from` · `401` not logged in · `403` admin · `404` not my booking (also for someone else's, so it isn't revealed).
 - `rejectionReason`, `completedAt` and `returnCondition` are Member 1's `Reservation` fields.
 
 **Overlap with Member 1's pages:** Member 1's `GET /api/reservations` and `/my-reservations` page list a member's reservations (no filters) for chat and cancellation (Req 55, 68). Req 53/54 (view all, filter by date or status) are mine, so `/reservations` is the filtered list and its rows open Member 1's `/my-reservations/:id` for chat and cancellation (see §10).

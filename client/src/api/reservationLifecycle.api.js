@@ -19,3 +19,6 @@ export const approveReservation = (id) => api.patch(`/reservation-lifecycle/${id
 
 /** PATCH /api/reservation-lifecycle/:id/reject - Req 56 - lender declines: { reason? } (up to 500) -> { reservation } */
 export const rejectReservation = (id, reason) => api.patch(`/reservation-lifecycle/${id}/reject`, { reason }).then((r) => r.data);
+
+/** PATCH /api/reservation-lifecycle/:id/pickup - Req 59 - lender marks the item as picked up -> { reservation } */
+export const markPickedUp = (id) => api.patch(`/reservation-lifecycle/${id}/pickup`).then((r) => r.data);

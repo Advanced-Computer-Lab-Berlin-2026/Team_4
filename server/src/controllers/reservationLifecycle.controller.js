@@ -34,3 +34,8 @@ exports.approve = asyncHandler(async (req, res) => {
 exports.reject = asyncHandler(async (req, res) => {
   res.json({ reservation: await lifecycle.decide(req.user, req.params.id, 'reject', req.body || {}) });
 });
+
+/** PATCH /api/reservation-lifecycle/:id/pickup - Req 59 - the lender marks the item as picked up (Member 1's pickup) */
+exports.pickup = asyncHandler(async (req, res) => {
+  res.json({ reservation: await lifecycle.markPickedUp(req.user, req.params.id) });
+});

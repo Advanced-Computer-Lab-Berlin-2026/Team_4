@@ -1,5 +1,5 @@
 // BOOKING REQUESTS (lender) - Owner: Member 5 - Requirements: 56, 59, 60 (list; the buttons come in Parts 10-12)
-// Requests can be approved or declined right on their card (Req 56, components/sprint2/m5/RequestAnswer.jsx).
+// Requests can be approved or declined (Req 56) and pickups marked (Req 59) right on their card.
 // Route: /lender/reservations   Access: lender   (registered in src/routes/sprint2/member5.routes.jsx)
 // Every booking of my items. "Needs my answer" shows pending requests and open extension requests, oldest first.
 // Filters (tab, item, dates, page) are kept in the address, so reload and the Back arrow keep them.
@@ -13,6 +13,7 @@ import FormField from '../../components/common/FormField';
 import Pagination from '../../components/common/Pagination';
 import ReservationCard from '../../components/sprint2/m5/ReservationCard';
 import RequestAnswer from '../../components/sprint2/m5/RequestAnswer';
+import PickupButton from '../../components/sprint2/m5/PickupButton';
 import { isDay, showDay } from '../../components/sprint2/m5/borrowDates';
 import { OPEN_STATUSES } from '../../components/sprint2/m5/reservationText';
 import s from '../../styles/sprint2/member5.module.css';
@@ -112,6 +113,9 @@ export default function LenderReservationsPage() {
   else if (from) rangeText = ` from ${showDay(from)} on`;
   else if (to) rangeText = ` until ${showDay(to)}`;
 
+  const stale = (message) => { setNotice(''); setProblem(message); setReloadKey((k) => k + 1); };
+  const done = (_, message) => { setProblem(''); setNotice(message); setReloadKey((k) => k + 1); window.scrollTo(0, 0); };
+
   const section = (key, title, note, rows) => rows.length > 0 && (
     <section aria-labelledby={`lend-${key}-title`}>
       <h2 id={`lend-${key}-title`} className={s.groupTitle}>{title}</h2>
@@ -119,8 +123,8 @@ export default function LenderReservationsPage() {
       <ul className={s.list}>
         {rows.map((r) => (
           <ReservationCard key={r._id} reservation={r}>
-            <RequestAnswer reservation={r} onStale={(message) => { setNotice(''); setProblem(message); setReloadKey((k) => k + 1); }}
-              onDone={(_, message) => { setProblem(''); setNotice(message); setReloadKey((k) => k + 1); }} />
+            <RequestAnswer reservation={r} onStale={stale} onDone={done} />
+            {r.actions?.pickup && <PickupButton reservation={r} onStale={stale} onDone={done} />}
           </ReservationCard>
         ))}
       </ul>

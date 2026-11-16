@@ -223,7 +223,7 @@ Read-only. Lists reservations where I am the **borrower**.
 
 **PATCH `/:id/reject`** — `{ reason? }`, up to 500 characters, shown to the borrower. The command refunds the held deposit and any charged delivery fee in full through Member 2.
 
-**PATCH `/:id/pickup`** — only while `confirmed` and within the booked interval (the command decides). Condition photos (Member 3) are optional; the page reminds the lender to add them.
+**PATCH `/:id/pickup`** — only while `confirmed` and within the booked interval (the command decides). The page shows **Mark as picked up** (**Mark as handed over** for a delivery, since Member 6's "delivered" doesn't change the booking) on the details page and on the Booking requests card, and "You can mark it picked up from …" before the start date. Condition photos (Member 3) are optional; the page reminds the lender to add them.
 
 **PATCH `/:id/return`** — good return (Req 60). The command refuses it while a damage case is open, stamps `returnedAt` and `completedAt`, **releases the deposit**, applies any late fee (Member 2), recalculates trust for both people (Member 3) and queues the completion events (Member 9). An early return is allowed.
 

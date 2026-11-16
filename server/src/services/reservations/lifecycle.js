@@ -255,4 +255,10 @@ async function decide(user, id, decision, body = {}) {
   return getOne(user, id);
 }
 
-module.exports = { listMine, listLending, lendingItems, getOne, decide, parseFilters, STATUS_FILTERS, MAX_REASON };
+/** Req 59: the lender marks the item as picked up (Member 1's `pickup`: confirmed only, within the booked days). */
+async function markPickedUp(user, id) {
+  await reservationCommands.transition({ actorId: user._id, reservationId: id, action: 'pickup', expectedStatus: 'confirmed' });
+  return getOne(user, id);
+}
+
+module.exports = { listMine, listLending, lendingItems, getOne, decide, markPickedUp, parseFilters, STATUS_FILTERS, MAX_REASON };

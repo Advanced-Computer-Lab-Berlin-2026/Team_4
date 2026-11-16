@@ -453,3 +453,75 @@ test('refund functions reject inconsistent input before moving money', async () 
   await assert.rejects(payment.settleCancellation({ reservationId, borrowerId: borrower._id, amountMinor: 100, currency: 'EGP', cancelledAt: 'nope', pickupDate: new Date(), idempotencyKey: 'bad:2' }), (e) => e.status === 400);
   assert.equal(await balanceOf(borrower), 0);
 });
+
+// ---------------------------------------------------------------- Step 5 (plan step D): late fees (Req 77)
+const { calculateLateFee } = require('../../src/services/payments/lateFee');
+
+test('Req 77: late fee = 10 % of the deposit per started day late, after a 1-hour grace, capped at the deposit', () => {
+  const endDate = new Date('2026-12-10T00:00:00Z');
+  const back = (minutes) => new Date(+endDate + minutes * 60000);
+  const fee = (minutes, depositMinor = 15000) => calculateLateFee({ depositMinor, endDate, returnedAt: back(minutes) });
+  assert.deepEqual([fee(0).feeMinor, fee(60).feeMinor], [0, 0]); // on time / inside the grace period
+  assert.deepEqual([fee(61).daysLate, fee(61).feeMinor], [1, 1500]); // 1 started day
+  assert.deepEqual([fee(24 * 60 + 1).daysLate, fee(24 * 60 + 1).feeMinor], [2, 3000]); // just over 1 day -> 2 days
+  const veryLate = fee(15 * 24 * 60); // 15 days = 150 % -> capped at 100 %
+  assert.deepEqual([veryLate.feeMinor, veryLate.capped], [15000, true]);
+  assert.equal(fee(5 * 24 * 60, 0).feeMinor, 0); // no deposit -> no fee
+});
+
+test('Req 77: a late return through the real return command releases the deposit, then charges the late fee once', async () => {
+  const borrower = await makeUser(0);
+  // Due 2 days ago (UTC midnight) -> returned now = 2 or 3 started days late depending on the time of day.
+  const reservation = await paidReservation({ borrower, status: 'active', startIn: -4, days: 2 });
+  await commands.transition({ actorId: reservation.lender, reservationId: reservation._id, action: 'return' });
+  await commands.transition({ actorId: reservation.lender, reservationId: reservation._id, action: 'return' }); // retry
+
+  const saved = await Reservation.findById(reservation._id);
+  const expected = calculateLateFee({ depositMinor: 15000, endDate: saved.endDate, returnedAt: saved.returnedAt });
+  assert.ok(expected.feeMinor > 0);
+  assert.equal(Math.round(saved.lateFee * 100), expected.feeMinor); // M1 stored our fee on the reservation
+  assert.equal(await balanceOf(borrower), 15000 - expected.feeMinor); // deposit back, minus the fee
+  assert.equal(await balanceOf({ _id: reservation.lender }), expected.feeMinor); // fee paid to the lender
+  assert.equal(await WalletTransaction.countDocuments({ user: borrower._id, type: 'late_fee' }), 1);
+
+  const auditRow = await AuditLog.findOne({ action: 'late_fee_applied' });
+  assert.equal(String(auditRow.reservation), String(reservation._id));
+  assert.deepEqual([auditRow.inputs.depositMinor, auditRow.inputs.percentOfDepositPerDay, auditRow.result.daysLate], [15000, 10, expected.daysLate]);
+});
+
+test('Req 77: a low wallet is never skipped - the rest stays owed and is collected from the next credit', async () => {
+  const borrower = await makeUser(20); // only EGP 20 available
+  const reservation = await paidReservation({ borrower, status: 'completed', startIn: -10, days: 3 });
+  const endDate = reservation.endDate;
+  const returnedAt = new Date(+endDate + 3 * 86400000); // exactly 3 days late -> 30 % of EGP 150 = EGP 45
+  const input = { reservationId: reservation._id, userId: borrower._id, currency: 'EGP', idempotencyKey: `reservation:${reservation._id}:late-fee`, endDate, returnedAt };
+
+  const result = await payment.applyLateFee(input);
+  assert.deepEqual([result.feeMinor, result.chargedMinor, result.outstandingMinor], [4500, 2000, 2500]);
+  assert.equal(await balanceOf(borrower), 0); // never negative
+  assert.equal((await payment.applyLateFee(input)).replayed, true); // retry: no second charge
+  assert.equal((await get('/account/wallet', borrower)).data.outstandingLateFeesMinor, 2500);
+
+  // Next money in: EGP 100 refund/reward -> EGP 25 owed is taken automatically.
+  await payment.creditReferral({ userId: borrower._id, amountMinor: 10000, referralId: new mongoose.Types.ObjectId(), idempotencyKey: 'ref:after-late-fee' });
+  assert.equal(await balanceOf(borrower), 7500);
+  assert.equal(await balanceOf({ _id: reservation.lender }), 4500); // lender received the whole fee in two parts
+
+  const fees = await get('/payments/late-fees', borrower);
+  assert.equal(fees.data.outstandingTotalMinor, 0);
+  assert.deepEqual([fees.data.items[0].lateFeeMinor, fees.data.items[0].chargedMinor, fees.data.items[0].outstandingMinor], [4500, 4500, 0]);
+  assert.equal(await AuditLog.countDocuments({ action: 'late_fee_collected' }), 1);
+});
+
+test('Req 77: returning within the grace period costs nothing but is still audited', async () => {
+  const borrower = await makeUser(50);
+  const reservation = await paidReservation({ borrower, status: 'completed', startIn: -10, days: 3 });
+  const result = await payment.applyLateFee({
+    reservationId: reservation._id, userId: borrower._id, currency: 'EGP', idempotencyKey: 'grace',
+    endDate: reservation.endDate, returnedAt: new Date(+reservation.endDate + 30 * 60000),
+  });
+  assert.equal(result.feeMinor, 0);
+  assert.equal(await balanceOf(borrower), 5000);
+  assert.equal((await AuditLog.findOne({ action: 'late_fee_applied' })).result.feeMinor, 0);
+  assert.equal((await get('/payments/late-fees', borrower)).data.total, 0); // zero fees are not listed
+});

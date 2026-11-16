@@ -34,7 +34,7 @@ All in `server/src/services/payments/config.js`; public at `GET /api/payments/po
 | Late-fee grace | **60 minutes** after the due time | M1 only calls `applyLateFee` for late returns (`returnTiming.isLateReturn`) |
 | Late-fee rate | **10 % of the deposit per started day** late | |
 | Late-fee cap | **100 %** of the deposit | |
-| Late fee with a low wallet | Charge what is available; record the rest as **outstanding** (`PaymentOperation.outstandingMinor`), collected automatically from the next wallet credit. No User schema change. | |
+| Late fee with a low wallet | Charge what is available; record the rest as **outstanding** (`PaymentOperation.outstandingMinor`). Any later wallet credit (refund, returned deposit, reward) collects it automatically, oldest first, in the same transaction (audit action `late_fee_collected`). No User schema change. | ✅ Built |
 | Receiver of forfeited deposit / late fee | Lender's wallet (ledger type `lender_payout`); set `forfeitedFundsTo: 'platform'` in `config.js` to keep it instead | **Open** |
 | Refunds of card payments | Always to the **wallet** (Req 52) | |
 
@@ -52,7 +52,7 @@ Member 1's `services/sprint2/bootstrap.js` loads this file automatically. Missin
 | `settleCancellation(input, session)` | Borrower cancels (Req 52, 81) | `reservationId, borrowerId, amountMinor, currency, cancelledAt, pickupDate, freeCancellationHours, idempotencyKey` | `{ refundMinor, ratePercent, rule, forfeitedMinor, paidToLenderMinor }` | ✅ Done |
 | `refundToWallet(input, session)` | Lender rejects (full refund) | `reservationId, userId, reference, currency, idempotencyKey, amountMinor, depositMinor, deliveryMinor` | `{ refundMinor }` | ✅ Done |
 | `releaseDeposit(input, session)` | Good return | same fields as `refundToWallet` | `{ releasedMinor }` | ✅ Done |
-| `applyLateFee(input, session)` | Late return (Req 77) | `reservationId, userId, reference, currency, idempotencyKey, returnedAt, endDate` | `{ feeMinor }` | Next |
+| `applyLateFee(input, session)` | Late return (Req 77) | `reservationId, userId, reference, currency, idempotencyKey, returnedAt, endDate` | `{ feeMinor, chargedMinor, outstandingMinor, daysLate }` | ✅ Done |
 | `startCardPayment(input)` | Card checkout (Req 51) | checkout payment input | `{ state:'pending', redirectUrl }` | Blocked: `stripe` package |
 | `getCardPayment(input)` | Checkout status / reconcile | checkout payment input + `closeExpired` | `{ state:'pending'\|'failed'\|'paid', … }` | Blocked |
 | `recordCardCheckout(input, session)` | Verified card payment | checkout payment input + `paymentReference` | — | Blocked |
@@ -65,6 +65,7 @@ Member 1's `services/sprint2/bootstrap.js` loads this file automatically. Missin
 |---|---|---|---|---|
 | `charge(input, session)` | M8 membership paid by wallet | `userId, amountMinor, currency, purpose:'membership', reference:{ type:'membership', id }, idempotencyKey` | `{ chargedMinor, balanceMinor, operationId, replayed }` | ✅ Done |
 | `quoteCancellationRefund(input)` | M1 / UI: show the refund before cancelling (no money moves) | `amountMinor, cancelledAt, pickupDate, freeCancellationHours?` | `{ ratePercent, rule, refundMinor, forfeitedMinor, hoursBeforePickup }` | ✅ Done |
+| `calculateLateFee(input)` | UI / M5: show the fee a late return would cost (no money moves) | `depositMinor, endDate, returnedAt` | `{ feeMinor, daysLate, minutesLate, capped }` | ✅ Done |
 | `creditReferral(input, session)` | M9 referral reward (Req 99) | `userId, amountMinor, currency, referralId, idempotencyKey` | `{ creditedMinor, balanceMinor, operationId, replayed }` | ✅ Done |
 | `settleForfeiture(input, session)` | M3 damage decision / dispute revision | `reservationId, targetForfeitMinor, idempotencyKey` — applies only the **difference** from what was already forfeited, bounded by the held deposit | `{ forfeitedTotalMinor, deltaMinor, releasedMinor }` | Planned |
 

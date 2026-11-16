@@ -58,9 +58,18 @@ async function applyChange({ userId, deltaMinor, type, reference, reservationId,
       }],
       { session }
     );
+    // After money comes IN, let lateFee.js collect any late fee still owed (same transaction).
+    if (deltaMinor > 0 && creditHook) {
+      const collectedMinor = await creditHook({ userId, session });
+      if (collectedMinor > 0) return { transaction, balanceMinor: afterMinor - collectedMinor, collectedMinor };
+    }
     return { transaction, balanceMinor: afterMinor };
   }
   throw ApiError.conflict('The wallet is busy, please try again');
 }
 
-module.exports = { getBalanceMinor, applyChange };
+// Registered by lateFee.js (wallet.js must not require it - that would be a circular require).
+let creditHook = null;
+function setCreditHook(fn) { creditHook = fn; }
+
+module.exports = { getBalanceMinor, applyChange, setCreditHook };

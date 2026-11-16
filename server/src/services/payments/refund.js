@@ -150,4 +150,4 @@ async function releaseDeposit(input, session) {
   }, session);
 }
 
-module.exports = { quoteCancellationRefund, settleCancellation, refundToWallet, releaseDeposit };
+module.exports = { quoteCancellationRefund, settleCancellation, refundToWallet, releaseDeposit, payLender };

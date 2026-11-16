@@ -7,6 +7,7 @@ const ApiError = require('../../utils/ApiError');
 const wallet = require('./wallet');
 const audit = require('./audit');
 const refund = require('./refund');
+const lateFee = require('./lateFee'); // also registers the "collect owed late fees after a credit" hook
 const { runOperation, checkReference } = require('./operation');
 const { assertAmountMinor, toMinor, fromMinor } = require('./money');
 
@@ -131,6 +132,9 @@ module.exports = {
   settleCancellation: refund.settleCancellation,
   refundToWallet: refund.refundToWallet,
   releaseDeposit: refund.releaseDeposit,
+  // Req 77 - late fees (lateFee.js)
+  applyLateFee: lateFee.applyLateFee,
+  calculateLateFee: lateFee.calculateLateFee,
   toMinor,
   fromMinor,
 };

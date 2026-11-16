@@ -11,7 +11,6 @@ const Reservation = require('../../src/models/Reservation');
 const PaymentOperation = require('../../src/models/PaymentOperation');
 const payment = require('../../src/services/payments/payment');
 const wallet = require('../../src/services/payments/wallet');
-const audit = require('../../src/services/payments/audit');
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -43,23 +42,18 @@ async function main() {
   // 3. Wallet deposit for it.
   await payment.charge({ userId: user._id, amountMinor: 20000, purpose: 'deposit', reference: { type: 'reservation', id: reservation._id }, idempotencyKey: key('deposit') });
 
-  // 4. A late fee of EGP 120 for 3 days late, of which only EGP 40 is paid now -> EGP 80 outstanding.
-  //    (Step 6 replaces this with the real applyLateFee calculation.)
-  const lateFeeMinor = 12000;
-  const chargedMinor = 4000;
-  const reference = { type: 'reservation', id: reservation._id };
-  const result = await payment.runOperation(
-    { idempotencyKey: key('late-fee'), kind: 'late_fee', purpose: 'late_fee', userId: user._id, reference, amountMinor: lateFeeMinor },
-    async ({ session, operation }) => {
-      await wallet.applyChange({ userId: user._id, deltaMinor: -chargedMinor, type: 'late_fee', reference, operationId: operation._id, note: 'Late fee (demo)' }, { session });
-      await PaymentOperation.updateOne({ _id: operation._id }, { $set: { outstandingMinor: lateFeeMinor - chargedMinor } }, { session });
-      await audit.record({ action: 'late_fee_applied', reservationId: reservation._id, userId: user._id, amountMinor: lateFeeMinor, operationId: operation._id, inputs: { demo: true, daysLate: 3 }, result: { lateFeeMinor, chargedMinor } }, { session });
-      return { lateFeeMinor, chargedMinor, daysLate: 3 };
-    }
-  );
+  // 4. The real late-fee calculation for that return: 3 days late x 10 % of the EGP 200 deposit = EGP 60.
+  //    Skipped if this reservation already has a late fee (e.g. from an earlier version of this script).
+  const existingFee = await PaymentOperation.findOne({ kind: 'late_fee', 'reference.id': reservation._id });
+  if (!existingFee) {
+    await payment.applyLateFee({
+      reservationId: reservation._id, userId: user._id, currency: 'EGP', idempotencyKey: key('late-fee-v2'),
+      returnedAt: reservation.returnedAt, endDate: reservation.endDate,
+    });
+  }
 
   const balanceMinor = await wallet.getBalanceMinor(user._id);
-  console.log(`Demo data ready for ${username}: balance EGP ${(balanceMinor / 100).toFixed(2)}, late fee ${result.replayed ? 'already existed' : 'created'}.`);
+  console.log(`Demo data ready for ${username}: balance EGP ${(balanceMinor / 100).toFixed(2)}, late fee ${existingFee ? 'already existed' : 'created'}.`);
   console.log('Open http://localhost:5173/account/wallet (logged in as that user).');
 }
 

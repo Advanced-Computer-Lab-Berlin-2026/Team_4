@@ -19,7 +19,8 @@ async function getBalanceMinor(userId, { session } = {}) {
 
 /**
  * Apply a signed change (+credit / -debit) to a user's wallet and write the ledger row.
- * Throws 402 if a debit would make the balance negative; nothing is written in that case.
+ * Throws 409 (conflict, as the team contract asks) if a debit would make the balance negative;
+ * nothing is written in that case.
  */
 async function applyChange({ userId, deltaMinor, type, reference, reservationId, operationId, note }, { session }) {
   if (!session) throw new Error('wallet.applyChange must run inside a transaction session');
@@ -31,7 +32,7 @@ async function applyChange({ userId, deltaMinor, type, reference, reservationId,
 
     const beforeMinor = toMinor(user.walletBalance);
     const afterMinor = beforeMinor + deltaMinor;
-    if (afterMinor < 0) throw new ApiError(402, 'Insufficient wallet balance');
+    if (afterMinor < 0) throw ApiError.conflict('Insufficient wallet balance');
 
     // Match the exact stored value (or a missing field for very old accounts) - that is the "compare" part.
     const expected = user.walletBalance === undefined ? { $exists: false } : user.walletBalance;

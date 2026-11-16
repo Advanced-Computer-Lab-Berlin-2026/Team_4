@@ -2,7 +2,7 @@
 
 Owner: Aly (Member 2). Requirements: **50, 51, 52, 77, 78, 81** + atomic ledger, payment idempotency and calculation audit (NFR 14), Stripe-only card capture (NFR 4).
 
-This file is the contract other members code against. Anything marked **(proposed)** still needs team confirmation; once agreed it should be copied into `docs/SPRINT2_CONTRACT.md` (Member 1).
+The **official** interface is the "Member 2 payment module" section of [`docs/SPRINT2_CONTRACT.md`](../SPRINT2_CONTRACT.md) (Member 1). This file explains how Member 2 implements it, the extra functions other members use, the HTTP API, policy values and status.
 
 ---
 
@@ -10,131 +10,137 @@ This file is the contract other members code against. Anything marked **(propose
 
 | Rule | What it means for you |
 |---|---|
-| Only Member 2 changes `User.walletBalance` | Never `$inc`/`$set` it yourself. Call a service below. |
-| Amounts in **integer minor units** (piastres) | `amountMinor: 2550` = EGP 25.50. Services return minor units; convert with `fromMinor()` only when saving to an existing EGP Number field. |
-| Every money call takes an **`idempotencyKey`** | Same key twice ⇒ the operation runs **once**; the second call returns the stored result with `replayed: true`. Same key with *different* inputs ⇒ `409`. Build keys from stable ids, e.g. `deposit:<reservationId>`, `late-fee:<reservationId>`. |
-| Services accept an optional **MongoDB `session`** | Pass your session to run the money change inside *your* transaction (e.g. checkout creating reservations). Without one, the service starts its own transaction. |
-| The browser never sends totals | Amounts come from server-side data (reservation snapshot, M6 quote, M8 tier price). |
-| Every calculation is audited | Each operation writes an `AuditLog` row: action, reservation id, timestamp, inputs, result. |
-| Insufficient funds never overdraw | Debits fail with `402 Insufficient wallet balance`; nothing is written. |
+| Only Member 2 changes `User.walletBalance` | Never `$inc`/`$set` it yourself. Call a payment function. |
+| Amounts in **integer minor units** (piastres) | `amountMinor: 2550` = EGP 25.50. Convert to EGP (`/ 100`) only when saving an existing EGP Number field. |
+| Every money call takes an **`idempotencyKey`** | Same key twice ⇒ runs **once**; the second call returns the stored result (`replayed: true`). Same key with *different* inputs ⇒ `409`. |
+| Pass your **MongoDB session** as the 2nd argument | `fn(input, session)` runs inside *your* transaction, so the money change commits or rolls back with your writes. Without a session the function starts its own transaction. |
+| The browser never sends totals | Amounts come from server data (M1 quote/reservation snapshot, M8 tier price). |
+| Every calculation is audited (NFR 14) | One `AuditLog` row per money change: action, reservation id, timestamp (`at`), inputs, result. |
+| Insufficient funds never overdraw | Debits fail with **`409 Insufficient wallet balance`**; nothing is written. |
 
 ---
 
-## 2. Policy values **(proposed defaults — confirm with M1/team)**
+## 2. Policy values **(proposed defaults — confirm with the team)**
 
-Kept in one file (`server/src/services/payments/config.js`) and exposed by `GET /api/payments/policy` so it is visible before payment.
+All in `server/src/services/payments/config.js`; public at `GET /api/payments/policy` so borrowers see them before paying.
 
 | Setting | Default | Notes |
 |---|---|---|
-| Full-refund window | `FREE_CANCELLATION_HOURS` = 48 (existing constant) | |
-| Refund reference point | reservation `startDate` | Hours between cancellation time and pickup start |
-| Refund ≥ 48 h before start | 100 % | |
-| Refund < 48 h before start | 50 % | Partial rate |
-| Refund after start | 0 % | M1 decides whether cancelling is allowed at all then |
-| Cancelled by lender / admin | 100 % | Borrower is never penalised for a lender cancellation |
-| Late-fee grace period | 1 hour after `endDate` | |
-| Late-fee rate | 10 % of the deposit per **started** day late | |
-| Late-fee cap | 100 % of the deposit | |
-| Late fee with low wallet | Charge what is available; record the rest as **outstanding**, collected automatically from the next wallet credit. No User schema change. | |
-| Receiver of late fees / forfeitures | Lender's wallet | |
-| Deposit return after card payment | Credited to the **wallet** (Req 52), not back to the card | |
+| Full-refund window | `FREE_CANCELLATION_HOURS` = 48 | Existing constant; M1 passes it as `freeCancellationHours` |
+| Refund reference point | the reservation's pickup date (`pickupDate` = `startDate`, UTC midnight) | Hours between cancellation time and pickup |
+| Refund ≥ 48 h before pickup | 100 % of the deposit | |
+| Refund < 48 h before pickup | **50 %** of the deposit | M1 forbids cancelling on/after the pickup date |
+| Lender rejects a request | 100 % of deposit **and** delivery fee | M1 calls `refundToWallet` |
+| Late-fee grace | **60 minutes** after the due time | M1 only calls `applyLateFee` for late returns (`returnTiming.isLateReturn`) |
+| Late-fee rate | **10 % of the deposit per started day** late | |
+| Late-fee cap | **100 %** of the deposit | |
+| Late fee with a low wallet | Charge what is available; record the rest as **outstanding** (`PaymentOperation.outstandingMinor`), collected automatically from the next wallet credit. No User schema change. | |
+| Receiver of forfeited deposit / late fee | Lender's wallet | **Open** |
+| Refunds of card payments | Always to the **wallet** (Req 52) | |
 
 ---
 
-## 3. Service contract (server-side functions other members call)
+## 3. Payment module (`server/src/services/payments/payment.js`)
 
-`require('../services/payments/payment')` — all functions are `async`, take `(input, { session } = {})`, and throw `ApiError` (`400` bad input, `402` insufficient funds, `404` not found, `409` key reused with different inputs / wrong state).
+Member 1's `services/sprint2/bootstrap.js` loads this file automatically. Missing functions make the related feature answer `503` (fails visibly, never fakes success).
 
-| Function | Called by | Input | Returns |
-|---|---|---|---|
-| `charge` | M1 checkout (wallet deposit), M8 membership (wallet) | `{ userId, amountMinor, currency:'EGP', purpose:'deposit'\|'membership', reference:{ type, id }, idempotencyKey }` | `{ operationId, chargedMinor, balanceMinor, replayed }` |
-| `createCardPayment` *(step 4)* | M1 checkout, M8 membership | same as `charge` | `{ operationId, clientSecret, paymentIntentId }` — the client confirms it with `StripePaymentForm` |
-| `releaseDeposit` | M5 good return, M3 after a "no damage" decision | `{ reservationId, idempotencyKey }` | `{ releasedMinor, balanceMinor, replayed }` |
-| `quoteCancellationRefund` | M1 cancel screen (show before confirming) | `{ reservationId, cancelledAt, cancelledByRole }` | `{ depositMinor, rate, refundMinor, hoursBeforeStart, rule }` (no money moves) |
-| `refundToWallet` | M1 cancellation, M1 checkout compensation | `{ reservationId, cancelledAt, cancelledByRole, idempotencyKey }` | `{ refundMinor, rate, rule, balanceMinor, replayed }` |
-| `settleForfeiture` | M3 damage decision / dispute revision | `{ reservationId, targetForfeitMinor, idempotencyKey }` | `{ forfeitedTotalMinor, deltaMinor, releasedMinor }` — applies only the **difference** from what was already forfeited; bounded by the held deposit |
-| `applyLateFee` | M5 return (called with the return time) | `{ reservationId, returnedAt, idempotencyKey }` | `{ lateFeeMinor, chargedMinor, outstandingMinor, daysLate }` |
-| `creditReferral` | M9 first completed reservation | `{ userId, amountMinor, referralId, idempotencyKey }` | `{ creditedMinor, balanceMinor, replayed }` |
+### Called by Member 1 (names fixed by `SPRINT2_CONTRACT.md`)
 
-Reservation fields (`deposit.status`, `payment.*`, `cancellation.refundAmount`, `lateFee`) are **written by M1's `reservationCommands`** using the values returned above (convert with `fromMinor`). Member 2 never saves a whole reservation.
+| Function | Called when | Input (main fields) | Returns | Status |
+|---|---|---|---|---|
+| `chargeWalletCheckout(input, session)` | Checkout paid by wallet (Req 50) | `attemptId, borrowerId, idempotencyKey, amountMinor, currency, expiresAt, lines[{ reservationId, itemId, title, amountMinor, deposit, fulfilment, startDate, endDate }]` | `{ chargedMinor, balanceMinor, operationId, replayed }` | ✅ Done |
+| `settleCancellation(input, session)` | Borrower cancels (Req 52, 81) | `reservationId, borrowerId, amountMinor, currency, cancelledAt, pickupDate, freeCancellationHours, idempotencyKey` | `{ refundMinor }` | Next |
+| `refundToWallet(input, session)` | Lender rejects (full refund) | `reservationId, userId, reference, currency, idempotencyKey, amountMinor, depositMinor, deliveryMinor` | `{ refundMinor }` | Next |
+| `releaseDeposit(input, session)` | Good return | same fields as `refundToWallet` | `{ releasedMinor }` | Next |
+| `applyLateFee(input, session)` | Late return (Req 77) | `reservationId, userId, reference, currency, idempotencyKey, returnedAt, endDate` | `{ feeMinor }` | Next |
+| `startCardPayment(input)` | Card checkout (Req 51) | checkout payment input | `{ state:'pending', redirectUrl }` | Blocked: `stripe` package |
+| `getCardPayment(input)` | Checkout status / reconcile | checkout payment input + `closeExpired` | `{ state:'pending'\|'failed'\|'paid', … }` | Blocked |
+| `recordCardCheckout(input, session)` | Verified card payment | checkout payment input + `paymentReference` | — | Blocked |
+| `verifyCheckoutWebhook(rawBody, signature)` | `POST /api/stripe-webhook` (mounted by M1) | raw Stripe event | attempt id or `null` | Blocked |
+| `refundFailedCheckout(input)` | Paid card checkout that cannot be booked | checkout payment input + `paymentReference` | — | Blocked |
 
-### Hooks Member 2 needs from others
+### Extra functions for other members
 
-| From | Hook | When Member 2 calls it |
-|---|---|---|
-| M1 | `onPaymentSucceeded({ reference, operationId, method }, { session })` | Verified Stripe webhook for a `deposit` payment |
-| M8 | `onMembershipPaid({ reference, operationId }, { session })` | Verified Stripe webhook for a `membership` payment |
+| Function | For | Input | Returns | Status |
+|---|---|---|---|---|
+| `charge(input, session)` | M8 membership paid by wallet | `userId, amountMinor, currency, purpose:'membership', reference:{ type:'membership', id }, idempotencyKey` | `{ chargedMinor, balanceMinor, operationId, replayed }` | ✅ Done |
+| `creditReferral(input, session)` | M9 referral reward (Req 99) | `userId, amountMinor, currency, referralId, idempotencyKey` | `{ creditedMinor, balanceMinor, operationId, replayed }` | ✅ Done |
+| `settleForfeiture(input, session)` | M3 damage decision / dispute revision | `reservationId, targetForfeitMinor, idempotencyKey` — applies only the **difference** from what was already forfeited, bounded by the held deposit | `{ forfeitedTotalMinor, deltaMinor, releasedMinor }` | Planned |
 
 ---
 
 ## 4. HTTP API
 
-All responses use `{ entity }` or `{ items, total, page, limit, pages }`; errors are `{ message, errors? }`. Members see only their own data.
+Responses use `{ entity }` or `{ items, total, page, limit, pages }`; errors are `{ message, errors? }`. Members see only their own data.
 
-| Method | Path | Access | Req | Request | Response |
-|---|---|---|---|---|---|
-| GET | `/api/account/wallet` | member | 36 | — | `{ balance, balanceMinor, currency, outstandingLateFeesMinor }` (extends Sprint 1) |
-| GET | `/api/wallet-ledger` | member | 36/78 | query `page`, `limit`, `type?` | `{ items:[{ _id, type, amount, amountMinor, balanceAfter, balanceAfterMinor, reference, note, createdAt }], total, page, limit, pages }` — own rows, newest first |
-| GET | `/api/payments/late-fees` | member | 78 | query `page`, `limit` | `{ items:[{ reservationId, itemTitle, daysLate, lateFeeMinor, chargedMinor, outstandingMinor, chargedAt }], total, page, limit, pages, outstandingTotalMinor }` |
-| GET | `/api/payments/policy` | public | 81/77 | — | `{ policy:{ freeCancellationHours, partialRefundPercent, lateFeePercentPerDay, lateFeeCapPercent, graceMinutes } }` |
-| GET | `/api/payments/operations/:id` *(step 4)* | member (own) | 51 | — | `{ operation:{ _id, status, purpose, amountMinor } }` — the client polls this after card confirmation; success only after the verified webhook |
-| POST | `/api/stripe-webhook` *(step 4)* | Stripe only (signature checked) | 51 | raw Stripe event | `{ received: true }` |
+| Method | Path | Access | Req | Request | Response | Status |
+|---|---|---|---|---|---|---|
+| GET | `/api/account/wallet` | member | 36 | — | `{ balance, balanceMinor, currency, outstandingLateFeesMinor }` | ✅ |
+| GET | `/api/wallet-ledger` | member | 36/78 | query `page`, `limit`, `type?` | `{ items:[{ _id, type, amount, amountMinor, balanceAfter, balanceAfterMinor, reservation, reference, note, createdAt }], total, page, limit, pages }` | ✅ |
+| GET | `/api/payments/late-fees` | member | 78 | query `page`, `limit` | `{ items:[{ _id, reservationId, itemTitle, dueAt, returnedAt, daysLate, lateFeeMinor, chargedMinor, outstandingMinor, chargedAt }], total, page, limit, pages, outstandingTotalMinor }` | ✅ |
+| GET | `/api/payments/policy` | public | 77/81 | — | `{ policy:{ currency, cancellation:{ freeCancellationHours, partialRefundPercent }, lateFee:{ graceMinutes, percentOfDepositPerDay, capPercentOfDeposit } } }` | ✅ |
+| POST | `/api/stripe-webhook` | Stripe only | 51 | raw signed event | `204` | Mounted by **M1** in `app.js`; calls `verifyCheckoutWebhook`. Member 2 does **not** add a route for it. |
 
-### Client components (imported by other owners)
+Checkout itself (`POST /api/checkout/quote`, `POST /api/checkout`, `GET /api/checkout/:id`) belongs to M1 and calls the module above.
 
-| Component | Props | Used by |
-|---|---|---|
-| `PaymentMethodPicker` | `{ amountMinor, value, onChange, disabled }` — shows wallet balance, disables "Wallet" if too low, shows the refund/late-fee policy | M1 `CheckoutPage`, M8 membership |
-| `StripePaymentForm` *(step 4)* | `{ clientSecret, operationId, onSuccess, onError }` — Stripe Elements only, card data never touches our server | M1 `CheckoutPage`, M8 membership |
-| `WalletLedger` | `{ pageSize? }` | Member 2 `WalletPage` |
+### Client components
 
-Client route (in `client/src/routes/sprint2/member2.routes.jsx`, wired by M1): `/account/late-fees` → `LateFeesPage` (member).
+| Component | Props | Used by | Status |
+|---|---|---|---|
+| `PaymentMethodPicker` | `{ amountMinor, methods, value, onChange, disabled, name? }` — wallet balance, "Wallet" disabled if too low, card note, policy summary | M1 `CheckoutPage` (replace its plain radios), M8 membership | ✅ Built |
+| `WalletLedger` | `{ pageSize? }` | Member 2 `WalletPage` | ✅ |
+
+Card payment uses a **Stripe-hosted page** (`redirectUrl`), so no card form is embedded in ShareShed and `StripePaymentForm` is not needed.
+
+Client route (in `client/src/routes/sprint2/member2.routes.jsx`, discovered automatically): `/account/late-fees` → `LateFeesPage` (member).
 
 ---
 
 ## 5. Data model changes (Member 2 models only)
 
-- **`PaymentOperation`** (new): one row per money operation. `idempotencyKey` (unique), `kind`, `purpose`, `user`, `reference`, `amountMinor`, `currency`, `status` (`pending`/`succeeded`/`failed`), `requestHash`, `result`, `stripePaymentIntentId`.
-- **`WalletTransaction`** (extended): adds `amountMinor`, `balanceAfterMinor`, `currency`, `operation`, `reference`. Existing `amount`/`balanceAfter` (EGP) kept for compatibility.
-- **`AuditLog`** (extended): adds `amountMinor`, `currency`, `operation`, `inputs`, `result`. Existing `details`/`amount` kept.
+- **`PaymentOperation`** (new): `idempotencyKey` (unique), `kind`, `purpose`, `user`, `reference{ type, id }`, `amountMinor`, `currency`, `status`, `requestHash`, `result`, `outstandingMinor`, `stripePaymentIntentId`.
+- **`WalletTransaction`** (extended): `amountMinor`, `balanceAfterMinor`, `currency`, `operation`, `reference`. `amount`/`balanceAfter` (EGP) kept.
+- **`AuditLog`** (extended): `amountMinor`, `currency`, `operation`, `inputs`, `result`. `details`/`amount` kept.
 
-No changes to `User` or `Reservation` are required.
+Reference types: `checkout`, `reservation`, `membership`, `referral`, `manual`. No changes to `User` or `Reservation` are needed.
 
 ---
 
-## 6. What Member 2 needs from others
+## 6. Needed from others
 
 | From | What | Why | Status |
 |---|---|---|---|
-| **M1** | Stage 0: packages `stripe` (server), `@stripe/stripe-js` + `@stripe/react-stripe-js` (client); in `server/src/app.js` add `app.use('/api/stripe-webhook', express.raw({ type: 'application/json' }))` **before** `express.json`; `STRIPE_WEBHOOK_SECRET` in `config/env.js` and both `.env.example` files; wire `member2.routes.jsx` + a "Late fees" nav link (`/account/late-fees`); a client test runner | Stripe (Req 51), Late fees page, client tests | Requested |
-| **M1** | `onPaymentSucceeded({ reference, operationId, method }, { session })` in `reservationCommands` | Verified card payment confirms the reservation | Requested |
-| **M1** | `reservationCommands` save Member 2's returned amounts (`deposit.status`, `cancellation.refundAmount`, `lateFee`, `payment.*`) | M1 is the only Reservation writer | Requested |
-| **M1** | Cancellation passes `cancelledAt` and `cancelledByRole` (`borrower` / `lender` / `admin`) to `refundToWallet` | Chooses the refund rate | Requested |
-| **M1** | Keep the Reservation fields below stable (rename = tell Member 2) | Member 2 reads them | Requested |
-| **M6** | Save the deposit quote on `reservation.deposit.amount` (EGP) when the reservation is created | Member 2 charges/refunds this snapshot, never recalculates | Requested |
-| **M6 + M1** | Decide whether the delivery fee is paid together with the deposit (then it is refunded with the same %) or separately | Refund amount | **Open decision** |
-| **M5** | Call `applyLateFee` and `releaseDeposit` with `returnedAt` on a good return | Days late, deposit release | Requested |
-| **M3** | Call `settleForfeiture` with `targetForfeitMinor` (total to keep) | Damage settlement deltas | Requested |
-| **M8** | `onMembershipPaid({ reference, operationId }, { session })`; pass `purpose:'membership'` and the membership id as `reference` | Card-paid memberships | Requested |
-| **M9** | Decide the referral reward amount; call `creditReferral` with `referralId` | Req 99 | **Open decision** |
+| **M1** | `stripe` package in `server/package.json` | Card payments (Req 51) | **Missing** |
+| **M1** | Client test runner (e.g. Vitest + Testing Library + jsdom) | `client/test/sprint2/member2.test.jsx` | **Missing** |
+| **M1** | "Late fees" nav link → `/account/late-fees` in `navLinks.js` | Req 78 discoverability | **Missing** |
+| **M1** | Use `PaymentMethodPicker` in `CheckoutPage` instead of the plain radios | Shows wallet balance and the policy before payment | Requested |
+| **M1** | Update `member1.test.js:214` — it expects wallet checkout to be unavailable "without Member 2"; Member 2's module now exists, so that scenario must pass `deps` with `payment: undefined` (or expect `['wallet']`) | Test now fails by design | Requested |
+| **M1** | Decide whether the delivery fee is refunded on **borrower cancellation** (today only the deposit is passed to `settleCancellation`) | Refund amount | **Open decision** |
+| **M3** | Call `settleForfeiture` with `targetForfeitMinor` | Damage settlement | Requested |
+| **M8** | Use `charge` (`purpose:'membership'`) / card functions for subscriptions | Req 85 | Requested |
+| **M9** | Decide the referral reward amount; call `creditReferral` | Req 99 | **Open decision** |
+| Done by M1 | Webhook mounted with raw body; `STRIPE_WEBHOOK_SECRET` in `env.js`; route modules auto-wired; `npm run test:sprint2` | | ✅ |
 
-### Reservation fields Member 2 reads (owned by M1, read-only for Member 2)
+### Reservation fields Member 2 reads (owned by M1)
 
-`_id`, `borrower`, `lender`, `status`, `startDate`, `endDate`, `returnedAt`, `deposit.amount`, `deposit.status`, `deposit.forfeited`, `payment.method`, `payment.stripePaymentIntentId`, `fulfilment.deliveryFee`. All exist in `server/src/models/Reservation.js` today; no schema change is needed.
+`_id`, `borrower`, `lender`, `status`, `startDate`, `endDate`, `returnedAt`, `deposit.amount`, `deposit.status`, `deposit.forfeited`, `payment.method`, `payment.stripePaymentIntentId`, `fulfilment.deliveryFee`, `checkoutAttempt`.
 
 ---
 
 ## 7. Testing
 
-Server tests: `server/test/sprint2/member2.test.js` (Node's built-in runner, no extra packages). They need a MongoDB **replica set** (Atlas is one):
+Server tests: `server/test/sprint2/member2.test.js` (Node's built-in runner). They need a MongoDB **replica set** (Atlas is one) and use their own temporary database:
 
 ```bash
-TEST_MONGO_URI="<your Atlas URI>" node --test server/test/sprint2/member2.test.js
+cd server
+TEST_MONGO_URI="<your Atlas URI>" node --test test/sprint2/member2.test.js
+# or all Sprint 2 tests:
+TEST_MONGO_URI="<your Atlas URI>" npm run test:sprint2
 ```
 
-The tests create and drop their own database (`member2_test_<pid>`), so your real data is untouched.
+They include end-to-end wallet checkouts through Member 1's real checkout code.
 
-**Demo data (dev only):** until M1's checkout and M5's returns exist, this fills one member's wallet history and a late fee through the real services, so the Wallet and Late fees pages have something to show. Safe to run twice (fixed idempotency keys):
+**Demo data (dev only):** fills one member's wallet history and a late fee through the real services, so the Wallet and Late fees pages have something to show. Safe to run twice:
 
 ```bash
 node server/test/sprint2/member2.demo.js member1

@@ -24,3 +24,13 @@
 .facts dd { margin: 0; font-weight: 600; }
 
 .empty { color: var(--muted); padding: 1rem 0; }
+
+/* PaymentMethodPicker */
+.picker { border: 1px solid var(--border); border-radius: var(--radius); padding: .75rem 1rem; margin: 0 0 1rem; }
+.picker legend { font-weight: 600; padding: 0 .25rem; }
+.option { display: flex; align-items: flex-start; gap: .6rem; padding: .6rem; border-radius: 8px; cursor: pointer; }
+.option:hover { background: #eef4ff; }
+.option input { margin-top: .3rem; width: 1.1rem; height: 1.1rem; flex: none; }
+.option:has(input:checked) { background: #eef4ff; outline: 2px solid var(--primary); }
+.optionDisabled { cursor: not-allowed; opacity: .6; }
+.optionDisabled:hover { background: none; }

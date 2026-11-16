@@ -15,7 +15,7 @@ const schema = new Schema(
     purpose: { type: String, enum: PURPOSES, required: true },
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     reference: {
-      type: { type: String, enum: ['reservation', 'membership', 'referral', 'manual'] },
+      type: { type: String, enum: ['checkout', 'reservation', 'membership', 'referral', 'manual'] },
       id: { type: Schema.Types.ObjectId },
     },
     amountMinor: { type: Number, required: true, min: 0 },

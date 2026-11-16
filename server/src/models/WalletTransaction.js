@@ -15,7 +15,7 @@ const schema = new Schema(
     currency: { type: String, default: 'EGP' },
     reservation: { type: Schema.Types.ObjectId, ref: 'Reservation' },
     reference: {
-      type: { type: String, enum: ['reservation', 'membership', 'referral', 'manual'] },
+      type: { type: String, enum: ['checkout', 'reservation', 'membership', 'referral', 'manual'] },
       id: { type: Schema.Types.ObjectId },
     },
     operation: { type: Schema.Types.ObjectId, ref: 'PaymentOperation', index: true },

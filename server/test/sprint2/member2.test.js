@@ -16,13 +16,19 @@ const PaymentOperation = require('../../src/models/PaymentOperation');
 const payment = require('../../src/services/payments/payment');
 const wallet = require('../../src/services/payments/wallet');
 const { COOKIE_NAME, signToken } = require('../../src/utils/tokens');
+const { Category, CheckoutAttempt, ReservationHold } = require('../../src/models');
 
 let server, base;
 const cookieFor = (user) => `${COOKIE_NAME}=${signToken(user._id)}`;
-async function get(path, user) {
-  const response = await fetch(`${base}/api${path}`, { headers: user ? { Cookie: cookieFor(user) } : {} });
+async function send(method, path, user, body) {
+  const response = await fetch(`${base}/api${path}`, {
+    method,
+    headers: { ...(user && { Cookie: cookieFor(user) }), ...(body && { 'Content-Type': 'application/json' }) },
+    ...(body && { body: JSON.stringify(body) }),
+  });
   return { status: response.status, data: await response.json() };
 }
+const get = (path, user) => send('GET', path, user);
 
 let n = 0;
 async function makeUser(walletBalance = 0) {
@@ -48,7 +54,8 @@ after(async () => {
   await mongoose.disconnect();
 });
 beforeEach(async () => {
-  await Promise.all([User.deleteMany({}), Item.deleteMany({}), Reservation.deleteMany({}), WalletTransaction.deleteMany({}), AuditLog.deleteMany({}), PaymentOperation.deleteMany({})]);
+  await Promise.all([User, Item, Category, Reservation, CheckoutAttempt, ReservationHold, WalletTransaction, AuditLog, PaymentOperation]
+    .map((model) => model.deleteMany({})));
 });
 
 /** A returned reservation of an item called `title` (test data; real ones come from M1's checkout). */
@@ -124,11 +131,11 @@ test('same key reused with a different amount is rejected (409)', async () => {
   assert.equal(await balanceOf(user), 9000);
 });
 
-test('insufficient funds are rejected (402) and nothing is written', async () => {
+test('insufficient funds are rejected (409) and nothing is written', async () => {
   const user = await makeUser(10);
   await assert.rejects(
     payment.charge({ userId: user._id, amountMinor: 1001, purpose: 'deposit', reference: reservationRef(), idempotencyKey: 'deposit:poor' }),
-    (err) => err.status === 402
+    (err) => err.status === 409 && /Insufficient/.test(err.message)
   );
   assert.equal(await balanceOf(user), 1000);
   assert.equal(await WalletTransaction.countDocuments({}), 0);
@@ -245,4 +252,102 @@ test('wallet, ledger and late-fee endpoints: guests get 401, admins get 403', as
     assert.equal((await get(path)).status, 401, `${path} guest`);
     assert.equal((await get(path, admin)).status, 403, `${path} admin`);
   }
+});
+
+// ---------------------------------------------------------------- Step 3: wallet checkout (Req 50) + policy
+
+const cartLines = (amounts) => amounts.map((amountMinor, i) => ({
+  reservationId: new mongoose.Types.ObjectId(), itemId: new mongoose.Types.ObjectId(), title: `Item ${i + 1}`,
+  amountMinor, deposit: { base: amountMinor / 100, categoryMultiplier: 1, tierDiscountPercent: 0, amount: amountMinor / 100 },
+  fulfilment: { method: 'pickup', deliveryFee: 0 },
+}));
+
+test('chargeWalletCheckout: one idempotent debit for the cart, one ledger + audit row per reservation', async () => {
+  const borrower = await makeUser(500);
+  const attemptId = new mongoose.Types.ObjectId();
+  const lines = cartLines([15000, 7550]);
+  const input = { attemptId, borrowerId: borrower._id, idempotencyKey: `checkout:${attemptId}`, amountMinor: 22550, currency: 'EGP', lines };
+
+  const first = await payment.chargeWalletCheckout(input);
+  const retry = await payment.chargeWalletCheckout(input);
+  assert.equal(first.chargedMinor, 22550);
+  assert.equal(retry.replayed, true);
+  assert.equal(await balanceOf(borrower), 50000 - 22550);
+
+  const ledger = await WalletTransaction.find({ user: borrower._id }).sort({ createdAt: 1 });
+  assert.deepEqual(ledger.map((t) => [String(t.reservation), t.amountMinor, t.type]),
+    lines.map((l) => [String(l.reservationId), -l.amountMinor, 'deposit_hold']));
+  const audits = await AuditLog.find({ action: 'deposit_charged' });
+  assert.equal(audits.length, 2);
+  assert.ok(audits.every((a) => a.inputs.method === 'wallet' && String(a.inputs.checkoutAttemptId) === String(attemptId)));
+});
+
+test('chargeWalletCheckout refuses a total that does not match its lines', async () => {
+  const borrower = await makeUser(500);
+  const attemptId = new mongoose.Types.ObjectId();
+  await assert.rejects(payment.chargeWalletCheckout({
+    attemptId, borrowerId: borrower._id, idempotencyKey: `checkout:${attemptId}`, amountMinor: 100, currency: 'EGP', lines: cartLines([15000]),
+  }), (err) => err.status === 400);
+  assert.equal(await balanceOf(borrower), 50000);
+});
+
+// End-to-end with Member 1's REAL checkout (it loads this payment module automatically).
+async function bookableItem(depositAmount) {
+  const lender = await User.create({
+    username: `m2_lender_${Date.now()}`, name: 'Lender', email: `lender${Date.now()}@example.com`, phone: `+2011${Date.now() % 1e8}`,
+    address: { street: '2 Test St', city: 'Cairo' }, passwordHash: 'not-used', lenderStatus: 'verified',
+  });
+  const category = await Category.create({ name: `Tools ${Date.now()}`, slug: `tools-${Date.now()}`, depositMultiplier: 1.5 });
+  return Item.create({ owner: lender._id, title: 'Pressure washer', category: category._id, description: 'Test', depositAmount });
+}
+const day = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+
+test('Req 50: checkout with method "wallet" debits the wallet once and creates the reservation', async () => {
+  const borrower = await makeUser(200); // EGP 200
+  const item = await bookableItem(100); // deposit 100 x multiplier 1.5 = EGP 150
+  const selection = { source: 'single', itemId: String(item._id), startDate: day(3), endDate: day(5) };
+
+  const quote = await send('POST', '/checkout/quote', borrower, selection);
+  assert.equal(quote.status, 200, JSON.stringify(quote.data));
+  assert.equal(quote.data.quote.amountMinor, 15000);
+  assert.ok(quote.data.quote.paymentMethods.includes('wallet'), 'wallet is offered now that Member 2 is present');
+
+  const body = { ...selection, method: 'wallet', operationKey: 'm2-wallet-checkout-0001', quoteHash: quote.data.quote.quoteHash };
+  const first = await send('POST', '/checkout', borrower, body);
+  const retry = await send('POST', '/checkout', borrower, body); // e.g. the user double-clicked
+  assert.equal(first.status, 200, JSON.stringify(first.data));
+  assert.deepEqual(retry.data.checkout.reservationIds, first.data.checkout.reservationIds);
+
+  const [reservationId] = first.data.checkout.reservationIds;
+  const reservation = await Reservation.findById(reservationId);
+  assert.deepEqual([reservation.payment.method, reservation.deposit.status, reservation.deposit.amount], ['wallet', 'held', 150]);
+  assert.equal(await balanceOf(borrower), 5000); // 200 - 150, charged exactly once
+  const ledger = await WalletTransaction.find({ user: borrower._id });
+  assert.equal(ledger.length, 1);
+  assert.equal(String(ledger[0].reservation), reservationId);
+  assert.equal(String((await AuditLog.findOne({ action: 'deposit_charged' })).reservation), reservationId);
+});
+
+test('Req 50: wallet checkout with too little balance is refused and books nothing', async () => {
+  const borrower = await makeUser(100); // EGP 100 < EGP 150
+  const item = await bookableItem(100);
+  const selection = { source: 'single', itemId: String(item._id), startDate: day(3), endDate: day(5) };
+  const quote = await send('POST', '/checkout/quote', borrower, selection);
+  const result = await send('POST', '/checkout', borrower, {
+    ...selection, method: 'wallet', operationKey: 'm2-wallet-checkout-0002', quoteHash: quote.data.quote.quoteHash,
+  });
+  assert.equal(result.status, 409);
+  assert.match(result.data.message, /Insufficient wallet balance/);
+  assert.equal(await Reservation.countDocuments({ item: item._id }), 0);
+  assert.equal(await balanceOf(borrower), 10000);
+  assert.equal(await PaymentOperation.countDocuments({}), 0);
+});
+
+test('GET /api/payments/policy is public and shows the refund and late-fee rules', async () => {
+  const { status, data } = await get('/payments/policy');
+  assert.equal(status, 200);
+  assert.equal(data.policy.currency, 'EGP');
+  assert.equal(data.policy.cancellation.freeCancellationHours, 48);
+  assert.equal(data.policy.cancellation.partialRefundPercent, 50);
+  assert.deepEqual(data.policy.lateFee, { graceMinutes: 60, percentOfDepositPerDay: 10, capPercentOfDeposit: 100 });
 });

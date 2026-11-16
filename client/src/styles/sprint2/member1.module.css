@@ -1,0 +1,76 @@
+.section {
+  max-width: 48rem;
+  margin-inline: auto;
+  padding: 1rem;
+  background: #fff;
+  color: #172723;
+  border: 1px solid #a1b6ad;
+  border-radius: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.section a {
+  color: #155447;
+  text-decoration: underline;
+}
+
+.section :is(a, input, button, select, textarea):focus-visible {
+  outline: 3px solid #145849;
+  outline-offset: 3px;
+}
+
+.form, .field, .list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.form {
+  margin-block: 1rem;
+}
+
+.form input:not([type='radio']), .form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.6rem;
+  color: inherit;
+  background: #fff;
+  border: 1px solid #58736a;
+  border-radius: 0.35rem;
+}
+
+.form textarea {
+  min-height: 5rem;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-block: 0.75rem;
+}
+
+.button {
+  width: fit-content;
+  max-width: 100%;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.8rem;
+  color: #fff;
+  background: #155447;
+  border: 1px solid #155447;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.button:disabled {
+  opacity: 0.75;
+  cursor: default;
+}
+
+.error {
+  color: #a01828;
+}
+
+.list {
+  padding-inline-start: 1.3rem;
+}

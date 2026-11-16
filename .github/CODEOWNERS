@@ -108,3 +108,33 @@
 /client/src/routes/ @member1
 /client/src/context/ @member1
 /client/src/styles/ @member1
+
+# Sprint 2 shared wiring and Member 1 booking files
+/server/src/app.js @member1
+/server/src/server.js @member1
+/server/src/models/Reservation.js @member1
+/server/src/models/ReservationHold.js @member1
+/server/src/models/BookingLock.js @member1
+/server/src/models/CheckoutAttempt.js @member1
+/server/src/models/ChatMessage.js @member1
+/server/src/services/reservations/ @member1
+/server/src/services/chat/ @member1
+/server/src/services/sprint2/ @member1
+/server/src/routes/reservations.routes.js @member1
+/server/src/routes/checkout.routes.js @member1
+/server/src/routes/reservationChat.routes.js @member1
+/server/src/controllers/reservations.controller.js @member1
+/server/src/controllers/checkout.controller.js @member1
+/server/src/controllers/reservationChat.controller.js @member1
+/server/test/sprint2/member1.test.js @member1
+/server/test/sprint2/load.js @member1
+/client/src/api/reservations.api.js @member1
+/client/src/api/checkout.api.js @member1
+/client/src/api/reservationChat.api.js @member1
+/client/src/pages/reservations/ReservePage.jsx @member1
+/client/src/pages/reservations/ReservationChatPage.jsx @member1
+/client/src/pages/checkout/CheckoutPage.jsx @member1
+/client/src/components/sprint2/m1/ @member1
+/docs/SPRINT2_CONTRACT.md @member1
+/docs/SPRINT2_OWNERSHIP.md @member1
+/docs/sprint2/member1.md @member1

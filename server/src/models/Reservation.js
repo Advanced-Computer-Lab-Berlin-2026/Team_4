@@ -8,6 +8,7 @@ const schema = new Schema(
   {
     item: { type: Schema.Types.ObjectId, ref: 'Item', required: true },
     borrower: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    checkoutAttempt: { type: Schema.Types.ObjectId, ref: 'CheckoutAttempt' },
     lender: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     startDate: { type: Date, required: true },
     endDate: { type: Date, required: true },   // current agreed return date (updated by approved extensions)

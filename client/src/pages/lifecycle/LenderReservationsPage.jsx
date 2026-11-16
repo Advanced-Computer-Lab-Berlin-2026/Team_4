@@ -119,7 +119,10 @@ export default function LenderReservationsPage() {
   return (
     <div className="container">
       <p className={s.backLink}><Link to="/lender/items">← My items</Link></p>
-      <h1 className={s.pageTitle}>Booking requests</h1>
+      <div className={s.dashHead}>
+        <h1 className={s.pageTitle}>Booking requests</h1>
+        <Link to="/lender/dashboard" className="btn btn-secondary">Dashboard</Link>
+      </div>
       <p className={`muted ${s.lead}`}>Every booking of your items: answer new requests, see what&apos;s coming up and what&apos;s out now.</p>
 
       {data && hasWaiting && tabKey !== 'action' && (

@@ -4,7 +4,7 @@
 // then the items grouped by the lender they are collected from. Each item can be re-dated (Req 48) or removed (Req 47).
 // Entries the server marks with a problem are shown first and are left out of the trip totals.
 // Checkout (Req 49) is Member 1's page (/checkout). It books every entry at once, so it stays disabled while any
-// entry needs attention.
+// entry needs attention or the list goes over the membership's limit on open bookings.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getErrorMessage } from '../../api/axios';
@@ -124,6 +124,8 @@ export default function BorrowListPage() {
   });
 
   const count = list?.count || 0;
+  const capacity = list?.capacity || null; // Member 1's checkout refuses the list if it goes over the membership limit
+  const overLimit = !!capacity && trip.ready.length > capacity.left;
   const max = list?.max || 10;
 
   return (
@@ -179,13 +181,22 @@ export default function BorrowListPage() {
                 <p className={`muted ${s.tripNote}`}>{plural(trip.problems.length, 'item')} that {trip.problems.length === 1 ? 'needs' : 'need'} attention {trip.problems.length === 1 ? 'is' : 'are'} not counted.</p>
               )}
               <p className={`muted ${s.tripNote}`}>Deposits are held when you check out. Your list doesn&apos;t reserve the items, so availability is checked again then.</p>
+              {capacity && (
+                <p className={`muted ${s.tripNote}`}>
+                  Your membership allows {plural(capacity.limit, 'open booking')}; you have {capacity.used}, so you can book {capacity.left} more.
+                </p>
+              )}
               <div className={s.summaryActions}>
-                {trip.problems.length === 0
+                {trip.problems.length === 0 && !overLimit
                   ? <Link to="/checkout" className="btn">Check out</Link>
                   : (
                     <>
                       <button type="button" className="btn" disabled aria-describedby="borrow-checkout-note">Check out</button>
-                      <p id="borrow-checkout-note" className={`muted ${s.tripNote}`}>Fix or remove the items that need attention before you check out.</p>
+                      <p id="borrow-checkout-note" className={`muted ${s.tripNote}`}>
+                        {trip.problems.length > 0
+                          ? 'Fix or remove the items that need attention before you check out.'
+                          : `Your membership lets you book ${plural(capacity.left, 'more item')}. Remove ${plural(trip.ready.length - capacity.left, 'item')} to check out.`}
+                      </p>
                     </>
                   )}
                 {count < max

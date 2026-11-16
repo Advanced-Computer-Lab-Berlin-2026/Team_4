@@ -14,7 +14,11 @@ const ApiError = require('../../utils/ApiError');
 const BorrowList = require('../../models/BorrowList');
 const Item = require('../../models/Item');
 const User = require('../../models/User');
-const { getAvailability } = require('../reservations/availability'); // Member 1: bookings and holds on an item (read only)
+const { Reservation, ReservationHold } = require('../../models');
+// Member 1's booking engine, read only: which statuses block dates, the overlap rule, and the membership limit.
+const { BLOCKING_STATUSES, overlapFilter } = require('../reservations/availability');
+const { getEntitlements } = require('../reservations/bookingRules');
+const { features } = require('../sprint2/bootstrap');
 
 const MAX_ENTRIES = 10;
 const HORIZON_DAYS = 365;        // the start date must be within 1 year from today
@@ -68,14 +72,17 @@ const lenderCanLend = (owner) => !!owner && owner.role === 'member' && owner.len
 /**
  * Why an entry can't be checked out right now, or null. These are the checks Member 1's checkout makes
  * (services/reservations/bookingRules.js), so "Check out" is only offered when checkout can succeed.
- * `context` = { trustScore, booked } (booked: these dates overlap a booking or hold on the item).
+ * `context` = { userId, owner (populated), trustScore, booked } (booked: the dates overlap someone else's booking or hold).
  */
 function problemOf(entry, item, context = {}) {
   if (!item || item.isArchived || item.moderationStatus !== 'ok') {
     return ['unavailable', 'This item is no longer available. Remove it from your list.'];
   }
-  if (item.owner && typeof item.owner === 'object' && 'lenderStatus' in item.owner && !lenderCanLend(item.owner)) {
+  if (context.checkLender && !lenderCanLend(item.owner)) { // owner populated: suspended, not verified, or deleted
     return ['unavailable', 'The lender can\'t lend this item right now. Remove it from your list.'];
+  }
+  if (context.userId && item.owner && String(item.owner._id) === String(context.userId)) {
+    return ['unavailable', 'This is your own item. Remove it from your list.'];
   }
   if (new Date(entry.startDate).getTime() < todayUtc()) return ['dates_passed', 'These dates have passed. Choose new dates.'];
   if (daysBetween(entry.startDate, entry.endDate) < 1) {
@@ -113,36 +120,65 @@ const toEntryDto = (entry, item, context) => {
   };
 };
 
-/** True when the entry's dates overlap a booking or hold on the item (Member 1's getAvailability). */
-async function isBooked(entry) {
+/**
+ * True when the entry's dates overlap someone else's booking or hold, by Member 1's rules (same statuses, same
+ * half-open overlap). My own temporary holds (a checkout of this list still being paid) don't count against me.
+ */
+async function isBooked(entry, userId) {
+  const range = { startDate: new Date(entry.startDate), endDate: new Date(entry.endDate) };
+  if (!(range.endDate > range.startDate)) return false; // flagged as invalid_dates already
+  const common = { item: entry.item, ...overlapFilter(range) };
+  const [booking, hold] = await Promise.all([
+    Reservation.exists({ ...common, status: { $in: BLOCKING_STATUSES } }),
+    ReservationHold.exists({ ...common, expiresAt: { $gt: new Date() }, borrower: { $ne: userId } }),
+  ]);
+  return !!(booking || hold);
+}
+
+/**
+ * The membership limit on open bookings that Member 1's checkout enforces (bookingRules.assertCapacity):
+ * { limit, used, left }, or null when my membership has no limit. My own holds count as used, like checkout does.
+ */
+async function capacityOf(user) {
+  if (!user) return null;
+  let entitlements;
   try {
-    const { available } = await getAvailability(entry.item, { startDate: entry.startDate, endDate: entry.endDate });
-    return !available;
+    entitlements = await getEntitlements(user, new Date(), null, features());
   } catch {
-    return false; // dates the engine can't read (e.g. an old end-before-start entry) are flagged by problemOf already
+    return null; // no membership information: checkout decides
   }
+  const limit = entitlements?.maxConcurrentReservations;
+  if (limit == null || !Number.isInteger(limit) || limit < 0) return null;
+  const [bookings, holds] = await Promise.all([
+    Reservation.countDocuments({ borrower: user._id, status: { $in: BLOCKING_STATUSES } }),
+    ReservationHold.countDocuments({ borrower: user._id, expiresAt: { $gt: new Date() } }),
+  ]);
+  const used = bookings + holds;
+  return { limit, used, left: Math.max(0, limit - used) };
 }
 
 /** GET my list with item details and each entry's problem. A member without a list gets an empty one. */
 async function getList(userId) {
   const [list, me] = await Promise.all([
     BorrowList.findOne({ user: userId }).lean(),
-    User.findById(userId).select('trustScore').lean(),
+    User.findById(userId).lean(),
   ]);
   const entries = list?.entries || [];
   const items = await Item.find({ _id: { $in: entries.map((e) => e.item) } }).select(ITEM_FIELDS)
     .populate('category', 'name slug').populate('owner', 'name role lenderStatus status').lean();
   const byId = new Map(items.map((i) => [String(i._id), i]));
+  const base = { userId, checkLender: true, trustScore: me?.trustScore ?? 0 };
   // Availability is only worth asking for entries that have no other problem.
-  const booked = await Promise.all(entries.map((e) => {
-    const item = byId.get(String(e.item));
-    return problemOf(e, item, { trustScore: me?.trustScore ?? 0 }) ? false : isBooked(e);
-  }));
+  const [booked, capacity] = await Promise.all([
+    Promise.all(entries.map((e) => (problemOf(e, byId.get(String(e.item)), base) ? false : isBooked(e, userId)))),
+    capacityOf(me),
+  ]);
   return {
     _id: list?._id || null,
     max: MAX_ENTRIES,
     count: entries.length,
-    entries: entries.map((e, n) => toEntryDto(e, byId.get(String(e.item)), { trustScore: me?.trustScore ?? 0, booked: booked[n] })),
+    capacity, // null = no membership limit
+    entries: entries.map((e, n) => toEntryDto(e, byId.get(String(e.item)), { ...base, booked: booked[n] })),
   };
 }
 

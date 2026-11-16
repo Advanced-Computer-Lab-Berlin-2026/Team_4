@@ -1,7 +1,7 @@
 // MY ITEMS - Owner: Member 5 - Requirements: 15, 21
 // Route: /lender/items   Access: lender   (already registered in src/routes/routeConfig.jsx - do NOT edit that file)
 // Shows ALL my items (incl. archived, Req 21) with a filter, and Archive / Unarchive on each one (Req 15).
-// Sprint 2: "Booking requests" links to the lender's bookings page (/lender/reservations, Req 56-60).
+// Sprint 2: "Dashboard" (/lender/dashboard, Req 106) and "Booking requests" (/lender/reservations, Req 56-60).
 // The filter and page are kept in the address (?status=archived&page=2) so reload and the Back arrow keep them.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -89,6 +89,7 @@ export default function MyItemsPage() {
       <div className="my-items-header">
         <h1>My items</h1>
         <div className="my-items-actions">
+          <Link to="/lender/dashboard" className="btn btn-secondary">Dashboard</Link>
           <Link to="/lender/reservations" className="btn btn-secondary">Booking requests</Link>
           <Link to="/lender/items/new" className="btn">New item</Link>
         </div>

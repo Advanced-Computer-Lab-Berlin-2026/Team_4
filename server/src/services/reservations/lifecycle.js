@@ -52,6 +52,17 @@ function overlap({ from, to }) {
   return f;
 }
 
+/** The item checks Member 1's `confirm` repeats (bookingRules.loadBookableItem): item still public, the borrower's
+ * trust score still high enough, the length still within the item's maximum. */
+function canStillBook(r) {
+  const item = r.item && typeof r.item === 'object' && r.item.title !== undefined ? r.item : null;
+  if (!item || item.isArchived || item.moderationStatus !== 'ok') return false;
+  const minTrust = Number(item.rules?.minTrustScore) || 0;
+  if (typeof r.borrower?.trustScore === 'number' && r.borrower.trustScore < minTrust) return false;
+  const max = Number(item.rules?.maxBorrowDays) || 0;
+  return !max || (new Date(r.endDate) - new Date(r.startDate)) / DAY_MS <= max;
+}
+
 /** Which buttons the current user may use right now. Same rules as Member 1's commands; the command still decides. */
 function actionsFor(r, user, { hasDamageCase }, now) {
   const isLender = String(r.lender?._id || r.lender) === String(user._id) && user.role === 'member' && user.lenderStatus === 'verified';
@@ -61,7 +72,7 @@ function actionsFor(r, user, { hasDamageCase }, now) {
   const extensionPending = flags.extensionStatus === 'pending';
   const depositHeld = !(r.deposit?.amount > 0) || r.deposit?.status === 'held';
   return {
-    approve: isLender && r.status === 'pending' && r.endDate > now,
+    approve: isLender && r.status === 'pending' && r.endDate > now && canStillBook(r), // Member 1's confirm re-checks these
     reject: isLender && r.status === 'pending' && depositHeld, // Member 1's reject refunds a held deposit
     pickup: isLender && r.status === 'confirmed' && r.startDate <= now && r.endDate > now,
     returnGood: isLender && active && !hasDamageCase && r.returnCondition !== 'damaged' && depositHeld,
@@ -112,8 +123,8 @@ function toDto(r, user, extra, now) {
 }
 
 const populate = (q) => q
-  .populate({ path: 'item', select: 'title photos category isArchived moderationStatus', populate: { path: 'category', select: 'name slug' } })
-  .populate('borrower', 'name')
+  .populate({ path: 'item', select: 'title photos category isArchived moderationStatus rules', populate: { path: 'category', select: 'name slug' } })
+  .populate('borrower', 'name trustScore') // trustScore is only used for the approve rule, never sent
   .populate('lender', 'name');
 
 async function damageCaseIds(ids) {

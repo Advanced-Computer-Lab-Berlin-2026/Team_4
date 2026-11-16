@@ -140,3 +140,36 @@
 @media (min-width: 640px) {
   .filterRow { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); }
 }
+
+/* ---------- Lending dashboard ---------- */
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.dashHead { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: .75rem; }
+.dashHead .btn { flex: 0 0 auto; }
+.dash { display: grid; gap: 1.5rem; }
+.dashSection { min-width: 0; }
+.statGrid { display: grid; gap: .75rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.stat { padding: .9rem 1rem; display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+.stat:first-child { grid-column: 1 / -1; }
+.statLabel { color: var(--muted); font-size: .92rem; font-weight: 600; }
+.statValue { font-size: 1.3rem; font-weight: 700; line-height: 1.2; overflow-wrap: normal; word-break: normal; font-variant-numeric: tabular-nums; } /* wraps only at the space after EGP */
+.statNote { font-size: .85rem; }
+@media (min-width: 640px) {
+  .statGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stat:first-child { grid-column: auto; }
+  .statValue { font-size: 1.6rem; }
+}
+@media (min-width: 900px) {
+  .statGrid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+.dashTable th, .dashTable td { vertical-align: middle; }
+.dashTable td, .num { font-variant-numeric: tabular-nums; }
+.num { text-align: right; white-space: nowrap; }
+.dashTable thead th.num { text-align: right; }
+.dashItem { font-weight: 600; min-width: 10rem; }
+.dashTable tbody th { background: var(--surface); } /* row names, not column headers */
+.dashItem a { color: var(--text); }
+.dashItem .badge { margin-left: .4rem; }
+.barCell { display: flex; align-items: center; gap: .6rem; min-width: 9rem; }
+.barValue { min-width: 1.5rem; text-align: right; font-weight: 600; }
+.barTrack { flex: 1; height: 8px; border-radius: 4px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; }
+.bar { display: block; height: 100%; border-radius: 4px; background: var(--primary); }

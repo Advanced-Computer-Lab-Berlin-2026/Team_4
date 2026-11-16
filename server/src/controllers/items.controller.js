@@ -189,7 +189,7 @@ const setArchived = async (req, archive) => {
     if (mine.isArchived) throw ApiError.conflict('Item is already archived');
     const open = await Reservation.countDocuments({ item: mine._id, status: { $in: OPEN_BOOKING_STATUSES } });
     if (open > 0) {
-      throw ApiError.conflict(`This item has ${open} open booking${open === 1 ? '' : 's'}. Archive it after ${open === 1 ? 'it finishes' : 'they finish'}.`);
+      throw ApiError.conflict(`This item has ${open} open booking${open === 1 ? '' : 's'} (a request, an upcoming or an active booking). Archive it after ${open === 1 ? 'it finishes' : 'they finish'}; you can decline requests in Booking requests.`);
     }
   }
   const update = archive

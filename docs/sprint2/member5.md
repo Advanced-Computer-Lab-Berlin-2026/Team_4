@@ -62,7 +62,7 @@ Conventions are the same as Sprint 1 ([`docs/API_CONTRACT.md`](../API_CONTRACT.m
 
 ### Archive rule change (Req 15, Sprint 1)
 
-`PATCH /api/items/:id/archive` now returns **`409`** "This item has open bookings. Archive it after they finish." while the item has any reservation in `pending`, `confirmed` or `active`. This stops borrowers from holding bookings for a hidden item. Unarchive is unchanged.
+`PATCH /api/items/:id/archive` now returns **`409`** "This item has 2 open bookings (a request, an upcoming or an active booking). Archive it after they finish; you can decline requests in Booking requests." (with the real number) while the item has any reservation in `pending`, `confirmed` or `active`. This stops borrowers from holding bookings for a hidden item. Unarchive is unchanged.
 
 ---
 
@@ -108,7 +108,7 @@ Conventions are the same as Sprint 1 ([`docs/API_CONTRACT.md`](../API_CONTRACT.m
 
 ```json
 {
-  "_id": "…", "max": 10, "count": 2,
+  "_id": "…", "max": 10, "count": 2, "capacity": { "limit": 5, "used": 3, "left": 2 },
   "entries": [
     {
       "_id": "…", "startDate": "2026-12-01", "endDate": "2026-12-03", "days": 2,
@@ -121,7 +121,9 @@ Conventions are the same as Sprint 1 ([`docs/API_CONTRACT.md`](../API_CONTRACT.m
 }
 ```
 
-`problem` is `null` for a valid entry, or one of `"unavailable"` (item archived or removed), `"dates_passed"` (start date is in the past), `"invalid_dates"` (the end date isn't after the start date, from a list saved before this rule), `"too_long"` (the lender lowered the item's maximum since it was added), `"trust_too_low"` (my trust score is below the item's `minTrustScore`) or `"booked"` (the dates overlap a booking or hold, from Member 1's `getAvailability`), with a readable `problemMessage`. `"unavailable"` also covers a lender who can no longer lend (suspended or not verified). These are exactly the checks Member 1's checkout makes, so **Check out** is offered only when it can succeed. If the item no longer exists, `item` is `null` and `problem` is `"unavailable"`.
+`problem` is `null` for a valid entry, or one of `"unavailable"` (item archived or removed), `"dates_passed"` (start date is in the past), `"invalid_dates"` (the end date isn't after the start date, from a list saved before this rule), `"too_long"` (the lender lowered the item's maximum since it was added), `"trust_too_low"` (my trust score is below the item's `minTrustScore`) or `"booked"` (the dates overlap a booking or hold, from Member 1's `getAvailability`), with a readable `problemMessage`. `"unavailable"` also covers a lender who can no longer lend (suspended, not verified or deleted) and, if it ever happens, my own item. `"booked"` ignores my own temporary holds (a checkout of this list still being paid). These are exactly the checks Member 1's checkout makes, so **Check out** is offered only when it can succeed. If the item no longer exists, `item` is `null` and `problem` is `"unavailable"`.
+
+`capacity` is the membership limit on open bookings that Member 1's checkout enforces (`bookingRules.getEntitlements` / `assertCapacity`): `used` counts my pending, confirmed and active bookings plus my temporary holds. It is `null` when my membership has no limit. The page disables **Check out** when the ready entries are more than `left`.
 
 ### 3.3 Model (`BorrowList.js`, Member 5)
 
@@ -183,6 +185,7 @@ Read-only. Lists reservations where I am the **borrower**.
 - `extension.requestId` is sent back when cancelling, approving or rejecting a request.
 - `item.available` is `false` when the item is archived or removed (its public page doesn't exist); `item` is `null` if it was deleted.
 - `actions.reject` also needs the deposit to be still held (or no deposit), like Member 1's `reject`.
+- `actions.approve` also needs what Member 1's `confirm` re-checks: the item still public, the borrower's trust score at least the item's `minTrustScore`, and the length within the item's `maxBorrowDays`.
 - `role` is the current user's side of this booking. `cancellation` is `{ at, reason }` for a cancelled booking, else `null`.
 - People are shown by name only (no email, phone or address). If the item was deleted, `item` is `null`.
 - **Errors:** `400` with the field for an unknown `status` (the filter word is `upcoming`, not `confirmed`), an invalid `from`/`to` date, or `to` before `from` · `401` not logged in · `403` admin · `404` not my booking (also for someone else's, so it isn't revealed).
@@ -273,7 +276,7 @@ All four call Member 1's `reservationCommands.extend({ actorId, reservationId, a
   "damage": { "upheld": 1, "completedLoans": 23, "rate": 0.043 },
   "needsAction": { "requests": 1, "extensions": 0 },
   "items": [
-    { "item": { "_id": "…", "title": "Cordless drill", "isArchived": false }, "timesLent": 9, "activeNow": 1,
+    { "item": { "_id": "…", "title": "Cordless drill", "isArchived": false, "photo": "…" }, "timesLent": 9, "activeNow": 1,
       "depositsCollected": 3600, "damageUpheld": 1 }
   ]
 }
@@ -282,8 +285,12 @@ All four call Member 1's `reservationCommands.extend({ actorId, reservationId, a
 **Definitions (proposed):**
 - **Items lent** (requirement wording): `loans.completed` is the number of completed reservations of my items; `loans.activeNow` is the number currently out (`active`). The `items` table breaks both down per item, including archived items.
 - **Total deposits collected:** the sum of `deposit.amount` over my items' reservations that took a deposit, so excluding `pending`, `cancelled` and `rejected`. Read from `Reservation`; no other service is needed. **Held now** (small extra line) is the sum for reservations whose `deposit.status` is `held`.
-- **Damage incident rate:** upheld damage reports ÷ completed loans. A report counts as upheld when its final amount (`resolution.finalForfeitAmount`, else `decision.forfeitAmount`) is above 0, the same rule Member 3 uses for trust. `0` when there are no completed loans.
-- **Period `30d`:** counts reservations completed, or with deposits taken, in the last 30 days. `activeNow`, `heldNow` and `needsAction` are always "right now".
+- **Damage incident rate:** upheld damage reports ÷ completed loans, rounded to 3 decimals. A report counts as upheld when it is `decided` or `resolved` **and** its final amount (`resolution.finalForfeitAmount`, else `decision.forfeitAmount`) is above 0, the same rule Member 3 uses for trust. Open and disputed cases don't count until they are settled. `0` when there are no completed loans.
+- **Items table:** every item of mine that has at least one booking (archived included), most lent first. `item` is `null` for a deleted item. Unbooked items aren't listed.
+- **Period `30d`:** loans completed in the last 30 days and deposits of bookings made in the last 30 days. Damage counts only for the loans completed in that period, so the rate compares the same loans and never exceeds 100%. `activeNow`, `heldNow` and `needsAction` are always "right now". Any other `period` → `400`.
+- **Access:** verified lenders only (`403` otherwise); only my own items' figures.
+
+**Page:** `/lender/dashboard`: an "All time | Last 30 days" switch, five figure cards, a "Waiting for your answer" box linking to Booking requests, and the per-item table (each row opens that item's bookings). Linked from **Dashboard** buttons on My items and Booking requests.
 
 Read-only queries on `Reservation` and `DamageReport`; the plan allows feature services to read other models.
 

@@ -1,0 +1,78 @@
+/* Sprint 2 - Member 5 feature styles (CSS module). Built only from the global tokens (docs/UI_README.md):
+   no hard-coded colours, mobile first, extra breakpoint only where the layout needs it. */
+
+/* ---------- shared: date pair (BorrowDateFields) ---------- */
+.dates { margin-bottom: .75rem; }
+.dateRow { display: grid; gap: 0 .75rem; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.dateRow > div { margin-bottom: .6rem; min-width: 0; }
+.dateSummary { margin: 0; }
+.badge { text-transform: none; }
+
+/* ---------- BorrowListButton (item details page) ---------- */
+.addBox { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.addTitle { margin: 0 0 .6rem; }
+.addState { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; margin: 0 0 .5rem; }
+.addNote { margin: .6rem 0; }
+
+/* ---------- Borrow list page ---------- */
+.pageTitle { margin-bottom: .25rem; }
+.lead { margin: 0 0 1rem; }
+.loadError { margin-bottom: 1rem; }
+.empty { padding: 1.5rem 0; }
+.empty p { margin: 0 0 .75rem; }
+
+.layout { display: grid; gap: 1.25rem; }
+.entries { display: grid; gap: 1.5rem; min-width: 0; }
+@media (min-width: 900px) {
+  .layout { grid-template-columns: minmax(0, 1fr) 320px; align-items: start; }
+  .summary { grid-column: 2; grid-row: 1; position: sticky; top: 4.5rem; }
+  .entries { grid-column: 1; grid-row: 1; }
+}
+
+/* trip summary */
+.summaryTitle { margin: 0 0 .5rem; }
+.capacity { margin: 0 0 .35rem; }
+.meter { height: 8px; border-radius: 999px; background: var(--border); overflow: hidden; margin-bottom: 1rem; }
+.meter span { display: block; height: 100%; border-radius: 999px; background: var(--primary); }
+.summaryFacts { margin: 0 0 .75rem; display: grid; gap: .45rem; }
+.summaryFacts > div { display: flex; justify-content: space-between; gap: 1rem; }
+.summaryFacts dt { color: var(--muted); font-size: .92rem; }
+.summaryFacts dd { margin: 0; font-weight: 600; text-align: right; }
+.summaryTotal { border-top: 1px solid var(--border); padding-top: .55rem; margin-top: .1rem; }
+.summaryTotal dd { font-size: 1.1rem; }
+.tripNote { margin: 0 0 .75rem; }
+.summaryActions { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+.summaryActions .btn { flex: 1 1 auto; }
+.summaryActions p { flex-basis: 100%; margin: 0; }
+
+/* groups and entries */
+.groupTitle { margin: 0; overflow-wrap: anywhere; }
+.groupNote { margin: .1rem 0 .6rem; overflow-wrap: anywhere; }
+.list { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+.entry { padding: .9rem 1rem; }
+.entryStale { border-left: 4px solid var(--warn); padding-left: calc(1rem - 3px); }
+.entryGone { border-left: 4px solid var(--danger); padding-left: calc(1rem - 3px); }
+.entryMain { display: flex; gap: .9rem; align-items: flex-start; }
+.thumb { flex: 0 0 auto; width: 88px; aspect-ratio: 4 / 3; border-radius: 8px; overflow: hidden; background: var(--bg); border: 1px solid var(--border); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; }
+.entryInfo { flex: 1; min-width: 0; }
+.entryTitle { margin: 0 0 .1rem; overflow-wrap: anywhere; }
+.entryTitle a { color: var(--text); }
+.problem { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .5rem; margin: .4rem 0 0; }
+.problemText { color: var(--text); font-size: .92rem; margin: 0; }
+.facts { margin: .75rem 0 0; display: grid; gap: .25rem; }
+.facts > div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: .5rem; align-items: baseline; }
+.facts dt { color: var(--muted); font-size: .92rem; }
+.facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.days { white-space: nowrap; }
+.entryActions { margin-top: .9rem; }
+.editor { margin-top: .9rem; padding-top: .9rem; border-top: 1px solid var(--border); }
+@media (min-width: 640px) {
+  /* wider screens: photo on the left; title, facts beside it; buttons and the date editor across the bottom */
+  .entry { display: grid; grid-template-columns: 132px minmax(0, 1fr); column-gap: .9rem; align-items: start; }
+  .entryMain { display: contents; }
+  .thumb { width: 132px; grid-column: 1; grid-row: 1 / span 2; }
+  .entryInfo { grid-column: 2; grid-row: 1; }
+  .facts { grid-column: 2; grid-row: 2; margin-top: .5rem; }
+  .entryActions, .editor { grid-column: 1 / -1; }
+}

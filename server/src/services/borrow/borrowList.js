@@ -2,9 +2,11 @@
  * BORROW LIST SERVICE - Owner: Member 5 - Requirements: 46, 47, 48
  * Contract: docs/sprint2/member5.md §3
  *
- * The list is a draft, not a hold on the items: checkout (Member 1, Req 49) re-checks everything.
- * Member 1's checkout reads and clears it only through getCheckoutEntries() and removeEntries().
- * Dates are whole days in UTC, the end date included (1-3 Dec = 3 days).
+ * The list is a draft, not a hold on the items. Member 1's checkout (Req 49) reads BorrowList itself, re-checks every
+ * entry and removes the checked-out entries that still match their id, item and dates (docs/sprint2/member5.md §3.4),
+ * so every write here is field-scoped ($push, $set on entries.$, $pull).
+ * Dates are whole days in UTC. The end date is the return day and is not counted (1-3 Dec = 2 days), the same
+ * rule as Member 1's checkout and reservations (docs/SPRINT2_CONTRACT.md: half-open [startDate, endDate)).
  */
 const mongoose = require('mongoose');
 const ApiError = require('../../utils/ApiError');
@@ -13,7 +15,7 @@ const Item = require('../../models/Item');
 
 const MAX_ENTRIES = 10;
 const HORIZON_DAYS = 365;        // the start date must be within 1 year from today
-const MAX_DAYS_WITHOUT_RULE = 365; // longest borrow when the item sets no maxBorrowDays
+const MAX_DAYS_WITHOUT_RULE = 365; // longest borrow (in days) when the item sets no maxBorrowDays
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -22,7 +24,7 @@ const ITEM_FIELDS = 'title photos category depositAmount owner pickup rules isAr
 const fieldError = (field, message) => ApiError.badRequest(message, [{ field, message }]);
 const todayUtc = () => { const n = new Date(); return Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()); };
 const toDay = (date) => new Date(date).toISOString().slice(0, 10);
-const daysBetween = (start, end) => Math.round((new Date(end) - new Date(start)) / DAY_MS) + 1; // inclusive
+const daysBetween = (start, end) => Math.round((new Date(end) - new Date(start)) / DAY_MS); // end date = return day, not counted
 
 /** "2026-12-01" -> Date at UTC midnight, or null if it isn't a real calendar date (e.g. 2026-02-30). */
 function parseDay(value) {
@@ -41,7 +43,7 @@ function checkDates(item, startDate, endDate) {
   const today = todayUtc();
   if (start.getTime() < today) throw fieldError('startDate', 'The start date can\'t be in the past');
   if (start.getTime() > today + HORIZON_DAYS * DAY_MS) throw fieldError('startDate', 'Pick a start date within the next year');
-  if (end < start) throw fieldError('endDate', 'The end date must be on or after the start date');
+  if (end <= start) throw fieldError('endDate', 'The end date must be after the start date');
   const max = item.rules?.maxBorrowDays || MAX_DAYS_WITHOUT_RULE;
   if (daysBetween(start, end) > max) {
     throw fieldError('endDate', `This item can be borrowed for at most ${max} day${max === 1 ? '' : 's'}`);
@@ -63,6 +65,9 @@ function problemOf(entry, item) {
     return ['unavailable', 'This item is no longer available. Remove it from your list.'];
   }
   if (new Date(entry.startDate).getTime() < todayUtc()) return ['dates_passed', 'These dates have passed. Choose new dates.'];
+  if (daysBetween(entry.startDate, entry.endDate) < 1) {
+    return ['invalid_dates', 'The end date must be after the start date. Choose new dates.']; // saved before the end-date rule changed
+  }
   const max = item.rules?.maxBorrowDays || MAX_DAYS_WITHOUT_RULE;
   if (daysBetween(entry.startDate, entry.endDate) > max) {
     return ['too_long', `This item can now be borrowed for at most ${max} day${max === 1 ? '' : 's'}. Shorten the dates.`];
@@ -153,36 +158,7 @@ async function removeEntry(user, entryId) {
   return getList(user._id);
 }
 
-// ---------- For Member 1's checkout (Req 49) ----------
-
-/** Entries that can be checked out now (no problem): [{ entryId, itemId, startDate, endDate }] as Dates. */
-async function getCheckoutEntries(userId, { session } = {}) {
-  const list = await BorrowList.findOne({ user: userId }).session(session || null).lean();
-  if (!list) return [];
-  const items = await Item.find({ _id: { $in: list.entries.map((e) => e.item) } }).select(ITEM_FIELDS).session(session || null).lean();
-  const byId = new Map(items.map((i) => [String(i._id), i]));
-  return list.entries
-    .filter((e) => !problemOf(e, byId.get(String(e.item))))
-    .map((e) => ({ entryId: e._id, itemId: e.item, startDate: e.startDate, endDate: e.endDate }));
-}
-
-/**
- * Remove only the given entries (the lines that were checked out), inside the caller's transaction.
- * Returns how many entries were actually removed (not "documents modified": the list's updatedAt changes on every save).
- */
-async function removeEntries(userId, entryIds, { session } = {}) {
-  const ids = entryIds.map((id) => new mongoose.Types.ObjectId(id));
-  const before = await BorrowList.findOneAndUpdate(
-    { user: userId, 'entries._id': { $in: ids } },
-    { $pull: { entries: { _id: { $in: ids } } } },
-    { new: false, projection: { 'entries._id': 1 }, session: session || null },
-  ).lean();
-  if (!before) return 0;
-  const wanted = new Set(ids.map(String));
-  return before.entries.filter((e) => wanted.has(String(e._id))).length;
-}
-
 module.exports = {
-  getList, addEntry, updateEntryDates, removeEntry, getCheckoutEntries, removeEntries,
+  getList, addEntry, updateEntryDates, removeEntry,
   MAX_ENTRIES, HORIZON_DAYS, MAX_DAYS_WITHOUT_RULE,
 };

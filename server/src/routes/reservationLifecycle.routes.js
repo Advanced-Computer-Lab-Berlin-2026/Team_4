@@ -26,6 +26,7 @@ const reservationIdParam = param('id').isMongoId().withMessage('Invalid reservat
 router.patch('/:id/approve', protect, requireVerifiedLender, reservationIdParam, validate, c.approve);
 router.patch('/:id/reject', protect, requireVerifiedLender, reservationIdParam, validate, c.reject);
 router.patch('/:id/pickup', protect, requireVerifiedLender, reservationIdParam, validate, c.pickup); // Req 59
+router.patch('/:id/return', protect, requireVerifiedLender, reservationIdParam, validate, c.markReturned); // Req 60
 router.get('/:id', ...member, param('id').isMongoId().withMessage('Invalid reservation'), validate, c.getOne); // Req 53
 
 module.exports = router;

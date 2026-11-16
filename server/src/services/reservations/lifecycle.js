@@ -10,6 +10,7 @@ const ApiError = require('../../utils/ApiError');
 const { Reservation, DamageReport } = require('../../models');
 const { lifecycleFlags } = require('./returnTiming'); // Member 1's labels for stuck reservations
 const reservationCommands = require('./reservationCommands'); // Member 1: the only writer of reservation status
+const { features } = require('../sprint2/bootstrap'); // Member 1's loader for other members' optional modules
 const { parsePagination, paginated } = require('../../utils/pagination');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -119,9 +120,25 @@ function toDto(r, user, extra, now) {
       decidedAt: r.extension?.decidedAt || null,
     },
     flags: { approvalOverdue: flags.approvalOverdue, pickupMissed: flags.pickupMissed, returnOverdue: flags.returnOverdue },
+    lateFeeIfReturnedNow: r.status === 'active' ? lateFeeNow(r, now) : null,
     actions: actionsFor(r, user, extra, now),
     createdAt: r.createdAt,
   };
+}
+
+/**
+ * The late fee a return right now would cost, from Member 2's calculateLateFee (pure arithmetic, no money moves):
+ * EGP number, 0 within his grace time or without a deposit, or null while his payment module isn't installed.
+ */
+function lateFeeNow(r, now) {
+  const calc = features().payment?.calculateLateFee;
+  if (typeof calc !== 'function') return null;
+  try {
+    const { feeMinor } = calc({ depositMinor: Math.round((Number(r.deposit?.amount) || 0) * 100), endDate: r.endDate, returnedAt: now });
+    return Number.isFinite(feeMinor) ? feeMinor / 100 : null;
+  } catch {
+    return null;
+  }
 }
 
 const populate = (q) => q
@@ -261,4 +278,13 @@ async function markPickedUp(user, id) {
   return getOne(user, id);
 }
 
-module.exports = { listMine, listLending, lendingItems, getOne, decide, markPickedUp, parseFilters, STATUS_FILTERS, MAX_REASON };
+/**
+ * Req 60: the lender records a return in good condition (Member 1's `return`: completes the booking, releases the
+ * deposit and applies any late fee through Member 2, recalculates trust, sends events). Refused while a damage case exists.
+ */
+async function markReturned(user, id) {
+  await reservationCommands.transition({ actorId: user._id, reservationId: id, action: 'return', expectedStatus: 'active' });
+  return getOne(user, id);
+}
+
+module.exports = { listMine, listLending, lendingItems, getOne, decide, markPickedUp, markReturned, parseFilters, STATUS_FILTERS, MAX_REASON };

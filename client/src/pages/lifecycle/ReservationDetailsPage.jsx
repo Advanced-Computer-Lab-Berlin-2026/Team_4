@@ -1,7 +1,7 @@
 // RESERVATION DETAILS - Owner: Member 5 - Requirements: 53 (and the screen for 56-60, 74, 75 in later parts)
 // Route: /reservations/:id   Access: member (the borrower or the lender of this booking; the server checks)
 // Status, progress, dates, deposit, the other person and any extension request. The lender answers a pending request
-// here (Req 56) and marks the pickup (Req 59); return and extensions come in Parts 12-13. Messages and cancellation are Member 1's page (/my-reservations/:id).
+// here (Req 56), marks the pickup (Req 59) and the return (Req 60); extensions come in Part 13. Messages and cancellation are Member 1's page (/my-reservations/:id).
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { getErrorMessage } from '../../api/axios';
@@ -12,6 +12,7 @@ import Alert from '../../components/common/Alert';
 import ReservationTimeline from '../../components/sprint2/m5/ReservationTimeline';
 import RequestAnswer from '../../components/sprint2/m5/RequestAnswer';
 import PickupButton from '../../components/sprint2/m5/PickupButton';
+import ReturnActions from '../../components/sprint2/m5/ReturnActions';
 import { dayCount, showDay, showRange } from '../../components/sprint2/m5/borrowDates';
 import { OPEN_STATUSES, depositText, labelsOf, nextStep, statusOf } from '../../components/sprint2/m5/reservationText';
 import s from '../../styles/sprint2/member5.module.css';
@@ -112,6 +113,16 @@ export default function ReservationDetailsPage() {
           <div className="card-body">
             <h2 id="res-pickup-title" className={s.cardTitle}>{r.fulfilment?.method === 'delivery' ? 'Handover' : 'Pickup'}</h2>
             <PickupButton reservation={r} onStale={(message) => { setNotice(''); setProblem(message); refresh(); }}
+              onDone={(updated, message) => { setR(updated); setProblem(''); setNotice(message); }} />
+          </div>
+        </section>
+      )}
+
+      {lender && r.status === 'active' && (
+        <section className={`card ${s.answerCard}`} aria-labelledby="res-return-title">
+          <div className="card-body">
+            <h2 id="res-return-title" className={s.cardTitle}>Return</h2>
+            <ReturnActions reservation={r} onStale={(message) => { setNotice(''); setProblem(message); refresh(); }}
               onDone={(updated, message) => { setR(updated); setProblem(''); setNotice(message); }} />
           </div>
         </section>

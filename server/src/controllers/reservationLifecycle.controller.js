@@ -39,3 +39,8 @@ exports.reject = asyncHandler(async (req, res) => {
 exports.pickup = asyncHandler(async (req, res) => {
   res.json({ reservation: await lifecycle.markPickedUp(req.user, req.params.id) });
 });
+
+/** PATCH /api/reservation-lifecycle/:id/return - Req 60 - returned in good condition (Member 1's return) */
+exports.markReturned = asyncHandler(async (req, res) => {
+  res.json({ reservation: await lifecycle.markReturned(req.user, req.params.id) });
+});

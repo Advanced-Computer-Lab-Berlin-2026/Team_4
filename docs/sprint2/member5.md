@@ -227,7 +227,9 @@ Read-only. Lists reservations where I am the **borrower**.
 
 **PATCH `/:id/return`** — good return (Req 60). The command refuses it while a damage case is open, stamps `returnedAt` and `completedAt`, **releases the deposit**, applies any late fee (Member 2), recalculates trust for both people (Member 3) and queues the completion events (Member 9). An early return is allowed.
 
-**Damaged return (Req 61, Member 3):** not an endpoint of mine. While the reservation is `active`, the lender's page shows **Report damage**, a link to Member 3's form `/damage-reports/new?reservation=<id>`. Submitting that form records the return (`returnDamaged`) and opens the case in one transaction; the deposit stays held for the admin's decision.
+**Return page (Req 60):** **Returned in good condition** on the details page and the Booking requests card, with a confirm box naming the deposit going back and, when Member 2's module is installed, the late fee (`reservation.lateFeeIfReturnedNow`, from his `calculateLateFee`; `null` until then, `0` within his 60-minute grace or without a deposit). Until Member 2 merges, a return with a deposit or a late return is answered `503` by Member 1's command and the page shows that message.
+
+**Damaged return (Req 61, Member 3):** not an endpoint of mine. While the reservation is `active`, the lender's page shows **Report damage**, a link to Member 3's form `/damage-reports/new?reservation=<id>`, only once that route is registered in the app (so it is never a broken link). Submitting that form records the return (`returnDamaged`) and opens the case in one transaction; the deposit stays held for the admin's decision.
 
 **Unanswered and stuck reservations:** nothing changes them automatically (shared contract). Pages show `flags`; a lender can still reject an overdue pending request, and an overdue active reservation can still be returned (late fee applies).
 

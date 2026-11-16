@@ -1,13 +1,27 @@
-/** SPRINT 2 model - defined now so the schema is stable and Sprint 1 code can reference it. Not used by Sprint 1 features. */
 const mongoose = require('mongoose');
 const { Schema } = mongoose;
+
 const schema = new Schema(
   {
-    code: { type: String, required: true, unique: true, uppercase: true, trim: true },
+    code: {
+      type: String, required: true, unique: true, uppercase: true, trim: true,
+      match: /^[A-Z0-9][A-Z0-9_-]{0,79}$/,
+    },
     discountType: { type: String, enum: ['percent', 'fixed'], required: true },
-    discountValue: { type: Number, required: true, min: 0 }, // % off the deposit, or fixed EGP
-    maxRedemptions: Number,
-    redemptionCount: { type: Number, default: 0 },
+    discountValue: {
+      type: Number, required: true,
+      validate: {
+        validator(value) {
+          return Number.isFinite(value) && value > 0 &&
+            (this.discountType !== 'percent' || value <= 100) &&
+            Number.isSafeInteger(Math.round(value * 100)) && Math.round(value * 100) / 100 === value;
+        },
+        message: 'Enter a positive discount with at most two decimal places',
+      },
+    },
+    maxRedemptions: { type: Number, min: 1, validate: Number.isSafeInteger },
+    redemptionCount: { type: Number, default: 0, min: 0, validate: Number.isSafeInteger },
+    onePerMember: { type: Boolean, default: false },
     validFrom: Date,
     validUntil: Date,
     isActive: { type: Boolean, default: true },
@@ -15,4 +29,5 @@ const schema = new Schema(
   },
   { timestamps: true }
 );
+
 module.exports = mongoose.model('PromoCode', schema);

@@ -44,10 +44,16 @@ async function charge({ userId, amountMinor, currency, purpose, reference, idemp
   }, opts);
 }
 
-/** creditReferral - M9 rewards the referrer on the referred user's first completed reservation (Req 99). */
-async function creditReferral({ userId, amountMinor, currency, referralId, idempotencyKey }, opts) {
+/**
+ * creditReferral - M9 rewards the referrer on the referred user's first completed reservation (Req 99).
+ * input: { userId, amountMinor, currency, reference: 'referral:<referralId>', idempotencyKey }
+ * (also accepted: reference { type: 'referral', id } or referralId)
+ */
+async function creditReferral({ userId, amountMinor, currency, reference: ref, referralId, idempotencyKey }, opts) {
   assertAmountMinor(amountMinor);
-  const reference = { type: 'referral', id: referralId };
+  const referralRef = typeof ref === 'string' ? ref.replace(/^referral:/, '') : ref?.id ?? referralId;
+  const reference = { type: 'referral', id: referralRef };
+  if (ref && typeof ref === 'object' && ref.type !== 'referral') throw ApiError.badRequest("reference.type must be 'referral'");
   checkReference(reference);
 
   return runOperation({ idempotencyKey, kind: 'referral_credit', purpose: 'referral', userId, reference, amountMinor, currency }, async ({ session, operation }) => {
@@ -60,7 +66,7 @@ async function creditReferral({ userId, amountMinor, currency, referralId, idemp
       userId,
       amountMinor,
       operationId: operation._id,
-      inputs: { amountMinor, referralId },
+      inputs: { amountMinor, referralId: referralRef },
       result: { creditedMinor: amountMinor, balanceAfterMinor: balanceMinor },
     }, { session });
 
@@ -132,6 +138,8 @@ module.exports = {
   settleCancellation: refund.settleCancellation,
   refundToWallet: refund.refundToWallet,
   releaseDeposit: refund.releaseDeposit,
+  // Req 62 / 64 - damage decisions (Member 3); dispute refunds go through refundToWallet with reference 'damage:<reportId>'
+  settleForfeiture: refund.settleForfeiture,
   // Req 77 - late fees (lateFee.js)
   applyLateFee: lateFee.applyLateFee,
   calculateLateFee: lateFee.calculateLateFee,

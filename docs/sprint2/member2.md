@@ -31,6 +31,9 @@ All in `server/src/services/payments/config.js`; public at `GET /api/payments/po
 | Refund ≥ 48 h before pickup | 100 % of the deposit | |
 | Refund < 48 h before pickup | **50 %** of the deposit | M1 forbids cancelling on/after the pickup date |
 | Lender rejects a request | 100 % of deposit **and** delivery fee | M1 calls `refundToWallet` |
+| Admin damage decision (Req 62) | The admin's amount is kept (max = held deposit), the rest goes back to the borrower | M3 calls `settleForfeiture` |
+| Dispute lowers the amount (Req 64) | Only the difference is refunded to the borrower and taken back from the lender (up to the lender's balance; any gap is recorded in the audit) | M3 calls `refundToWallet` with `reference: 'damage:<reportId>'` |
+| A deposit is settled once | A good-condition release and a damage decision can't both happen for one reservation (409) | — |
 | Late-fee grace | **60 minutes** after the due time | M1 only calls `applyLateFee` for late returns (`returnTiming.isLateReturn`) |
 | Late-fee rate | **10 % of the deposit per started day** late | |
 | Late-fee cap | **100 %** of the deposit | |
@@ -52,6 +55,8 @@ Member 1's `services/sprint2/bootstrap.js` loads this file automatically. Missin
 | `settleCancellation(input, session)` | Borrower cancels (Req 52, 81) | `reservationId, borrowerId, amountMinor, currency, cancelledAt, pickupDate, freeCancellationHours, idempotencyKey` | `{ refundMinor, ratePercent, rule, forfeitedMinor, paidToLenderMinor }` | ✅ Done |
 | `refundToWallet(input, session)` | Lender rejects (full refund) | `reservationId, userId, reference, currency, idempotencyKey, amountMinor, depositMinor, deliveryMinor` | `{ refundMinor }` | ✅ Done |
 | `releaseDeposit(input, session)` | Good return | same fields as `refundToWallet` | `{ releasedMinor }` | ✅ Done |
+| `settleForfeiture(input, session)` | M3 damage decision (Req 62) | `reservationId, amountMinor` (to keep, 0 allowed)`, idempotencyKey: 'damage:<reportId>:decision'`; session as 2nd arg **or** inside the input | `{ forfeitedMinor, releasedMinor, paidToLenderMinor }` | ✅ Done |
+| `refundToWallet(input, session)` — dispute form | M3 dispute resolution (Req 64) | `userId, amountMinor, reference: 'damage:<reportId>', idempotencyKey: 'damage:<reportId>:resolution'` (no `reservationId`) | `{ refundMinor, takenFromLenderMinor }` | ✅ Done |
 | `applyLateFee(input, session)` | Late return (Req 77) | `reservationId, userId, reference, currency, idempotencyKey, returnedAt, endDate` | `{ feeMinor, chargedMinor, outstandingMinor, daysLate }` | ✅ Done |
 | `startCardPayment(input)` | Card checkout (Req 51) | checkout payment input | `{ state:'pending', redirectUrl }` | Blocked: `stripe` package |
 | `getCardPayment(input)` | Checkout status / reconcile | checkout payment input + `closeExpired` | `{ state:'pending'\|'failed'\|'paid', … }` | Blocked |
@@ -66,8 +71,7 @@ Member 1's `services/sprint2/bootstrap.js` loads this file automatically. Missin
 | `charge(input, session)` | M8 membership paid by wallet | `userId, amountMinor, currency, purpose:'membership', reference:{ type:'membership', id }, idempotencyKey` | `{ chargedMinor, balanceMinor, operationId, replayed }` | ✅ Done |
 | `quoteCancellationRefund(input)` | M1 / UI: show the refund before cancelling (no money moves) | `amountMinor, cancelledAt, pickupDate, freeCancellationHours?` | `{ ratePercent, rule, refundMinor, forfeitedMinor, hoursBeforePickup }` | ✅ Done |
 | `calculateLateFee(input)` | UI / M5: show the fee a late return would cost (no money moves) | `depositMinor, endDate, returnedAt` | `{ feeMinor, daysLate, minutesLate, capped }` | ✅ Done |
-| `creditReferral(input, session)` | M9 referral reward (Req 99) | `userId, amountMinor, currency, referralId, idempotencyKey` | `{ creditedMinor, balanceMinor, operationId, replayed }` | ✅ Done |
-| `settleForfeiture(input, session)` | M3 damage decision / dispute revision | `reservationId, targetForfeitMinor, idempotencyKey` — applies only the **difference** from what was already forfeited, bounded by the held deposit | `{ forfeitedTotalMinor, deltaMinor, releasedMinor }` | Planned |
+| `creditReferral(input, session)` | M9 referral reward (Req 99). Also exported from `wallet.js`, where M9's code loads it | `userId, amountMinor, currency, reference: 'referral:<referralId>'` (or `referralId`), `idempotencyKey` | `{ creditedMinor, balanceMinor, operationId, replayed }` | ✅ Done |
 
 ---
 
@@ -118,9 +122,9 @@ Reference types: `checkout`, `reservation`, `membership`, `referral`, `manual`. 
 | **M1** | Use `PaymentMethodPicker` in `CheckoutPage` instead of the plain radios | Shows wallet balance and the policy before payment | Requested |
 | **M1** | Update `member1.test.js:214` — it expects wallet checkout to be unavailable "without Member 2"; Member 2's module now exists, so that scenario must pass `deps` with `payment: undefined` (or expect `['wallet']`) | Test now fails by design | Requested |
 | **M1** | Decide whether the delivery fee is refunded on **borrower cancellation** (today only the deposit is passed to `settleCancellation`) | Refund amount | **Open decision** |
-| **M3** | Call `settleForfeiture` with `targetForfeitMinor` | Damage settlement | Requested |
+| **M3** | Already matches: `settleForfeiture({ reservationId, amountMinor, idempotencyKey, session })` and `refundToWallet({ userId, amountMinor, reference: 'damage:<id>', ... })`. Please also set the reservation's `deposit.status` / `deposit.forfeited` after the decision (Member 2 does not write `Reservation`) | Damage settlement | Matches M3's code |
 | **M8** | Use `charge` (`purpose:'membership'`) / card functions for subscriptions | Req 85 | Requested |
-| **M9** | Decide the referral reward amount; call `creditReferral` | Req 99 | **Open decision** |
+| **M9** | Already matches: `creditReferral({ userId, amountMinor: 10000, currency, reference: 'referral:<id>', idempotencyKey })` from `wallet.js`. Reward EGP 100 (M9's md) | Req 99 | Matches M9's code |
 | Done by M1 | Webhook mounted with raw body; `STRIPE_WEBHOOK_SECRET` in `env.js`; route modules auto-wired; `npm run test:sprint2` | | ✅ |
 
 ### Reservation fields Member 2 reads (owned by M1)

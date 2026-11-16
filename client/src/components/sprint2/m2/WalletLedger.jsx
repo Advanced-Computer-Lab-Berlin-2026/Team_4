@@ -13,7 +13,7 @@ import styles from '../../../styles/sprint2/member2.module.css';
 export const LEDGER_LABELS = {
   deposit_hold: 'Deposit paid',
   deposit_release: 'Deposit returned',
-  refund: 'Cancellation refund',
+  refund: 'Refund',
   late_fee: 'Late fee',
   forfeit: 'Deposit kept for damage',
   lender_payout: 'Received from a borrower',

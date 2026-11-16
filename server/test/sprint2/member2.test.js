@@ -525,3 +525,83 @@ test('Req 77: returning within the grace period costs nothing but is still audit
   assert.equal((await AuditLog.findOne({ action: 'late_fee_applied' })).result.feeMinor, 0);
   assert.equal((await get('/payments/late-fees', borrower)).data.total, 0); // zero fees are not listed
 });
+
+// ---------------------------------------------------------------- Member 9 referral + Member 3 damage settlement
+
+test("Req 99: creditReferral works the way Member 9 calls it (from wallet.js, reference 'referral:<id>'), once", async () => {
+  const referrer = await makeUser(0);
+  const referralId = new mongoose.Types.ObjectId();
+  const call = () => require('../../src/services/payments/wallet').creditReferral({
+    userId: referrer._id, amountMinor: 10000, currency: 'EGP', reference: `referral:${referralId}`, idempotencyKey: `referral:${referralId}:first-completion`,
+  });
+  await call();
+  const again = await call(); // retry
+  assert.equal(again.replayed, true);
+  assert.equal(await balanceOf(referrer), 10000);
+  const row = await WalletTransaction.findOne({ user: referrer._id });
+  assert.equal(row.type, 'referral_credit');
+  assert.equal(String(row.reference.id), String(referralId));
+  await assert.rejects(payment.creditReferral({ userId: referrer._id, amountMinor: 100, reference: 'referral:not-an-id', idempotencyKey: 'ref:bad' }), (e) => e.status === 400);
+});
+
+/** Member 3's adapter: settleForfeiture({ reservationId, amountMinor, idempotencyKey, session }) inside its own transaction. */
+const decide = (reservation, amountMinor, key = `damage:R1:decision`) => mongoose.connection.transaction((session) =>
+  payment.settleForfeiture({ reservationId: reservation._id, amountMinor, idempotencyKey: key, session }));
+const resolveDispute = (borrower, amountMinor, report = 'R1') => mongoose.connection.transaction((session) =>
+  payment.refundToWallet({ userId: borrower._id, amountMinor, reference: `damage:${report}`, idempotencyKey: `damage:${report}:resolution`, session }));
+
+test('Req 62: a damage decision keeps part of the deposit for the lender and returns the rest, exactly once', async () => {
+  const borrower = await makeUser(0);
+  const reservation = await paidReservation({ borrower, status: 'completed', startIn: -5, deposit: 400 });
+  await decide(reservation, 15000);
+  await decide(reservation, 15000); // retry
+
+  assert.equal(await balanceOf(borrower), 25000); // 400 - 150 kept
+  assert.equal(await wallet.getBalanceMinor(reservation.lender), 15000);
+  const audit = await AuditLog.findOne({ action: 'deposit_forfeited' });
+  assert.deepEqual([audit.result.forfeitedMinor, audit.result.releasedMinor, audit.result.paidToLenderMinor], [15000, 25000, 15000]);
+  assert.equal(await AuditLog.countDocuments({ action: 'deposit_forfeited' }), 1);
+});
+
+test('Req 62: keeping 0 returns the whole deposit; keeping more than the deposit is refused', async () => {
+  const borrower = await makeUser(0);
+  const reservation = await paidReservation({ borrower, status: 'completed', startIn: -5, deposit: 100 });
+  await assert.rejects(decide(reservation, 10001), (e) => e.status === 400);
+  await decide(reservation, 0);
+  assert.equal(await balanceOf(borrower), 10000);
+  assert.equal(await wallet.getBalanceMinor(reservation.lender), 0);
+});
+
+test('a deposit is settled once: no damage decision after a good-condition release, and a failed decision rolls back', async () => {
+  const borrower = await makeUser(0);
+  const reservation = await paidReservation({ borrower, status: 'completed', startIn: -5, deposit: 100 });
+  await payment.releaseDeposit({ reservationId: reservation._id, userId: borrower._id, currency: 'EGP', idempotencyKey: 'rel:1', amountMinor: 10000 });
+  await assert.rejects(decide(reservation, 5000), (e) => e.status === 409);
+  assert.equal(await balanceOf(borrower), 10000);
+  assert.equal(await PaymentOperation.countDocuments({ kind: 'forfeiture' }), 0); // nothing left behind
+});
+
+test('Req 64: a dispute that lowers the amount refunds only the difference, takes it back from the lender, once', async () => {
+  const borrower = await makeUser(0);
+  const reservation = await paidReservation({ borrower, status: 'completed', startIn: -5, deposit: 400 });
+  await decide(reservation, 15000);                 // kept 150, borrower gets 250 back
+  await resolveDispute(borrower, 10000);            // final 50 -> refund 100
+  await resolveDispute(borrower, 10000);            // retry
+
+  assert.equal(await balanceOf(borrower), 35000);
+  assert.equal(await wallet.getBalanceMinor(reservation.lender), 5000);
+  const audit = await AuditLog.findOne({ action: 'damage_dispute_refunded' });
+  assert.equal(audit.result.takenFromLenderMinor, 10000);
+  assert.equal(await AuditLog.countDocuments({ action: 'damage_dispute_refunded' }), 1);
+});
+
+test('Req 64: a dispute refund can never exceed what was kept, and needs a decision first', async () => {
+  const borrower = await makeUser(0);
+  const reservation = await paidReservation({ borrower, status: 'completed', startIn: -5, deposit: 400 });
+  await assert.rejects(resolveDispute(borrower, 100), (e) => e.status === 409); // no decision yet
+  await decide(reservation, 15000);
+  await assert.rejects(resolveDispute(borrower, 15001), (e) => e.status === 400);
+  const stranger = await makeUser(0);
+  await assert.rejects(resolveDispute(stranger, 100), (e) => e.status === 400);
+  assert.equal(await balanceOf(borrower), 25000);
+});

@@ -72,4 +72,8 @@ async function applyChange({ userId, deltaMinor, type, reference, reservationId,
 let creditHook = null;
 function setCreditHook(fn) { creditHook = fn; }
 
-module.exports = { getBalanceMinor, applyChange, setCreditHook };
+// Member 9's referral code loads creditReferral from THIS file (docs/sprint2/member9.md). The real function lives in
+// payment.js; it is loaded on call, because payment.js itself requires wallet.js (a top-level require would be circular).
+const creditReferral = (...args) => require('./payment').creditReferral(...args);
+
+module.exports = { getBalanceMinor, applyChange, setCreditHook, creditReferral };

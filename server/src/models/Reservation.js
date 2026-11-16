@@ -2,7 +2,14 @@
 const mongoose = require('mongoose');
 const { RESERVATION_STATUS, DEPOSIT_STATUS, DELIVERY_STATUS } = require('../config/constants');
 const { Schema } = mongoose;
-const photoRef = new Schema({ url: String, path: String, takenAt: { type: Date, default: Date.now } }, { _id: false });
+const photoRef = new Schema({
+  path: { type: String, required: true },
+  takenAt: { type: Date, default: Date.now },
+  uploadedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  originalName: { type: String, required: true },
+  mimeType: { type: String, enum: ['image/jpeg', 'image/png'], required: true },
+  size: { type: Number, min: 1, required: true },
+});
 
 const schema = new Schema(
   {
@@ -28,9 +35,17 @@ const schema = new Schema(
     },
     pickedUpAt: Date,
     returnedAt: Date,
+    completedAt: Date,
+    returnCondition: { type: String, enum: ['good', 'damaged'] },
+    rejectionReason: { type: String, trim: true, maxlength: 500 },
     conditionPhotos: { pickup: [photoRef], return: [photoRef] },
 
-    extension: { requestedEndDate: Date, status: { type: String, enum: ['none', 'pending', 'approved', 'rejected'], default: 'none' }, decidedAt: Date },
+    extension: {
+      requestId: Schema.Types.ObjectId,
+      requestedEndDate: Date,
+      status: { type: String, enum: ['none', 'pending', 'approved', 'rejected', 'cancelled'], default: 'none' },
+      decidedAt: Date,
+    },
     cancellation: { at: Date, by: { type: Schema.Types.ObjectId, ref: 'User' }, reason: String, refundAmount: Number },
     lateFee: { type: Number, default: 0 },
     remindersSent: { dueSoon: { type: Boolean, default: false } },

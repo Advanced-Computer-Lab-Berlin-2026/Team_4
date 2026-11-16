@@ -6,7 +6,7 @@ process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'disposable-member1-integration';
 const mongoose = require('mongoose');
 const app = require('../../src/app');
-const { User, Category, Item, Reservation, ReservationHold, CheckoutAttempt, BorrowList, MembershipTier } = require('../../src/models');
+const { User, Category, Item, Reservation, ReservationHold, CheckoutAttempt, BorrowList, MembershipTier, DamageReport } = require('../../src/models');
 const checkout = require('../../src/services/reservations/checkout');
 const { cancel } = require('../../src/services/reservations/cancellation');
 const commands = require('../../src/services/reservations/reservationCommands');
@@ -167,8 +167,12 @@ test('approval of an overlapping extension fails and late cancellation is reject
   const adjacentEnd = new Date(Date.parse(range.endDate) + 86400000).toISOString().slice(0, 10);
   await Reservation.create({ item: tool.id, borrower: other.id, lender: lender.id,
     startDate: range.endDate, endDate: adjacentEnd, status: 'confirmed' });
-  await commands.extend({ actorId: borrower.id, reservationId: active.id, action: 'request', endDate: adjacentEnd });
-  await assert.rejects(commands.extend({ actorId: lender.id, reservationId: active.id, action: 'approve' }), { status: 409 });
+  const requested = await commands.extend({
+    actorId: borrower.id, reservationId: active.id, action: 'request', endDate: adjacentEnd,
+  });
+  await assert.rejects(commands.extend({
+    actorId: lender.id, reservationId: active.id, action: 'approve', requestId: requested.extension.requestId,
+  }), { status: 409 });
   assert.equal(+(await Reservation.findById(active.id)).endDate, Date.parse(range.endDate));
   const past = await item('Past pickup');
   const pastReservation = await Reservation.create({ item: past.id, borrower: borrower.id, lender: lender.id,
@@ -309,4 +313,176 @@ test('late paid card result compensates a booking it can no longer fulfill', asy
   assert.equal((await checkout.reconcileCard(first.id, deps)).status, 'failed');
   assert.equal(refunds, 1);
   assert.equal(await Reservation.countDocuments({ item: tool.id }), 1);
+});
+
+async function lifecycleFixture(status, fields = {}) {
+  const tool = await item('Lifecycle drill');
+  return Reservation.create({
+    item: tool._id, lender: lender._id, borrower: borrower._id, status, ...range, ...fields,
+  });
+}
+
+function lenderAction(record, action, fields = {}, deps = {}) {
+  return commands.transition({ actorId: lender._id, reservationId: record._id, action, ...fields }, deps);
+}
+
+test('good return releases the held deposit, recalculates both users and emits completion once', async () => {
+  const record = await lifecycleFixture('active', { deposit: { amount: 100, status: 'held' } });
+  const recalculated = [];
+  const emitted = [];
+  let settlements = 0;
+  const deps = {
+    payment: {
+      async releaseDeposit(input, session) {
+        assert(session.inTransaction());
+        assert.equal(input.amountMinor, 10000);
+        assert.equal(input.idempotencyKey, 'reservation:' + record.id + ':release');
+        settlements++;
+      },
+    },
+    trust: {
+      async recalculateTrust(userId, { session }) {
+        assert.equal((await Reservation.findById(record._id).session(session)).status, 'completed');
+        recalculated.push(userId);
+      },
+    },
+    events: { async enqueueEvent(type) { emitted.push(type); } },
+  };
+  const updated = await lenderAction(record, 'return', { expectedStatus: 'active' }, deps);
+  await lenderAction(record, 'return', { expectedStatus: 'active' }, deps);
+  assert.equal(updated.returnCondition, 'good');
+  assert.equal(updated.deposit.status, 'released');
+  assert.equal(+updated.completedAt, +updated.returnedAt);
+  assert.equal(settlements, 1);
+  assert.deepEqual(recalculated, [borrower.id, lender.id]);
+  assert.deepEqual(emitted, ['reservation_completed', 'availability_changed']);
+});
+
+test('paid rejection rolls back when settlement is unavailable and refunds in full on retry', async () => {
+  const record = await lifecycleFixture('pending', {
+    deposit: { amount: 50, status: 'held' }, fulfilment: { method: 'delivery', deliveryFee: 20 },
+  });
+  await assert.rejects(lenderAction(record, 'reject'), { status: 503 });
+  assert.equal((await Reservation.findById(record._id)).status, 'pending');
+  let refunds = 0;
+  const deps = { payment: { async refundToWallet(input, session) {
+    assert(session.inTransaction());
+    assert.equal(input.userId, borrower.id);
+    assert.equal(input.amountMinor, 7000);
+    assert.equal(input.depositMinor, 5000);
+    assert.equal(input.deliveryMinor, 2000);
+    refunds++;
+  } } };
+  const rejected = await lenderAction(record, 'reject', { reason: ' Unavailable ' }, deps);
+  await lenderAction(record, 'reject', {}, deps);
+  assert.equal(rejected.status, 'rejected');
+  assert.equal(rejected.rejectionReason, 'Unavailable');
+  assert.equal(rejected.deposit.status, 'refunded');
+  assert.equal(refunds, 1);
+});
+
+test('damaged return retains the deposit and rolls back if its open case was not created', async () => {
+  const record = await lifecycleFixture('active', { deposit: { amount: 100, status: 'held' } });
+  await assert.rejects(lenderAction(record, 'returnDamaged', { beforeCommit: async () => {} }), { status: 409 });
+  assert.equal((await Reservation.findById(record._id)).status, 'active');
+  const result = await lenderAction(record, 'returnDamaged', { beforeCommit: async (returned, session) => {
+    assert.equal((await Reservation.findById(record._id).session(session)).returnCondition, 'damaged');
+    await DamageReport.create([{
+      reservation: record._id, item: record.item, reportedBy: lender._id,
+      borrower: borrower._id, description: 'Handle was damaged on return.',
+    }], { session });
+    assert(returned.completedAt);
+  } });
+  assert.equal(result.deposit.status, 'held');
+  assert.equal(result.status, 'completed');
+  await assert.rejects(lenderAction(record, 'return'), { status: 409 });
+  assert.equal(await DamageReport.countDocuments({ reservation: record._id }), 1);
+});
+
+test('returns at the UTC deadline are on time; later returns are charged through Member 2', async () => {
+  const { isLateReturn } = require('../../src/services/reservations/returnTiming');
+  const due = new Date('2026-11-15T00:00:00.000Z');
+  assert.equal(isLateReturn(due, due), false);
+  assert.equal(isLateReturn(new Date(+due + 1), due), true);
+  const record = await lifecycleFixture('active', { startDate: new Date(+due - 86400000), endDate: due });
+  let calls = 0;
+  const deps = { payment: { async applyLateFee(input, session) {
+    assert(session.inTransaction());
+    assert(input.returnedAt > input.endDate);
+    calls++;
+    return { feeMinor: 175 };
+  } } };
+  const returned = await lenderAction(record, 'return', {}, deps);
+  await lenderAction(record, 'return', {}, deps);
+  assert.equal(returned.lateFee, 1.75);
+  assert.equal(calls, 1);
+});
+
+test('borrower cancels only their current extension and expired requests cannot be approved', async () => {
+  const record = await lifecycleFixture('active');
+  const newEndDate = new Date(Date.parse(range.endDate) + 86400000).toISOString().slice(0, 10);
+  const request = () => commands.extend({
+    actorId: borrower.id, reservationId: record.id, action: 'request', endDate: newEndDate,
+  });
+  const first = await request();
+  const firstId = first.extension.requestId;
+  const cancelInput = { actorId: borrower.id, reservationId: record.id, action: 'cancel', requestId: firstId };
+  await assert.rejects(commands.extend({ ...cancelInput, actorId: lender.id }), { status: 403 });
+  assert.equal((await commands.extend(cancelInput)).extension.status, 'cancelled');
+  const second = await request();
+  await assert.rejects(commands.extend(cancelInput), { status: 409 });
+  assert.equal((await Reservation.findById(record._id)).extension.status, 'pending');
+  await Reservation.updateOne({ _id: record._id }, { startDate: '2026-11-14', endDate: '2026-11-15' });
+  const expired = await Reservation.findById(record._id);
+  assert.equal(commands.reservationView(expired).extensionStatus, 'expired');
+  assert.equal(commands.reservationView(expired).returnOverdue, true);
+  await assert.rejects(commands.extend({
+    actorId: lender.id, reservationId: record.id, action: 'approve', requestId: second.extension.requestId,
+  }), { status: 409 });
+});
+
+test('condition photos have stable private metadata and spoofed images are rejected', async () => {
+  const express = require('express');
+  const fs = require('node:fs/promises');
+  const sharp = require('sharp');
+  const { uploadConditionPhotos, fileInfo } = require('../../src/middleware/upload');
+  const uploadApp = express();
+  const written = [];
+  uploadApp.post('/photos', uploadConditionPhotos, async (req, res) => {
+    written.push(...req.files.map((file) => file.path));
+    res.json(req.files.map(fileInfo));
+  });
+  uploadApp.use((error, req, res, next) => res.status(error.status || 400).json({ message: error.message }));
+  const listener = await new Promise((resolve) => {
+    const instance = uploadApp.listen(0, '127.0.0.1', () => resolve(instance));
+  });
+  const send = async (bytes, name, count = 1) => {
+    const form = new FormData();
+    for (let index = 0; index < count; index++) {
+      form.append('photos', new Blob([bytes], { type: 'image/png' }), name);
+    }
+    return fetch('http://127.0.0.1:' + listener.address().port + '/photos', { method: 'POST', body: form });
+  };
+  try {
+    const png = await sharp({
+      create: { width: 2, height: 2, channels: 3, background: 'white' },
+    }).png().toBuffer();
+    const good = await send(png, 'evidence.png');
+    assert.equal(good.status, 200);
+    const [info] = await good.json();
+    assert.match(info.path, /^private\/condition-photos\//);
+    assert.equal(info.url, undefined);
+    assert.equal((await fetch(base + '/uploads/' + info.path)).status, 404);
+    assert.equal((await send('not an image', 'fake.png')).status, 400);
+    assert.equal((await send(png, 'wrong.pdf')).status, 400);
+    assert.equal((await send(png, 'too-many.png', 6)).status, 400);
+    const record = await lifecycleFixture('active', { conditionPhotos: {
+      pickup: [{ ...info, uploadedBy: lender._id }, { ...info, uploadedBy: lender._id }],
+    } });
+    assert.notEqual(String(record.conditionPhotos.pickup[0]._id), String(record.conditionPhotos.pickup[1]._id));
+    assert.equal(record.conditionPhotos.pickup[0].url, undefined);
+  } finally {
+    await new Promise((resolve) => listener.close(resolve));
+    await Promise.all(written.map((file) => fs.unlink(file)));
+  }
 });

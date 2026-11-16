@@ -1,9 +1,12 @@
-const { Reservation, ReservationHold } = require('../../models');
+const { Types } = require('mongoose');
+const { Reservation, ReservationHold, DamageReport } = require('../../models');
 const ApiError = require('../../utils/ApiError');
 const { bookingKeys, transactBooking } = require('./bookingLock');
 const { normalizeRange, objectId } = require('./availability');
 const { loadActor, getEntitlements, assertCapacity, loadBookableItem } = require('./bookingRules');
-const { features, enqueueReservationEvent } = require('../sprint2/bootstrap');
+const { CURRENCY } = require('../../config/constants');
+const { isLateReturn, lifecycleFlags } = require('./returnTiming');
+const { features, requireFeature, enqueueReservationEvent } = require('../sprint2/bootstrap');
 
 const participantFilter = (actorId) => ({ $or: [{ borrower: actorId }, { lender: actorId }] });
 
@@ -15,6 +18,9 @@ function reservationView(reservation) {
     startDate: reservation.startDate, endDate: reservation.endDate, status: reservation.status,
     depositAmount: reservation.deposit?.amount ?? 0, refundAmount: reservation.cancellation?.refundAmount,
     fulfilmentMethod: reservation.fulfilment?.method || 'pickup',
+    returnedAt: reservation.returnedAt, completedAt: reservation.completedAt || reservation.returnedAt,
+    returnCondition: reservation.returnCondition, rejectionReason: reservation.rejectionReason,
+    ...lifecycleFlags(reservation),
   };
 }
 
@@ -44,20 +50,88 @@ async function withReservation(params, work) {
   }, session);
 }
 
-const lenderCommands = {
-  confirm: { from: ['pending'], to: 'confirmed' },
-  reject: { from: ['pending'], to: 'rejected' },
-  pickup: { from: ['confirmed'], to: 'active' },
-  return: { from: ['active'], to: 'completed' },
-};
+const lenderCommands = new Map([
+  ['confirm', ['pending', 'confirmed']],
+  ['reject', ['pending', 'rejected']],
+  ['pickup', ['confirmed', 'active']],
+  ['return', ['active', 'completed']],
+  ['returnDamaged', ['active', 'completed']],
+]);
+
+function paymentContext(record, operation) {
+  return {
+    reservationId: record.id,
+    userId: String(record.borrower),
+    reference: record.id,
+    currency: CURRENCY,
+    idempotencyKey: 'reservation:' + record.id + ':' + operation,
+  };
+}
+
+async function settleHeldDeposit(record, rejected, deps, session) {
+  const depositMinor = Math.round((record.deposit?.amount || 0) * 100);
+  const deliveryMinor = rejected ? Math.round((record.fulfilment?.deliveryFee || 0) * 100) : 0;
+  const amountMinor = depositMinor + deliveryMinor;
+  if (!amountMinor) return;
+  if (depositMinor && record.deposit.status !== 'held') {
+    throw ApiError.conflict('The reservation deposit is no longer held');
+  }
+  const operation = rejected ? 'refundToWallet' : 'releaseDeposit';
+  const context = paymentContext(record, rejected ? 'reject-refund' : 'release');
+  const settle = requireFeature(deps.payment, operation, 'Deposit settlement');
+  await settle({ ...context, amountMinor, depositMinor, deliveryMinor }, session);
+  if (depositMinor) record.deposit.status = rejected ? 'refunded' : 'released';
+}
+
+async function completeReturn(record, damaged, now, deps, session) {
+  record.returnedAt = now;
+  record.completedAt = now;
+  record.returnCondition = damaged ? 'damaged' : 'good';
+  if (record.extension?.status === 'pending') {
+    record.extension.status = 'cancelled';
+    record.extension.decidedAt = now;
+  }
+
+  if (!damaged) await settleHeldDeposit(record, false, deps, session);
+  if (isLateReturn(now, record.endDate)) {
+    const applyLateFee = requireFeature(deps.payment, 'applyLateFee', 'Late fee processing');
+    const { feeMinor } = await applyLateFee({
+      ...paymentContext(record, 'late-fee'), returnedAt: now, endDate: record.endDate,
+    }, session);
+    if (!Number.isSafeInteger(feeMinor) || feeMinor < 0) throw new Error('Invalid late fee amount');
+    record.lateFee = feeMinor / 100;
+  }
+}
 
 async function transition(params, deps = features()) {
-  const rule = lenderCommands[params.action];
-  if (!rule) throw ApiError.badRequest('Invalid reservation action');
+  const states = lenderCommands.get(params.action);
+  if (!states) throw ApiError.badRequest('Invalid reservation action');
+  const [from, to] = states;
+  const returning = to === 'completed';
+  const damaged = params.action === 'returnDamaged';
   return withReservation(params, async (record, actor, session) => {
     if (!record.lender.equals(actor._id) || !actor.isVerifiedLender()) throw ApiError.forbidden();
-    if (record.status === rule.to) return record;
-    if (!rule.from.includes(record.status)) throw ApiError.conflict('Invalid reservation status for this action');
+    const damageCase = returning ? await DamageReport.findOne({ reservation: record._id })
+      .select('_id status borrower reportedBy').session(session) : null;
+    if (returning && !damaged && (damageCase || record.returnCondition === 'damaged')) {
+      throw ApiError.conflict('A damage case owns settlement for this reservation');
+    }
+    if (record.status === to) {
+      if (damaged && (record.returnCondition === 'good' || !damageCase)) {
+        throw ApiError.conflict('This reservation is already completed');
+      }
+      return record;
+    }
+    if ((params.expectedStatus && params.expectedStatus !== record.status) || record.status !== from) {
+      throw ApiError.conflict('Invalid reservation status for this action');
+    }
+    if (damaged && (!params.beforeCommit || damageCase)) {
+      throw ApiError.conflict('Record the damaged return and open its damage case together');
+    }
+    if (damaged && record.deposit?.amount > 0 && record.deposit.status !== 'held') {
+      throw ApiError.conflict('The reservation deposit is no longer held');
+    }
+
     const now = new Date();
     if (params.action === 'confirm') {
       if (record.endDate <= now) throw ApiError.conflict('This reservation has already ended');
@@ -67,53 +141,89 @@ async function transition(params, deps = features()) {
         session, excludeReservationId: record._id,
       });
     }
-    if (params.action === 'pickup' && record.startDate > now) {
-      throw ApiError.conflict('Pickup is before the booked start date');
+    if (params.action === 'reject') {
+      if (params.reason != null && (typeof params.reason !== 'string' || params.reason.length > 500)) {
+        throw ApiError.badRequest('Use a rejection reason of up to 500 characters');
+      }
+      record.rejectionReason = params.reason?.trim();
+      await settleHeldDeposit(record, true, deps, session);
     }
-    if (['reject', 'return'].includes(params.action) && record.deposit?.status === 'held' && !params.beforeCommit) {
-      throw new ApiError(503, 'Deposit settlement is unavailable. Please try again later.');
+    if (params.action === 'pickup') {
+      if (record.startDate > now || record.endDate <= now) {
+        throw ApiError.conflict('Pickup must be within the booked date range');
+      }
+      record.pickedUpAt = now;
     }
-    if (params.action === 'pickup') record.pickedUpAt = now;
-    if (params.action === 'return') record.returnedAt = now;
-    record.status = rule.to;
+    if (returning) await completeReturn(record, damaged, now, deps, session);
+
+    record.status = to;
+    // The damage creator can read the returned reservation in this session.
+    if (damaged) await record.save({ session });
     if (params.beforeCommit) await params.beforeCommit(record, session);
-    await record.save({ session });
-    await enqueueReservationEvent(deps.events, record, rule.to, session);
+    if (!damaged || record.isModified()) await record.save({ session });
+    if (damaged) {
+      const openCase = await DamageReport.exists({
+        reservation: record._id, item: record.item, borrower: record.borrower,
+        reportedBy: actor._id, status: 'open',
+      }).session(session);
+      if (!openCase) throw ApiError.conflict('The damaged return must include an open damage case');
+    }
+    if (returning && deps.trust?.recalculateTrust) {
+      const eventKey = record.id + ':completed';
+      for (const userId of [record.borrower, record.lender]) {
+        await deps.trust.recalculateTrust(String(userId), { eventKey, session });
+      }
+    }
+    await enqueueReservationEvent(deps.events, record, to, session);
     return record;
   });
 }
 
 async function extend(params, deps = features()) {
+  const { action } = params;
+  if (!['request', 'cancel', 'approve', 'reject'].includes(action)) {
+    throw ApiError.badRequest('Invalid extension action');
+  }
   return withReservation(params, async (record, actor, session) => {
-    const lender = record.lender.equals(actor._id) && actor.isVerifiedLender();
-    const borrower = record.borrower.equals(actor._id);
+    const borrowerAction = action === 'request' || action === 'cancel';
+    const permitted = borrowerAction ? record.borrower.equals(actor._id) :
+      record.lender.equals(actor._id) && actor.isVerifiedLender();
+    if (!permitted) throw ApiError.forbidden();
     if (record.status !== 'active') throw ApiError.conflict('Only active reservations can be extended');
-    if (params.action === 'request') {
-      if (!borrower) throw ApiError.forbidden();
+    const now = new Date();
+    const target = { approve: 'approved', reject: 'rejected', cancel: 'cancelled' }[action];
+
+    if (action === 'request') {
+      if (now >= record.endDate) throw ApiError.conflict('The return deadline has passed');
       const { endDate } = normalizeRange({ startDate: record.startDate, endDate: params.endDate });
       if (endDate <= record.endDate) throw ApiError.badRequest('Choose a later return date');
       if (record.extension?.status === 'pending') {
         if (+record.extension.requestedEndDate === +endDate) return record;
         throw ApiError.conflict('An extension request is already pending');
       }
-      record.extension = { requestedEndDate: endDate, status: 'pending' };
+      record.extension = { requestId: new Types.ObjectId(), requestedEndDate: endDate, status: 'pending' };
     } else {
-      if (!lender) throw ApiError.forbidden();
-      const targetStatus = { approve: 'approved', reject: 'rejected' }[params.action];
-      if (!targetStatus) throw ApiError.badRequest('Invalid extension action');
-      if (record.extension?.status === targetStatus) return record;
-      if (record.extension?.status !== 'pending') throw ApiError.conflict('No pending extension request');
-      if (targetStatus === 'approved') {
-        const borrowerAccount = await loadActor(record.borrower, session);
-        const accountTier = await getEntitlements(borrowerAccount, new Date(), session, deps);
+      if (record.extension?.requestId && !params.requestId) {
+        throw ApiError.badRequest('Supply the extension request ID');
+      }
+      if (params.requestId && String(record.extension?.requestId) !== objectId(params.requestId)) {
+        throw ApiError.conflict('This extension request is no longer current');
+      }
+      if (record.extension?.status === target) return record;
+      if (lifecycleFlags(record, now).extensionStatus !== 'pending') {
+        throw ApiError.conflict('No pending, unexpired extension request');
+      }
+      if (action === 'approve') {
+        const borrower = await loadActor(record.borrower, session);
+        const entitlements = await getEntitlements(borrower, now, session, deps);
         const range = { startDate: record.startDate, endDate: record.extension.requestedEndDate };
-        await loadBookableItem(record.item, borrowerAccount, range, accountTier, deps, {
+        await loadBookableItem(record.item, borrower, range, entitlements, deps, {
           session, excludeReservationId: record._id,
         });
         record.endDate = range.endDate;
       }
-      record.extension.status = targetStatus;
-      record.extension.decidedAt = new Date();
+      record.extension.status = target;
+      record.extension.decidedAt = now;
     }
     return record.save({ session });
   });

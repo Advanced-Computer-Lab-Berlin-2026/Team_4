@@ -14,6 +14,7 @@ function features() {
     pricing: optionalFeature('pricing/depositQuote'),
     membership: optionalFeature('membership/entitlements'),
     promo: optionalFeature('promotions/promo'),
+    trust: optionalFeature('reviews/trust'),
     events: optionalFeature('notifications/eventOutbox'),
   };
 }
@@ -40,6 +41,8 @@ async function enqueueReservationEvent(events, reservation, status, session) {
   const payload = {
     reservationId: id, itemId: String(reservation.item), status,
     startDate: reservation.startDate, endDate: reservation.endDate,
+    returnedAt: reservation.returnedAt, completedAt: reservation.completedAt,
+    returnCondition: reservation.returnCondition,
   };
   if (CHECKOUT_EVENTS[status]) {
     await events.enqueueEvent(CHECKOUT_EVENTS[status], id, recipients, payload, id + ':' + status, session);

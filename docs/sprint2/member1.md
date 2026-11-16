@@ -36,9 +36,11 @@ Point `MONGO_URI` at MongoDB Atlas or a transaction-capable replica set and conf
 Run these commands from the repository root. Use a disposable replica set for test data.
 
 ```sh
-TEST_MONGO_URI='mongodb://localhost:27017/?replicaSet=rs0' node --test server/test/sprint2/member1.test.js
+TEST_MONGO_URI='mongodb://localhost:27017/?replicaSet=rs0' npm run test:sprint2 --prefix server
 TEST_MONGO_URI='mongodb://localhost:27017/?replicaSet=rs0' node server/test/sprint2/load.js
 npm run build --prefix client
 ```
+
+Sprint 2 tests use Node's built-in `node:test` and `node:assert/strict`. Add each member's suite as `server/test/sprint2/memberN.test.js`. Suites using MongoDB should use a unique disposable database. Run `npm run seed` against a development database for three completed reservation fixtures: an on-time return, a late return and a damaged return with an open report and a held deposit. They are inserted once per database. The open case is a fixture for damage decisions and has no attached photos. To exercise uploads, use a separate reservation whose evidence stage is open.
 
 The load script uses 5,000 listings and 200 concurrent local requests, half browsing and half reserving different items. It checks zero failures and an adjustable 2-second combined p95 budget (`LOAD_P95_MS`). It measures local performance. Configure deployed monitoring against the readiness endpoint to evaluate the 99% business-hours uptime target. Run the server under a service manager with restart on failure and preserve the MongoDB replica-set configuration during recovery.

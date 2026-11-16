@@ -12,8 +12,9 @@
  */
 const mongoose = require('mongoose');
 const connectDB = require('../config/db');
+const env = require('../config/env');
 const {
-  User, Category, Item, MembershipTier, Notice,
+  User, Category, Item, MembershipTier, Notice, Reservation, DamageReport,
 } = require('../models');
 
 const PASSWORD = 'Passw0rd!';
@@ -61,8 +62,8 @@ async function upsertUser(data) {
 
   // ---- Users --------------------------------------------------------------------------------------
   await upsertUser({ username: 'admin', name: 'Site Admin', email: 'admin@shareshed.local', phone: '+201000000001', address: HOME, role: 'admin' });
-  await upsertUser({ username: 'member1', name: 'Mona Member', email: 'member1@shareshed.local', phone: '+201000000002', address: HOME });
-  await upsertUser({ username: 'member2', name: 'Karim Member', email: 'member2@shareshed.local', phone: '+201000000003', address: HOME });
+  const member1 = await upsertUser({ username: 'member1', name: 'Mona Member', email: 'member1@shareshed.local', phone: '+201000000002', address: HOME });
+  const member2 = await upsertUser({ username: 'member2', name: 'Karim Member', email: 'member2@shareshed.local', phone: '+201000000003', address: HOME });
   const lender = await upsertUser({ username: 'lender1', name: 'Layla Lender', email: 'lender1@shareshed.local', phone: '+201000000004', address: OTHER, lenderStatus: 'verified', trustScore: 80 });
   await upsertUser({ username: 'applicant', name: 'Adam Applicant', email: 'applicant@shareshed.local', phone: '+201000000005', address: OTHER });
   const admin = await User.findOne({ username: 'admin' });
@@ -93,6 +94,33 @@ async function upsertUser(data) {
       pickup: { location: 'Giza - 5 Palm Street, ground floor', instructions: 'Call before arriving.' },
     },
   }, { upsert: true });
+
+  if (env.NODE_ENV !== 'production') {
+    const demoItem = await Item.findOne({ owner: lender._id, title: 'ShareShed Demo Hand Trowel' });
+    const day = 86400000;
+    const midnight = Date.parse(new Date().toISOString().slice(0, 10));
+    const completed = [
+      { id: '000000000000000002000061', account: member1, offset: 7, lateBy: -2, condition: 'good' },
+      { id: '000000000000000002000062', account: member1, offset: 4, lateBy: 3, condition: 'good' },
+      { id: '000000000000000002000063', account: member2, offset: 1, lateBy: -1, condition: 'damaged' },
+    ];
+    for (const fixture of completed) {
+      const due = new Date(midnight - fixture.offset * day);
+      const returned = new Date(+due + fixture.lateBy * 3600000);
+      await Reservation.updateOne({ _id: fixture.id }, { $setOnInsert: {
+        item: demoItem._id, borrower: fixture.account._id, lender: lender._id, status: 'completed',
+        startDate: new Date(+due - day), endDate: due, pickedUpAt: new Date(+due - day),
+        returnedAt: returned, completedAt: returned, returnCondition: fixture.condition,
+        deposit: fixture.condition === 'damaged' ? { base: 100, amount: 100, status: 'held' } : { amount: 0 },
+      } }, { upsert: true, runValidators: true });
+      if (fixture.condition === 'damaged') {
+        await DamageReport.updateOne({ reservation: fixture.id }, { $setOnInsert: {
+          item: demoItem._id, borrower: fixture.account._id, reportedBy: lender._id,
+          description: 'Demo evidence case: loose handle noticed on return.', status: 'open',
+        } }, { upsert: true, runValidators: true });
+      }
+    }
+  }
 
   // ---- Notice -------------------------------------------------------------------------------------
   if ((await Notice.countDocuments()) === 0) {

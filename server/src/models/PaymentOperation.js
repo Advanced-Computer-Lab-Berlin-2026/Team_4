@@ -23,6 +23,7 @@ const schema = new Schema(
     status: { type: String, enum: ['pending', 'succeeded', 'failed'], default: 'pending', index: true },
     requestHash: { type: String, required: true }, // detects a key reused with different inputs
     result: Schema.Types.Mixed, // returned again on a replay
+    outstandingMinor: { type: Number, default: 0, min: 0 }, // late fees only: part not yet paid (low wallet)
     stripePaymentIntentId: { type: String, index: { unique: true, sparse: true } },
     completedAt: Date,
   },

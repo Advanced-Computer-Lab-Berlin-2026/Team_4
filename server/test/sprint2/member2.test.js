@@ -4,13 +4,25 @@
 const { test, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 process.env.NODE_ENV = 'test';
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'member2-test-secret';
 const mongoose = require('mongoose');
+const app = require('../../src/app');
 const User = require('../../src/models/User');
+const Item = require('../../src/models/Item');
+const Reservation = require('../../src/models/Reservation');
 const WalletTransaction = require('../../src/models/WalletTransaction');
 const AuditLog = require('../../src/models/AuditLog');
 const PaymentOperation = require('../../src/models/PaymentOperation');
 const payment = require('../../src/services/payments/payment');
 const wallet = require('../../src/services/payments/wallet');
+const { COOKIE_NAME, signToken } = require('../../src/utils/tokens');
+
+let server, base;
+const cookieFor = (user) => `${COOKIE_NAME}=${signToken(user._id)}`;
+async function get(path, user) {
+  const response = await fetch(`${base}/api${path}`, { headers: user ? { Cookie: cookieFor(user) } : {} });
+  return { status: response.status, data: await response.json() };
+}
 
 let n = 0;
 async function makeUser(walletBalance = 0) {
@@ -27,13 +39,33 @@ before(async () => {
   assert.ok(process.env.TEST_MONGO_URI, 'Set TEST_MONGO_URI to a MongoDB replica set (e.g. your Atlas URI)');
   await mongoose.connect(process.env.TEST_MONGO_URI, { dbName: `member2_test_${process.pid}` });
   await Promise.all([User.init(), WalletTransaction.init(), AuditLog.init(), PaymentOperation.init()]);
+  server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
+  base = `http://127.0.0.1:${server.address().port}`;
 });
 after(async () => {
+  if (server) await new Promise((resolve) => server.close(resolve));
   if (mongoose.connection.readyState === 1) await mongoose.connection.dropDatabase();
   await mongoose.disconnect();
 });
 beforeEach(async () => {
-  await Promise.all([User.deleteMany({}), WalletTransaction.deleteMany({}), AuditLog.deleteMany({}), PaymentOperation.deleteMany({})]);
+  await Promise.all([User.deleteMany({}), Item.deleteMany({}), Reservation.deleteMany({}), WalletTransaction.deleteMany({}), AuditLog.deleteMany({}), PaymentOperation.deleteMany({})]);
+});
+
+/** A returned reservation of an item called `title` (test data; real ones come from M1's checkout). */
+async function makeReservation(borrower, title = 'Cordless drill') {
+  const lender = await makeUser(0);
+  const item = await Item.create({ owner: lender._id, title, category: new mongoose.Types.ObjectId(), description: 'Test item', depositAmount: 200 });
+  return Reservation.create({
+    item: item._id, borrower: borrower._id, lender: lender._id,
+    startDate: new Date('2026-11-01'), endDate: new Date('2026-11-05'), returnedAt: new Date('2026-11-07'), status: 'completed',
+  });
+}
+
+/** Stand-in for a late fee as step 6 (applyLateFee) will store it. */
+const insertLateFee = (user, reservation, { lateFeeMinor, chargedMinor, daysLate }) => PaymentOperation.create({
+  idempotencyKey: `late-fee:${reservation._id}`, kind: 'late_fee', purpose: 'late_fee', user: user._id,
+  reference: { type: 'reservation', id: reservation._id }, amountMinor: lateFeeMinor, requestHash: 'test',
+  status: 'succeeded', result: { lateFeeMinor, chargedMinor, daysLate }, outstandingMinor: lateFeeMinor - chargedMinor, completedAt: new Date(),
 });
 
 test('wallet charge: debits the balance, writes one ledger row and an audit row with the reservation id', async () => {
@@ -158,4 +190,59 @@ test('bad inputs are rejected before anything happens', async () => {
   await assert.rejects(payment.charge({ ...base, amountMinor: 100, purpose: 'gift' }), (err) => err.status === 400);
   await assert.rejects(payment.charge({ ...base, amountMinor: 100, idempotencyKey: '' }), (err) => err.status === 400);
   assert.equal(await balanceOf(user), 10000);
+});
+
+// ---------------------------------------------------------------- Step 2: ledger + late fees (Req 36/78)
+
+test('GET /api/wallet-ledger: own rows only, newest first, paginated, filterable by type', async () => {
+  const me = await makeUser(0);
+  const someoneElse = await makeUser(0);
+  for (let i = 1; i <= 3; i += 1) {
+    await payment.creditReferral({ userId: me._id, amountMinor: 1000 * i, referralId: new mongoose.Types.ObjectId(), idempotencyKey: `ledger:${i}` });
+  }
+  await payment.charge({ userId: me._id, amountMinor: 500, purpose: 'deposit', reference: reservationRef(), idempotencyKey: 'ledger:charge' });
+  await payment.creditReferral({ userId: someoneElse._id, amountMinor: 9999, referralId: new mongoose.Types.ObjectId(), idempotencyKey: 'ledger:other' });
+
+  const page1 = await get('/wallet-ledger?limit=3', me);
+  assert.equal(page1.status, 200);
+  assert.deepEqual([page1.data.total, page1.data.page, page1.data.pages, page1.data.items.length], [4, 1, 2, 3]);
+  assert.deepEqual(page1.data.items.map((t) => t.amountMinor), [-500, 3000, 2000]); // newest first
+  assert.equal(page1.data.items[0].balanceAfterMinor, 5500);
+  assert.ok(page1.data.items.every((t) => t.amountMinor !== 9999), "another user's rows never appear");
+
+  const deposits = await get('/wallet-ledger?type=deposit_hold', me);
+  assert.deepEqual(deposits.data.items.map((t) => t.type), ['deposit_hold']);
+  assert.equal((await get('/wallet-ledger?type=bogus', me)).status, 400);
+});
+
+test('GET /api/payments/late-fees: own late fees with item, days late and what is still owed', async () => {
+  const me = await makeUser(0);
+  const someoneElse = await makeUser(0);
+  await insertLateFee(me, await makeReservation(me, 'Cordless drill'), { lateFeeMinor: 4000, chargedMinor: 4000, daysLate: 2 });
+  await insertLateFee(me, await makeReservation(me, 'Ladder'), { lateFeeMinor: 6000, chargedMinor: 2500, daysLate: 3 });
+  await insertLateFee(someoneElse, await makeReservation(someoneElse, 'Tent'), { lateFeeMinor: 1000, chargedMinor: 0, daysLate: 1 });
+
+  const { status, data } = await get('/payments/late-fees', me);
+  assert.equal(status, 200);
+  assert.equal(data.total, 2);
+  assert.deepEqual(data.items.map((f) => f.itemTitle).sort(), ['Cordless drill', 'Ladder']);
+  const ladder = data.items.find((f) => f.itemTitle === 'Ladder');
+  assert.deepEqual([ladder.daysLate, ladder.lateFeeMinor, ladder.chargedMinor, ladder.outstandingMinor], [3, 6000, 2500, 3500]);
+  assert.equal(data.outstandingTotalMinor, 3500);
+});
+
+test('GET /api/account/wallet: balance in EGP and piastres plus late fees still owed', async () => {
+  const me = await makeUser(12.5);
+  await insertLateFee(me, await makeReservation(me), { lateFeeMinor: 3000, chargedMinor: 1250, daysLate: 2 });
+  const { status, data } = await get('/account/wallet', me);
+  assert.equal(status, 200);
+  assert.deepEqual(data, { balance: 12.5, balanceMinor: 1250, currency: 'EGP', outstandingLateFeesMinor: 1750 });
+});
+
+test('wallet, ledger and late-fee endpoints: guests get 401, admins get 403', async () => {
+  const admin = await User.create({ username: 'm2_admin', name: 'Admin', role: 'admin', passwordHash: 'not-used' });
+  for (const path of ['/wallet-ledger', '/payments/late-fees', '/account/wallet']) {
+    assert.equal((await get(path)).status, 401, `${path} guest`);
+    assert.equal((await get(path, admin)).status, 403, `${path} admin`);
+  }
 });

@@ -133,3 +133,9 @@ TEST_MONGO_URI="<your Atlas URI>" node --test server/test/sprint2/member2.test.j
 ```
 
 The tests create and drop their own database (`member2_test_<pid>`), so your real data is untouched.
+
+**Demo data (dev only):** until M1's checkout and M5's returns exist, this fills one member's wallet history and a late fee through the real services, so the Wallet and Late fees pages have something to show. Safe to run twice (fixed idempotency keys):
+
+```bash
+node server/test/sprint2/member2.demo.js member1
+```

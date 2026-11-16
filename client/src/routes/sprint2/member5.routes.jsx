@@ -6,6 +6,7 @@ const member5Routes = [
   { path: '/borrow-list', access: 'member', element: lazy(() => import('../../pages/borrow/BorrowListPage')) }, // Req 46-48
   { path: '/reservations', access: 'member', element: lazy(() => import('../../pages/lifecycle/MyReservationsPage')) }, // Req 53, 54
   { path: '/reservations/:id', access: 'member', element: lazy(() => import('../../pages/lifecycle/ReservationDetailsPage')) }, // Req 53
+  { path: '/lender/reservations', access: 'lender', element: lazy(() => import('../../pages/lifecycle/LenderReservationsPage')) }, // Req 56-60
 ];
 
 export default member5Routes;

@@ -2,7 +2,8 @@
  * BORROW LIST SERVICE - Owner: Member 5 - Requirements: 46, 47, 48
  * Contract: docs/sprint2/member5.md §3
  *
- * The list is a draft, not a hold on the items. Member 1's checkout (Req 49) reads BorrowList itself, re-checks every
+ * The list is a draft, not a hold on the items; entries that checkout would refuse are marked with a `problem`.
+ * Member 1's checkout (Req 49) reads BorrowList itself, re-checks every
  * entry and removes the checked-out entries that still match their id, item and dates (docs/sprint2/member5.md §3.4),
  * so every write here is field-scoped ($push, $set on entries.$, $pull).
  * Dates are whole days in UTC. The end date is the return day and is not counted (1-3 Dec = 2 days), the same
@@ -12,6 +13,8 @@ const mongoose = require('mongoose');
 const ApiError = require('../../utils/ApiError');
 const BorrowList = require('../../models/BorrowList');
 const Item = require('../../models/Item');
+const User = require('../../models/User');
+const { getAvailability } = require('../reservations/availability'); // Member 1: bookings and holds on an item (read only)
 
 const MAX_ENTRIES = 10;
 const HORIZON_DAYS = 365;        // the start date must be within 1 year from today
@@ -59,10 +62,20 @@ async function loadBorrowableItem(user, itemId) {
   return item;
 }
 
-/** Why an entry can't be checked out right now, or null. */
-function problemOf(entry, item) {
+/** Is the item's lender still allowed to lend? (Member 1's checkout refuses otherwise.) */
+const lenderCanLend = (owner) => !!owner && owner.role === 'member' && owner.lenderStatus === 'verified' && owner.status === 'active';
+
+/**
+ * Why an entry can't be checked out right now, or null. These are the checks Member 1's checkout makes
+ * (services/reservations/bookingRules.js), so "Check out" is only offered when checkout can succeed.
+ * `context` = { trustScore, booked } (booked: these dates overlap a booking or hold on the item).
+ */
+function problemOf(entry, item, context = {}) {
   if (!item || item.isArchived || item.moderationStatus !== 'ok') {
     return ['unavailable', 'This item is no longer available. Remove it from your list.'];
+  }
+  if (item.owner && typeof item.owner === 'object' && 'lenderStatus' in item.owner && !lenderCanLend(item.owner)) {
+    return ['unavailable', 'The lender can\'t lend this item right now. Remove it from your list.'];
   }
   if (new Date(entry.startDate).getTime() < todayUtc()) return ['dates_passed', 'These dates have passed. Choose new dates.'];
   if (daysBetween(entry.startDate, entry.endDate) < 1) {
@@ -72,11 +85,16 @@ function problemOf(entry, item) {
   if (daysBetween(entry.startDate, entry.endDate) > max) {
     return ['too_long', `This item can now be borrowed for at most ${max} day${max === 1 ? '' : 's'}. Shorten the dates.`];
   }
+  const minTrust = Number(item.rules?.minTrustScore) || 0;
+  if (context.trustScore !== undefined && context.trustScore < minTrust) {
+    return ['trust_too_low', `This item needs a trust score of at least ${minTrust} (yours is ${context.trustScore}). Remove it from your list.`];
+  }
+  if (context.booked) return ['booked', 'Someone has already booked part of these dates. Choose other dates.'];
   return null;
 }
 
-const toEntryDto = (entry, item) => {
-  const problem = problemOf(entry, item);
+const toEntryDto = (entry, item, context) => {
+  const problem = problemOf(entry, item, context);
   return {
     _id: entry._id,
     startDate: toDay(entry.startDate),
@@ -95,18 +113,36 @@ const toEntryDto = (entry, item) => {
   };
 };
 
+/** True when the entry's dates overlap a booking or hold on the item (Member 1's getAvailability). */
+async function isBooked(entry) {
+  try {
+    const { available } = await getAvailability(entry.item, { startDate: entry.startDate, endDate: entry.endDate });
+    return !available;
+  } catch {
+    return false; // dates the engine can't read (e.g. an old end-before-start entry) are flagged by problemOf already
+  }
+}
+
 /** GET my list with item details and each entry's problem. A member without a list gets an empty one. */
 async function getList(userId) {
-  const list = await BorrowList.findOne({ user: userId }).lean();
+  const [list, me] = await Promise.all([
+    BorrowList.findOne({ user: userId }).lean(),
+    User.findById(userId).select('trustScore').lean(),
+  ]);
   const entries = list?.entries || [];
   const items = await Item.find({ _id: { $in: entries.map((e) => e.item) } }).select(ITEM_FIELDS)
-    .populate('category', 'name slug').populate('owner', 'name').lean();
+    .populate('category', 'name slug').populate('owner', 'name role lenderStatus status').lean();
   const byId = new Map(items.map((i) => [String(i._id), i]));
+  // Availability is only worth asking for entries that have no other problem.
+  const booked = await Promise.all(entries.map((e) => {
+    const item = byId.get(String(e.item));
+    return problemOf(e, item, { trustScore: me?.trustScore ?? 0 }) ? false : isBooked(e);
+  }));
   return {
     _id: list?._id || null,
     max: MAX_ENTRIES,
     count: entries.length,
-    entries: entries.map((e) => toEntryDto(e, byId.get(String(e.item)))),
+    entries: entries.map((e, n) => toEntryDto(e, byId.get(String(e.item)), { trustScore: me?.trustScore ?? 0, booked: booked[n] })),
   };
 }
 

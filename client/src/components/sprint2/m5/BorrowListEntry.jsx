@@ -16,12 +16,14 @@ const PROBLEMS = {
   dates_passed: { label: 'Dates passed', tone: 'amber' },
   too_long: { label: 'Too long', tone: 'amber' },
   invalid_dates: { label: 'Check the dates', tone: 'amber' },
+  booked: { label: 'Already booked', tone: 'amber' },
+  trust_too_low: { label: 'Trust score too low', tone: 'red' },
 };
 
 export default function BorrowListEntry({ entry, showLocation = true, editing, busy = '', locked = false, onEdit, onCancel, onSave, onRemove }) {
   const { item, problem } = entry;
   const title = item?.title || 'Unavailable item';
-  const canChangeDates = !!item && problem !== 'unavailable';
+  const canChangeDates = !!item && !['unavailable', 'trust_too_low'].includes(problem); // new dates can't fix these
   const stored = { startDate: entry.startDate, endDate: entry.endDate };
 
   const [dates, setDates] = useState(stored);

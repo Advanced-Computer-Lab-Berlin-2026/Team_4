@@ -3,7 +3,7 @@
 // Status, progress, dates, deposit, the other person and any extension request. Read only for now: the lifecycle buttons
 // come in Parts 10-13. Messages and cancellation are Member 1's page (/my-reservations/:id).
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { getErrorMessage } from '../../api/axios';
 import { getReservation } from '../../api/reservationLifecycle.api';
 import { formatDate, formatMoney } from '../../utils/format';
@@ -15,9 +15,14 @@ import { OPEN_STATUSES, depositText, labelsOf, nextStep, statusOf } from '../../
 import s from '../../styles/sprint2/member5.module.css';
 
 const EXTENSION = { pending: 'Waiting for the lender', approved: 'Approved', rejected: 'Declined', cancelled: 'Withdrawn', expired: 'Not answered in time' };
+const EXTENSION_FOR_LENDER = { ...EXTENSION, pending: 'Waiting for your answer', rejected: 'You declined it' };
+// Where the back link goes when the page wasn't opened from a list (typed address, reload): the viewer's own list.
+const HOME = { borrower: { to: '/reservations', label: 'My reservations' }, lender: { to: '/lender/reservations', label: 'Booking requests' } };
 
 export default function ReservationDetailsPage() {
   const { id } = useParams();
+  const location = useLocation();
+  const cameFrom = typeof location.state?.from === 'string' && location.state.from.startsWith('/') ? { to: location.state.from, label: location.state.fromLabel || 'Back' } : null;
   const [r, setR] = useState(null);
   const [error, setError] = useState({ text: '', notFound: false });
   const [reloadKey, setReloadKey] = useState(0);
@@ -36,7 +41,8 @@ export default function ReservationDetailsPage() {
     return () => { ignore = true; };
   }, [id, reloadKey]);
 
-  const back = <p className={s.backLink}><Link to="/reservations">← My reservations</Link></p>;
+  const home = cameFrom || (r ? HOME[r.role] : HOME.borrower);
+  const back = <p className={s.backLink}><Link to={home.to}>← {home.label}</Link></p>;
 
   if (error.text) {
     return (
@@ -46,7 +52,7 @@ export default function ReservationDetailsPage() {
           <div className={`center ${s.empty}`}>
             <h1>Reservation not found</h1>
             <p className="muted">It doesn&apos;t exist, or it isn&apos;t one of your bookings.</p>
-            <Link to="/reservations" className="btn">My reservations</Link>
+            <Link to={home.to} className="btn">{home.label}</Link>
           </div>
         ) : (
           <div className={s.loadError}>
@@ -95,7 +101,7 @@ export default function ReservationDetailsPage() {
                 <h2 id="res-ext-title" className={s.cardTitle}>Extension request</h2>
                 <dl className={s.summaryFacts}>
                   <div><dt>New return date asked</dt><dd>{r.extension.requestedEndDate ? showDay(r.extension.requestedEndDate) : '—'}</dd></div>
-                  <div><dt>Answer</dt><dd>{EXTENSION[r.extension.status] || r.extension.status}</dd></div>
+                  <div><dt>Answer</dt><dd>{(lender ? EXTENSION_FOR_LENDER : EXTENSION)[r.extension.status] || r.extension.status}</dd></div>
                   {r.extension.decidedAt && <div><dt>Answered on</dt><dd>{formatDate(r.extension.decidedAt)}</dd></div>}
                 </dl>
               </div>
@@ -121,8 +127,11 @@ export default function ReservationDetailsPage() {
               {r.lateFee > 0 && <div><dt>Late fee</dt><dd className={s.penalty}>{formatMoney(r.lateFee)}</dd></div>}
             </dl>
             <div className={s.summaryActions}>
-              {r.item && <Link to={`/catalog/${r.item._id}`} className="btn btn-secondary">View item</Link>}
-              <Link to={`/my-reservations/${r._id}`} className="btn btn-secondary">{open ? 'Messages and cancellation' : 'Messages'}</Link>
+              {/* the lender edits their own item (works even when archived); a borrower sees the public page only when it exists */}
+              {r.item && lender && <Link to={`/lender/items/${r.item._id}/edit`} className="btn btn-secondary">Edit item</Link>}
+              {r.item && !lender && r.item.available && <Link to={`/catalog/${r.item._id}`} className="btn btn-secondary">View item</Link>}
+              {/* only the borrower can cancel (Member 1's rule); both can message */}
+              <Link to={`/my-reservations/${r._id}`} className="btn btn-secondary">{open && !lender ? 'Messages and cancellation' : 'Messages'}</Link>
             </div>
           </div>
         </aside>

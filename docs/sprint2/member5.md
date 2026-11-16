@@ -76,7 +76,7 @@ Conventions are the same as Sprint 1 ([`docs/API_CONTRACT.md`](../API_CONTRACT.m
 - **Each item once.** To use different dates, the member changes the entry's dates (Req 48).
 - **At most 10 entries.**
 - **Dates are required when adding.** Start date is today (UTC) or later and **within 1 year** from today; the end date is **after** the start date (the shortest borrow is 1 day). The length (`end − start` days) must not exceed the item's `rules.maxBorrowDays` when the item has one, and **at most 365 days** when it has none. Both limits catch typos (e.g. 2062 for 2026) and follow Member 1's booking horizon once his contract sets one.
-- **Checks when adding or changing dates:** the item exists, is public (`Item.publicFilter()`), and isn't the member's own item. Availability is **not** checked here: the list is a draft and doesn't hold the item (plan p.22). Checkout re-checks everything. Once Member 1's `getAvailability` exists, entries show a warning if the dates are already booked.
+- **Checks when adding or changing dates:** the item exists, is public (`Item.publicFilter()`), and isn't the member's own item. Availability is **not** checked here: the list is a draft and doesn't hold the item (plan p.22). Checkout re-checks everything. Entries whose dates are already booked are marked `booked` (Member 1's `getAvailability`).
 - **Stale entries are kept, not deleted.** When an item is archived or removed, or an entry's start date has passed, the entry stays in the list with a `problem` and is excluded from checkout until the member fixes or removes it.
 
 ### 3.2 Endpoints — `/api/borrow-lists` (`borrowLists.routes.js`)
@@ -121,7 +121,7 @@ Conventions are the same as Sprint 1 ([`docs/API_CONTRACT.md`](../API_CONTRACT.m
 }
 ```
 
-`problem` is `null` for a valid entry, or one of `"unavailable"` (item archived or removed), `"dates_passed"` (start date is in the past), `"invalid_dates"` (the end date isn't after the start date, from a list saved before this rule) or `"too_long"` (the lender lowered the item's maximum since it was added), with a readable `problemMessage`. If the item no longer exists, `item` is `null` and `problem` is `"unavailable"`.
+`problem` is `null` for a valid entry, or one of `"unavailable"` (item archived or removed), `"dates_passed"` (start date is in the past), `"invalid_dates"` (the end date isn't after the start date, from a list saved before this rule), `"too_long"` (the lender lowered the item's maximum since it was added), `"trust_too_low"` (my trust score is below the item's `minTrustScore`) or `"booked"` (the dates overlap a booking or hold, from Member 1's `getAvailability`), with a readable `problemMessage`. `"unavailable"` also covers a lender who can no longer lend (suspended or not verified). These are exactly the checks Member 1's checkout makes, so **Check out** is offered only when it can succeed. If the item no longer exists, `item` is `null` and `problem` is `"unavailable"`.
 
 ### 3.3 Model (`BorrowList.js`, Member 5)
 
@@ -164,7 +164,7 @@ Read-only. Lists reservations where I am the **borrower**.
 {
   "_id": "…", "status": "pending|confirmed|active|completed|cancelled|rejected",
   "startDate": "2026-12-01", "endDate": "2026-12-03", "days": 2,
-  "item": { "_id": "…", "title": "…", "photo": "…", "category": { "name": "…" } },
+  "item": { "_id": "…", "title": "…", "photo": "…", "available": true, "category": { "name": "…" } },
   "borrower": { "_id": "…", "name": "…" }, "lender": { "_id": "…", "name": "…" }, "role": "borrower|lender",
   "deposit": { "amount": 400, "status": "held" },
   "fulfilment": { "method": "pickup|delivery", "deliveryStatus": "none" },
@@ -181,6 +181,8 @@ Read-only. Lists reservations where I am the **borrower**.
 - `actions` says which buttons the **current user** may use right now. The server decides; the page only shows them.
 - `extension.status` and `flags` come from Member 1's `returnTiming.lifecycleFlags(reservation)`: a pending request whose deadline passed shows as `"expired"`; `approvalOverdue` (pending at the start date), `pickupMissed` (confirmed, never picked up by the end date), `returnOverdue` (active after the deadline). They are labels only: the stored status doesn't change (shared contract).
 - `extension.requestId` is sent back when cancelling, approving or rejecting a request.
+- `item.available` is `false` when the item is archived or removed (its public page doesn't exist); `item` is `null` if it was deleted.
+- `actions.reject` also needs the deposit to be still held (or no deposit), like Member 1's `reject`.
 - `role` is the current user's side of this booking. `cancellation` is `{ at, reason }` for a cancelled booking, else `null`.
 - People are shown by name only (no email, phone or address). If the item was deleted, `item` is `null`.
 - **Errors:** `400` with the field for an unknown `status` (the filter word is `upcoming`, not `confirmed`), an invalid `from`/`to` date, or `to` before `from` · `401` not logged in · `403` admin · `404` not my booking (also for someone else's, so it isn't revealed).
@@ -201,8 +203,16 @@ Read-only. Lists reservations where I am the **borrower**.
 | PATCH | `/api/reservation-lifecycle/:id/return` | `markReturned` | lender of this reservation | 60 | `active` → `completed` (good condition) |
 
 **Query for `GET /lending`:** the same `status`, `from`, `to`, `page`, `limit` as `/mine`, plus:
-- `item` (an item id): only that item's reservations.
-- `needsAction=true`: only pending requests and pending extension requests, oldest first.
+- `item` (one of my item ids): only that item's reservations. Another lender's item id simply matches nothing.
+- `needsAction=true`: only what waits for my answer (pending requests, and active bookings with an extension request that hasn't expired), **oldest request first**. Combines with the other filters.
+
+**Response:** `{ items: [reservation], total, page, limit, pages, waiting: { requests, extensions } }`. `waiting` counts everything waiting for my answer across all my items, whatever the filters (for the page's banner). Each `reservation` has the §4 shape with `role: "lender"`.
+
+| Method | Path | Handler | Access | Description |
+|---|---|---|---|---|
+| GET | `/api/reservation-lifecycle/lending/items` | `lendingItems` | lender | `{ items: [{ _id, title, isArchived, bookings }] }`: my items that have at least one booking (archived included), for the item filter |
+
+**Page:** `/lender/reservations` ("Booking requests"): a banner when something waits, tabs (Needs my answer, All and the six statuses), an item filter and the date filter, the same cards as `/reservations` from the lender's side. Linked from a **Booking requests** button on **My items** (`/lender/items`), since the menu is Member 1's.
 
 **Every action calls Member 1's command once and returns the document it gives back** (shared contract): `reservationCommands.transition({ actorId, reservationId, action, expectedStatus, reason?, session? })` with `confirm` (the **Approve** button), `reject`, `pickup` or `return`. The command checks that the actor is the verified lender of this reservation, the state and the dates, and does all side effects in its own transaction. My controller repeats none of them.
 
@@ -288,7 +298,7 @@ Read-only queries on `Reservation` and `DamageReport`; the plan allows feature s
 | `/borrow-list` | `BorrowListPage` | member |
 | `/reservations` | `MyReservationsPage`: filtered list (Req 53/54); a row opens the details below | member |
 | `/reservations/:id` | `ReservationDetailsPage` (borrower and lender view, lifecycle buttons); links to Member 1's `/my-reservations/:id` for chat and cancellation | member |
-| `/lender/reservations` | `LenderReservationsPage` | lender |
+| `/lender/reservations` | `LenderReservationsPage` ("Booking requests"; linked from My items) | lender |
 | `/lender/dashboard` | `LenderDashboardPage` | lender |
 
 All pages follow `docs/UI_README.md`: shared components, a loading/error/empty state for everything, 375 px phone width. Styles go in `client/src/styles/sprint2/member5.module.css`.

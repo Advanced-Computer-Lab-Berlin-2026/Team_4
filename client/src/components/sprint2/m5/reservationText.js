@@ -63,7 +63,7 @@ export function nextStep(r) {
     case 'cancelled':
       return `Cancelled${r.cancellation?.at ? ` on ${formatDate(r.cancellation.at)}` : ''}.${r.cancellation?.reason ? ` Reason: ${r.cancellation.reason}` : ''}`;
     case 'rejected':
-      return `The lender declined this request.${r.rejectionReason ? ` Reason: ${r.rejectionReason}` : ''}`;
+      return `${lender ? 'You declined this request.' : 'The lender declined this request.'}${r.rejectionReason ? ` Reason: ${r.rejectionReason}` : ''}`;
     default:
       return '';
   }

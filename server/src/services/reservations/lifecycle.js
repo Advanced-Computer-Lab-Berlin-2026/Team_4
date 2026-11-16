@@ -1,5 +1,5 @@
 /**
- * RESERVATION LIFECYCLE (read side) - Owner: Member 5 - Requirements: 53, 54 (and the data for 56-60, 74, 75)
+ * RESERVATION LIFECYCLE (read side) - Owner: Member 5 - Requirements: 53, 54, and the lender's list for 56-60, 74, 75
  * Contract: docs/sprint2/member5.md §4. Read only: every change to a reservation goes through Member 1's
  * reservationCommands (docs/SPRINT2_CONTRACT.md); this file never writes.
  * Dates: UTC midnight, the end date is the return day and is not counted (half-open [startDate, endDate)).
@@ -62,7 +62,7 @@ function actionsFor(r, user, { hasDamageCase }, now) {
   const depositHeld = !(r.deposit?.amount > 0) || r.deposit?.status === 'held';
   return {
     approve: isLender && r.status === 'pending' && r.endDate > now,
-    reject: isLender && r.status === 'pending',
+    reject: isLender && r.status === 'pending' && depositHeld, // Member 1's reject refunds a held deposit
     pickup: isLender && r.status === 'confirmed' && r.startDate <= now && r.endDate > now,
     returnGood: isLender && active && !hasDamageCase && r.returnCondition !== 'damaged' && depositHeld,
     reportDamage: isLender && active && !hasDamageCase,
@@ -84,6 +84,7 @@ function toDto(r, user, extra, now) {
     days: Math.round((new Date(r.endDate) - new Date(r.startDate)) / DAY_MS),
     item: item ? {
       _id: item._id, title: item.title, photo: item.photos?.[0]?.url || null,
+      available: !item.isArchived && item.moderationStatus === 'ok', // public item page exists
       category: item.category ? { _id: item.category._id, name: item.category.name, slug: item.category.slug } : null,
     } : null,
     borrower: person(r.borrower),
@@ -111,7 +112,7 @@ function toDto(r, user, extra, now) {
 }
 
 const populate = (q) => q
-  .populate({ path: 'item', select: 'title photos category', populate: { path: 'category', select: 'name slug' } })
+  .populate({ path: 'item', select: 'title photos category isArchived moderationStatus', populate: { path: 'category', select: 'name slug' } })
   .populate('borrower', 'name')
   .populate('lender', 'name');
 
@@ -121,36 +122,93 @@ async function damageCaseIds(ids) {
   return new Set(cases.map((c) => String(c.reservation)));
 }
 
+/** Ids of one page of matches. Default order: pending/upcoming/active first, soonest start first; then the rest,
+ * most recent start first. `oldestFirst` (the lender's "needs my answer" list): oldest request first. */
+async function pageOfIds(match, pg, { oldestFirst = false } = {}) {
+  const sortStages = oldestFirst
+    ? [{ $sort: { createdAt: 1, _id: 1 } }]
+    : [
+      { $addFields: { _open: { $in: ['$status', OPEN] }, _ts: { $toLong: '$startDate' } } },
+      { $addFields: { _key: { $cond: ['$_open', '$_ts', { $multiply: ['$_ts', -1] }] } } },
+      { $sort: { _open: -1, _key: 1, _id: 1 } },
+    ];
+  const [ordered, total] = await Promise.all([
+    Reservation.aggregate([{ $match: match }, ...sortStages, { $skip: pg.skip }, { $limit: pg.limit }, { $project: { _id: 1 } }]),
+    Reservation.countDocuments(match),
+  ]);
+  return { ids: ordered.map((d) => d._id), total };
+}
+
 /**
  * Req 53, 54: my reservations as the borrower, filtered and paginated.
- * Order: pending/upcoming/active first, soonest start first; then the rest, most recent start first.
  */
 async function listMine(user, query = {}) {
   const filters = parseFilters(query);
   const pg = parsePagination(query);
   const match = { borrower: new mongoose.Types.ObjectId(String(user._id)), ...overlap(filters) };
   if (filters.status !== 'all') match.status = STATUS_FILTERS[filters.status];
+  const { ids, total } = await pageOfIds(match, pg);
+  return paginated(await toDtos(ids, user), total, pg);
+}
 
-  const [ordered, total] = await Promise.all([
-    Reservation.aggregate([
-      { $match: match },
-      { $addFields: { _open: { $in: ['$status', OPEN] }, _ts: { $toLong: '$startDate' } } },
-      { $addFields: { _key: { $cond: ['$_open', '$_ts', { $multiply: ['$_ts', -1] }] } } },
-      { $sort: { _open: -1, _key: 1, _id: 1 } },
-      { $skip: pg.skip },
-      { $limit: pg.limit },
-      { $project: { _id: 1 } },
-    ]),
-    Reservation.countDocuments(match),
+/** Pending requests, and active bookings with an extension request that hasn't expired: what waits for the lender. */
+const waitingFilter = (now) => ({
+  $or: [
+    { status: 'pending' },
+    { status: 'active', 'extension.status': 'pending', endDate: { $gt: now } },
+  ],
+});
+
+/**
+ * Req 56-60, 74, 75 (read side): bookings of my items, for the verified lender.
+ * Extra query: item=<my item id>, needsAction=true (only what waits for my answer, oldest first).
+ * Also returns `waiting`: { requests, extensions } for all my items, whatever the filters.
+ */
+async function listLending(user, query = {}) {
+  const filters = parseFilters(query);
+  const pg = parsePagination(query);
+  const needsAction = query.needsAction === 'true';
+  if (query.needsAction !== undefined && query.needsAction !== '' && !['true', 'false'].includes(query.needsAction)) {
+    throw fieldError('needsAction', 'needsAction must be true or false');
+  }
+  if (query.item && !mongoose.isValidObjectId(query.item)) throw fieldError('item', 'Choose a valid item');
+  const lender = new mongoose.Types.ObjectId(String(user._id));
+  const now = new Date();
+  const match = { lender, ...overlap(filters) };
+  if (query.item) match.item = new mongoose.Types.ObjectId(String(query.item));
+  if (filters.status !== 'all') match.status = STATUS_FILTERS[filters.status];
+  const finalMatch = needsAction ? { $and: [match, waitingFilter(now)] } : match;
+
+  const [{ ids, total }, requests, extensions] = await Promise.all([
+    pageOfIds(finalMatch, pg, { oldestFirst: needsAction }),
+    Reservation.countDocuments({ lender, status: 'pending' }),
+    Reservation.countDocuments({ lender, status: 'active', 'extension.status': 'pending', endDate: { $gt: now } }),
   ]);
-  const ids = ordered.map((d) => d._id);
+  return { ...paginated(await toDtos(ids, user), total, pg), waiting: { requests, extensions } };
+}
+
+/** My items that have at least one booking (archived included), for the lender's item filter. */
+async function lendingItems(user) {
+  const lender = new mongoose.Types.ObjectId(String(user._id));
+  const rows = await Reservation.aggregate([
+    { $match: { lender } },
+    { $group: { _id: '$item', bookings: { $sum: 1 } } },
+    { $lookup: { from: 'items', localField: '_id', foreignField: '_id', as: 'item' } },
+    { $unwind: '$item' }, // deleted items drop out: they can't be filtered by a title
+    { $match: { 'item.owner': lender } },
+    { $project: { _id: '$item._id', title: '$item.title', isArchived: '$item.isArchived', bookings: 1 } },
+    { $sort: { title: 1, _id: 1 } },
+  ]);
+  return rows;
+}
+
+async function toDtos(ids, user) {
   const docs = await populate(Reservation.find({ _id: { $in: ids } })).lean();
   const byId = new Map(docs.map((d) => [String(d._id), d]));
   const damaged = await damageCaseIds(ids);
   const now = new Date();
-  const items = ids.map((id) => byId.get(String(id))).filter(Boolean)
+  return ids.map((id) => byId.get(String(id))).filter(Boolean)
     .map((r) => toDto(r, user, { hasDamageCase: damaged.has(String(r._id)) }, now));
-  return paginated(items, total, pg);
 }
 
 /** One reservation for its borrower or its lender. Anyone else gets 404 so its existence isn't revealed. */
@@ -163,4 +221,4 @@ async function getOne(user, id) {
   return toDto(r, user, { hasDamageCase: damaged.has(String(r._id)) }, new Date());
 }
 
-module.exports = { listMine, getOne, parseFilters, STATUS_FILTERS };
+module.exports = { listMine, listLending, lendingItems, getOne, parseFilters, STATUS_FILTERS };

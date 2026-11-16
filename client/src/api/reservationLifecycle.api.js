@@ -13,3 +13,9 @@ export const listLendingReservations = (params) => api.get('/reservation-lifecyc
 
 /** GET /api/reservation-lifecycle/lending/items - my items that have bookings -> { items: [{ _id, title, isArchived, bookings }] } */
 export const listLendingItems = () => api.get('/reservation-lifecycle/lending/items').then((r) => r.data);
+
+/** PATCH /api/reservation-lifecycle/:id/approve - Req 56 - lender approves a pending request -> { reservation } */
+export const approveReservation = (id) => api.patch(`/reservation-lifecycle/${id}/approve`).then((r) => r.data);
+
+/** PATCH /api/reservation-lifecycle/:id/reject - Req 56 - lender declines: { reason? } (up to 500) -> { reservation } */
+export const rejectReservation = (id, reason) => api.patch(`/reservation-lifecycle/${id}/reject`, { reason }).then((r) => r.data);

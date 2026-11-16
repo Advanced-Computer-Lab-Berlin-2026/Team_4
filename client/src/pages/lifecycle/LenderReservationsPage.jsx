@@ -1,4 +1,5 @@
 // BOOKING REQUESTS (lender) - Owner: Member 5 - Requirements: 56, 59, 60 (list; the buttons come in Parts 10-12)
+// Requests can be approved or declined right on their card (Req 56, components/sprint2/m5/RequestAnswer.jsx).
 // Route: /lender/reservations   Access: lender   (registered in src/routes/sprint2/member5.routes.jsx)
 // Every booking of my items. "Needs my answer" shows pending requests and open extension requests, oldest first.
 // Filters (tab, item, dates, page) are kept in the address, so reload and the Back arrow keep them.
@@ -11,6 +12,7 @@ import Alert from '../../components/common/Alert';
 import FormField from '../../components/common/FormField';
 import Pagination from '../../components/common/Pagination';
 import ReservationCard from '../../components/sprint2/m5/ReservationCard';
+import RequestAnswer from '../../components/sprint2/m5/RequestAnswer';
 import { isDay, showDay } from '../../components/sprint2/m5/borrowDates';
 import { OPEN_STATUSES } from '../../components/sprint2/m5/reservationText';
 import s from '../../styles/sprint2/member5.module.css';
@@ -50,6 +52,8 @@ export default function LenderReservationsPage() {
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
   const [reloadKey, setReloadKey] = useState(0);
+  const [notice, setNotice] = useState('');
+  const [problem, setProblem] = useState('');
 
   const go = (next, replace = false) => {
     const p = new URLSearchParams();
@@ -112,7 +116,14 @@ export default function LenderReservationsPage() {
     <section aria-labelledby={`lend-${key}-title`}>
       <h2 id={`lend-${key}-title`} className={s.groupTitle}>{title}</h2>
       <p className={`muted ${s.groupNote}`}>{note}</p>
-      <ul className={s.list}>{rows.map((r) => <ReservationCard key={r._id} reservation={r} />)}</ul>
+      <ul className={s.list}>
+        {rows.map((r) => (
+          <ReservationCard key={r._id} reservation={r}>
+            <RequestAnswer reservation={r} onStale={(message) => { setNotice(''); setProblem(message); setReloadKey((k) => k + 1); }}
+              onDone={(_, message) => { setProblem(''); setNotice(message); setReloadKey((k) => k + 1); }} />
+          </ReservationCard>
+        ))}
+      </ul>
     </section>
   );
 
@@ -135,7 +146,7 @@ export default function LenderReservationsPage() {
       <div className="tabs" role="group" aria-label="Show bookings">
         {TABS.map((t) => (
           <button key={t.key} type="button" className={`tab ${tabKey === t.key ? 'active' : ''}`} aria-pressed={tabKey === t.key}
-            onClick={() => go({ tab: t.key, page: 1 })}>
+            onClick={() => { setNotice(''); setProblem(''); go({ tab: t.key, page: 1 }); }}>
             {t.label}{t.key === 'action' && data && hasWaiting ? ` (${waiting.requests + waiting.extensions})` : ''}
           </button>
         ))}
@@ -165,6 +176,9 @@ export default function LenderReservationsPage() {
           {filtered && <button type="button" className="btn btn-secondary" onClick={() => go({ item: '', from: '', to: '', page: 1 })}>Clear filters</button>}
         </div>
       </fieldset>
+
+      <Alert variant="success">{notice}</Alert>
+      <Alert variant="error">{problem}</Alert>
 
       {loading && !data && !rangeError && <Spinner label="Loading bookings..." />}
 

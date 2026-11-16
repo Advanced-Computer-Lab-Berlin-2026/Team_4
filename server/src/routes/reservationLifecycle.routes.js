@@ -1,4 +1,4 @@
-// RESERVATION LIFECYCLE ROUTES - Owner: Member 5 - mounted automatically at /api/reservation-lifecycle (Req 53, 54, 56-60)
+// RESERVATION LIFECYCLE ROUTES - Owner: Member 5 - mounted automatically at /api/reservation-lifecycle (Req 53, 54, 56-60; answers: Req 56)
 const router = require('express').Router();
 const { param, query } = require('express-validator');
 const c = require('../controllers/reservationLifecycle.controller');
@@ -21,6 +21,10 @@ router.get('/lending', protect, requireVerifiedLender,
   textQuery('page', 'page'), textQuery('limit', 'page size'), textQuery('item', 'item'), textQuery('needsAction', 'needsAction value'),
   validate, c.listLending); // Req 56-60
 router.get('/lending/items', protect, requireVerifiedLender, c.lendingItems);
+// Req 56: answer a request. Verified lenders only; Member 1's command checks this is the lender of the booking.
+const reservationIdParam = param('id').isMongoId().withMessage('Invalid reservation');
+router.patch('/:id/approve', protect, requireVerifiedLender, reservationIdParam, validate, c.approve);
+router.patch('/:id/reject', protect, requireVerifiedLender, reservationIdParam, validate, c.reject);
 router.get('/:id', ...member, param('id').isMongoId().withMessage('Invalid reservation'), validate, c.getOne); // Req 53
 
 module.exports = router;

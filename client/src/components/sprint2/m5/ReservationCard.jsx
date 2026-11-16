@@ -1,5 +1,5 @@
 // ReservationCard - Owner: Member 5 - Requirements: 53, 54
-// Props: { reservation } - one booking in My reservations or Booking requests: item, status, dates, the other person,
+// Props: { reservation, children? } - children = buttons under the card (the lender's answer). One booking in My reservations or Booking requests: item, status, dates, the other person,
 // deposit, what's next. Opening it remembers the list (and its filters) so the details page can link straight back.
 import { Link, useLocation } from 'react-router-dom';
 import { formatMoney } from '../../../utils/format';
@@ -7,7 +7,7 @@ import { dayCount, showRange } from './borrowDates';
 import { depositText, labelsOf, nextStep, statusOf } from './reservationText';
 import s from '../../../styles/sprint2/member5.module.css';
 
-export default function ReservationCard({ reservation: r }) {
+export default function ReservationCard({ reservation: r, children }) {
   const location = useLocation();
   // The details page links back to this exact list, filters included.
   const from = { from: `${location.pathname}${location.search}`, fromLabel: location.pathname.startsWith('/lender/') ? 'Booking requests' : 'My reservations' };
@@ -37,6 +37,7 @@ export default function ReservationCard({ reservation: r }) {
             <div><dt>{other.label}</dt><dd>{other.person?.name || 'Unknown'}</dd></div>
             <div><dt>Deposit</dt><dd>{formatMoney(r.deposit?.amount)} <span className="muted">· {depositText(r.deposit)}</span></dd></div>
           </dl>
+          {children}
         </div>
       </article>
     </li>

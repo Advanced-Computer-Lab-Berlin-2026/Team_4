@@ -320,10 +320,11 @@ All pages follow `docs/UI_README.md`: shared components, a loading/error/empty s
 
 | Component | From | Where |
 |---|---|---|
-| `ConditionPhotoPanel` `{ reservationId }` | Member 3 | `ReservationDetailsPage` (lender: pickup and return) |
-| `ReviewForm` `{ reservationId }` | Member 3 | `ReservationDetailsPage` after completion |
-| `DeliveryStatusPanel` | Member 6 | `ReservationDetailsPage` when `fulfilment.method` is `delivery` |
-| `ItemDeliverySettings` | Member 6 | `ItemEditorPage` (my file) |
+| `ConditionPhotoPanel` `{ reservationId, onChange? }` | Member 3 (`components/sprint2/m3/`) | `ReservationDetailsPage` (lender: pickup and return); the server decides when uploads are allowed |
+| `ReviewForm` `{ reservationId, onSuccess? }` | Member 3 (`components/sprint2/m3/`) | `ReservationDetailsPage` after completion; hides itself when no review is possible |
+| `DeliveryStatusPanel` `{ reservationId, onChange? }` | Member 6 (`components/sprint2/m6/`) | `ReservationDetailsPage` when `fulfilment.method` is `delivery` |
+
+Delivery settings (`ItemDeliverySettings`) are **not** mine to embed: Member 6 shows them inside his own **Pickup & rules** tab of the item editor and saves them through `PATCH /api/delivery/items/:itemId`.
 
 ### 8.4 Events
 
@@ -357,15 +358,18 @@ None of these are in the requirement sheet. The project description allows the t
 
 **Answered by Member 1's merged contract (16 Nov 2026):** the lifecycle commands and what `return` does, the damaged return through Member 3's form, the refund on reject, the extension commands with `requestId`, `rejectionReason`, stuck reservations (`lifecycleFlags`), the date rule (end date not counted), events (sent by the commands), and checkout reading the borrow list itself. Member 2's and Member 3's side effects are called by the commands, so I need nothing from them for Req 56–60.
 
+**Answered by the other members' contracts (16 Nov 2026):**
+- **Member 3** (`docs/sprint2/member3.md`): the damage form is `/damage-reports/new?reservation=<id>`; `hasOpenDamageCase(reservationId)` is in `services/damage/damage.js` (Member 1's `return` already refuses while a case exists).
+- **Member 6** (`docs/sprint2/member6.md`): delivery settings are in his **Pickup & rules** tab and saved through his endpoint. "Delivered" only changes `fulfilment.deliveryStatus`, not the booking status, so the lender still marks **picked up** (Req 59) for a delivery.
+- **Member 2** (`docs/sprint2/member2.md`): `refundToWallet` (full deposit and delivery fee on a declined request), `releaseDeposit` and `applyLateFee` are in `services/payments/payment.js`, the file Member 1's commands load, so they connect once merged. The late fee starts 60 minutes after the due time (10 % of the deposit per started day, capped at 100 %); `calculateLateFee` lets my return screen show the fee before the lender confirms.
+
 **Still open:**
 
 | To | Request / question | Needed for |
 |---|---|---|
 | **Member 1** | Add a **Borrow list** link (`/borrow-list`) to the member menu in `navLinks.js` (shared, his file). Without it the page is only reachable from the item page's button. | Req 46–48 |
 | **Member 1** | Reservations menu: Req 53/54 (view all, filter by date or status) are Member 5's. Point the **Reservations** menu link to `/reservations` (my filtered list), whose rows open his `/my-reservations/:id` for chat and cancellation, so members don't see two different "my reservations" lists. | Req 53, 54, 55, 68 |
-| **Member 3** | Confirm the damage form path `/damage-reports/new?reservation=<id>` and that `hasOpenDamageCase(reservationId)` is exported for my page | Req 60, 61 |
-| **Member 6** | `ItemDeliverySettings` props, and whether delivery settings are saved through your endpoint (as with pickup/rules in Sprint 1) or mine | Req 69 (your), item editor (mine) |
-| **Member 6** | For a delivered item, does "delivered" also count as picked up, or does the lender still mark pickup? | Req 59 |
+| **Member 1** | Lender menu: add **Booking requests** (`/lender/reservations`) and **Dashboard** (`/lender/dashboard`) to `lenderLinks` in `navLinks.js`, next to **My items**. Today lenders reach them only through the buttons on My items. | Req 56–60, 106 |
 | **Member 7** | Embed `<BorrowListButton itemId={item._id} ownerId={item.owner?._id} maxBorrowDays={item.rules?.maxBorrowDays} />` on `ItemDetailsPage` (import from `components/sprint2/m5/BorrowListButton`); read `item.tags` for alternatives (old items may have none) | Req 46, 92 |
 
 ---

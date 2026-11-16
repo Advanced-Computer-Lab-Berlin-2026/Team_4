@@ -1,13 +1,15 @@
 /**
  * RESERVATION LIFECYCLE (read side) - Owner: Member 5 - Requirements: 53, 54, and the lender's list for 56-60, 74, 75
- * Contract: docs/sprint2/member5.md §4. Read only: every change to a reservation goes through Member 1's
- * reservationCommands (docs/SPRINT2_CONTRACT.md); this file never writes.
+ * Contract: docs/sprint2/member5.md §4-§5. This file never writes a reservation itself: every change goes through
+ * Member 1's reservationCommands (docs/SPRINT2_CONTRACT.md), called once, and its side effects (refunds, events) are
+ * never repeated here.
  * Dates: UTC midnight, the end date is the return day and is not counted (half-open [startDate, endDate)).
  */
 const mongoose = require('mongoose');
 const ApiError = require('../../utils/ApiError');
 const { Reservation, DamageReport } = require('../../models');
 const { lifecycleFlags } = require('./returnTiming'); // Member 1's labels for stuck reservations
+const reservationCommands = require('./reservationCommands'); // Member 1: the only writer of reservation status
 const { parsePagination, paginated } = require('../../utils/pagination');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -232,4 +234,25 @@ async function getOne(user, id) {
   return toDto(r, user, { hasDamageCase: damaged.has(String(r._id)) }, new Date());
 }
 
-module.exports = { listMine, listLending, lendingItems, getOne, parseFilters, STATUS_FILTERS };
+const MAX_REASON = 500;
+
+/**
+ * Req 56: the lender approves or declines a pending request through Member 1's command, then gets the updated booking.
+ * Approve = his `confirm` (re-checks the item, the borrower and the dates). Decline = his `reject` (optional reason,
+ * refunds the held deposit and any delivery fee in full through Member 2). Pressing twice changes nothing twice.
+ */
+async function decide(user, id, decision, body = {}) {
+  let reason;
+  if (decision === 'reject' && body.reason !== undefined && body.reason !== null) {
+    if (typeof body.reason !== 'string') throw fieldError('reason', 'The reason must be text');
+    const trimmed = body.reason.trim();
+    if (trimmed.length > MAX_REASON) throw fieldError('reason', `Keep the reason under ${MAX_REASON} characters`);
+    reason = trimmed || undefined;
+  }
+  await reservationCommands.transition({
+    actorId: user._id, reservationId: id, action: decision === 'approve' ? 'confirm' : 'reject', expectedStatus: 'pending', reason,
+  });
+  return getOne(user, id);
+}
+
+module.exports = { listMine, listLending, lendingItems, getOne, decide, parseFilters, STATUS_FILTERS, MAX_REASON };

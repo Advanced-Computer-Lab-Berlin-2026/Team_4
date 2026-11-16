@@ -1,7 +1,7 @@
 // RESERVATION DETAILS - Owner: Member 5 - Requirements: 53 (and the screen for 56-60, 74, 75 in later parts)
 // Route: /reservations/:id   Access: member (the borrower or the lender of this booking; the server checks)
-// Status, progress, dates, deposit, the other person and any extension request. Read only for now: the lifecycle buttons
-// come in Parts 10-13. Messages and cancellation are Member 1's page (/my-reservations/:id).
+// Status, progress, dates, deposit, the other person and any extension request. The lender answers a pending request
+// here (Req 56); pickup, return and extensions come in Parts 11-13. Messages and cancellation are Member 1's page (/my-reservations/:id).
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { getErrorMessage } from '../../api/axios';
@@ -10,6 +10,7 @@ import { formatDate, formatMoney } from '../../utils/format';
 import Spinner from '../../components/common/Spinner';
 import Alert from '../../components/common/Alert';
 import ReservationTimeline from '../../components/sprint2/m5/ReservationTimeline';
+import RequestAnswer from '../../components/sprint2/m5/RequestAnswer';
 import { dayCount, showDay, showRange } from '../../components/sprint2/m5/borrowDates';
 import { OPEN_STATUSES, depositText, labelsOf, nextStep, statusOf } from '../../components/sprint2/m5/reservationText';
 import s from '../../styles/sprint2/member5.module.css';
@@ -26,9 +27,16 @@ export default function ReservationDetailsPage() {
   const [r, setR] = useState(null);
   const [error, setError] = useState({ text: '', notFound: false });
   const [reloadKey, setReloadKey] = useState(0);
+  const [notice, setNotice] = useState('');
+  const [problem, setProblem] = useState('');
+
+  // Quiet refresh after an action was refused because the booking changed elsewhere: no loading screen, message kept.
+  const refresh = () => { getReservation(id).then((d) => setR(d.reservation)).catch((e) => setProblem(getErrorMessage(e))); };
 
   useEffect(() => {
     let ignore = false;
+    setProblem('');
+    setNotice('');
     setR(null);
     setError({ text: '', notFound: false });
     getReservation(id)
@@ -84,6 +92,18 @@ export default function ReservationDetailsPage() {
         <ul className={s.labels} aria-label="Notes">
           {labels.map((l) => <li key={l.key} className={`badge badge-${l.tone} ${s.badge}`}>{l.text}</li>)}
         </ul>
+      )}
+
+      <Alert variant="success">{notice}</Alert>
+      <Alert variant="error">{problem}</Alert>
+      {lender && (r.actions?.approve || r.actions?.reject) && (
+        <section className={`card ${s.answerCard}`} aria-labelledby="res-answer-title">
+          <div className="card-body">
+            <h2 id="res-answer-title" className={s.cardTitle}>Answer this request</h2>
+            <RequestAnswer reservation={r} onStale={(message) => { setNotice(''); setProblem(message); refresh(); }}
+              onDone={(updated, message) => { setR(updated); setProblem(''); setNotice(message); }} />
+          </div>
+        </section>
       )}
 
       <div className={s.detailLayout}>

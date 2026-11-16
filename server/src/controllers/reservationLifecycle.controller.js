@@ -24,3 +24,13 @@ exports.lendingItems = asyncHandler(async (req, res) => {
 exports.getOne = asyncHandler(async (req, res) => {
   res.json({ reservation: await lifecycle.getOne(req.user, req.params.id) });
 });
+
+/** PATCH /api/reservation-lifecycle/:id/approve - Req 56 - the lender approves a pending request (Member 1's confirm) */
+exports.approve = asyncHandler(async (req, res) => {
+  res.json({ reservation: await lifecycle.decide(req.user, req.params.id, 'approve') });
+});
+
+/** PATCH /api/reservation-lifecycle/:id/reject - Req 56 - { reason? } (up to 500 characters, shown to the borrower) */
+exports.reject = asyncHandler(async (req, res) => {
+  res.json({ reservation: await lifecycle.decide(req.user, req.params.id, 'reject', req.body || {}) });
+});

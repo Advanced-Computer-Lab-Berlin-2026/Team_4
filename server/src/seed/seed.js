@@ -86,6 +86,14 @@ async function upsertUser(data) {
     ]);
   }
 
+  await Item.updateOne({ owner: lender._id, title: 'ShareShed Demo Hand Trowel' }, {
+    $setOnInsert: {
+      category: cat.garden._id, description: 'Hand trowel available without a deposit.',
+      depositAmount: 0, photos: [PLACEHOLDER],
+      pickup: { location: 'Giza - 5 Palm Street, ground floor', instructions: 'Call before arriving.' },
+    },
+  }, { upsert: true });
+
   // ---- Notice -------------------------------------------------------------------------------------
   if ((await Notice.countDocuments()) === 0) {
     await Notice.create({ title: 'Welcome to ShareShed!', body: 'Borrow before you buy. Be kind, return items on time, and report any damage honestly.', postedBy: admin._id, pinned: true });

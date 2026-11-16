@@ -5,6 +5,11 @@
 //          member = role member | lender = verified lender | admin = role admin
 import { lazy } from 'react';
 
+// Eagerly discover route declarations only. Each member's pages remain lazy.
+const sprint2Routes = Object.values(import.meta.glob('./sprint2/*.routes.jsx', {
+  eager: true, import: 'default',
+})).flat();
+
 const P = (loader) => lazy(loader);
 
 const routes = [
@@ -47,7 +52,7 @@ const routes = [
   { path: '/admin/categories', access: 'admin', element: P(() => import('../pages/admin/AdminCategoriesPage')) },
   { path: '/admin/notices', access: 'admin', element: P(() => import('../pages/admin/AdminNoticesPage')) },
 
-  // ---- Sprint 2 routes go here (reservations, borrow list, wallet top-ups, membership, ...)
+  ...sprint2Routes,
 ];
 
 export default routes;

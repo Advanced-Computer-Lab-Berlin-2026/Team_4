@@ -7,6 +7,8 @@ export const guestLinks = [
 
 export const memberLinks = [
   { to: '/catalog', label: 'Browse items' },
+  { to: '/reserve', label: 'Reserve' },
+  { to: '/my-reservations', label: 'Reservations' },
   { to: '/favorites', label: 'Favorites' },
   { to: '/household', label: 'Household' },
   { to: '/notices', label: 'Notices' },

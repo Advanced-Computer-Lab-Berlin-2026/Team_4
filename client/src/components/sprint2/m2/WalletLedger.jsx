@@ -16,6 +16,7 @@ export const LEDGER_LABELS = {
   refund: 'Cancellation refund',
   late_fee: 'Late fee',
   forfeit: 'Deposit kept for damage',
+  lender_payout: 'Received from a borrower',
   membership: 'Membership payment',
   referral_credit: 'Referral reward',
   adjustment: 'Adjustment',

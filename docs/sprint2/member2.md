@@ -35,7 +35,7 @@ All in `server/src/services/payments/config.js`; public at `GET /api/payments/po
 | Late-fee rate | **10 % of the deposit per started day** late | |
 | Late-fee cap | **100 %** of the deposit | |
 | Late fee with a low wallet | Charge what is available; record the rest as **outstanding** (`PaymentOperation.outstandingMinor`), collected automatically from the next wallet credit. No User schema change. | |
-| Receiver of forfeited deposit / late fee | Lender's wallet | **Open** |
+| Receiver of forfeited deposit / late fee | Lender's wallet (ledger type `lender_payout`); set `forfeitedFundsTo: 'platform'` in `config.js` to keep it instead | **Open** |
 | Refunds of card payments | Always to the **wallet** (Req 52) | |
 
 ---
@@ -49,9 +49,9 @@ Member 1's `services/sprint2/bootstrap.js` loads this file automatically. Missin
 | Function | Called when | Input (main fields) | Returns | Status |
 |---|---|---|---|---|
 | `chargeWalletCheckout(input, session)` | Checkout paid by wallet (Req 50) | `attemptId, borrowerId, idempotencyKey, amountMinor, currency, expiresAt, lines[{ reservationId, itemId, title, amountMinor, deposit, fulfilment, startDate, endDate }]` | `{ chargedMinor, balanceMinor, operationId, replayed }` | ✅ Done |
-| `settleCancellation(input, session)` | Borrower cancels (Req 52, 81) | `reservationId, borrowerId, amountMinor, currency, cancelledAt, pickupDate, freeCancellationHours, idempotencyKey` | `{ refundMinor }` | Next |
-| `refundToWallet(input, session)` | Lender rejects (full refund) | `reservationId, userId, reference, currency, idempotencyKey, amountMinor, depositMinor, deliveryMinor` | `{ refundMinor }` | Next |
-| `releaseDeposit(input, session)` | Good return | same fields as `refundToWallet` | `{ releasedMinor }` | Next |
+| `settleCancellation(input, session)` | Borrower cancels (Req 52, 81) | `reservationId, borrowerId, amountMinor, currency, cancelledAt, pickupDate, freeCancellationHours, idempotencyKey` | `{ refundMinor, ratePercent, rule, forfeitedMinor, paidToLenderMinor }` | ✅ Done |
+| `refundToWallet(input, session)` | Lender rejects (full refund) | `reservationId, userId, reference, currency, idempotencyKey, amountMinor, depositMinor, deliveryMinor` | `{ refundMinor }` | ✅ Done |
+| `releaseDeposit(input, session)` | Good return | same fields as `refundToWallet` | `{ releasedMinor }` | ✅ Done |
 | `applyLateFee(input, session)` | Late return (Req 77) | `reservationId, userId, reference, currency, idempotencyKey, returnedAt, endDate` | `{ feeMinor }` | Next |
 | `startCardPayment(input)` | Card checkout (Req 51) | checkout payment input | `{ state:'pending', redirectUrl }` | Blocked: `stripe` package |
 | `getCardPayment(input)` | Checkout status / reconcile | checkout payment input + `closeExpired` | `{ state:'pending'\|'failed'\|'paid', … }` | Blocked |
@@ -64,6 +64,7 @@ Member 1's `services/sprint2/bootstrap.js` loads this file automatically. Missin
 | Function | For | Input | Returns | Status |
 |---|---|---|---|---|
 | `charge(input, session)` | M8 membership paid by wallet | `userId, amountMinor, currency, purpose:'membership', reference:{ type:'membership', id }, idempotencyKey` | `{ chargedMinor, balanceMinor, operationId, replayed }` | ✅ Done |
+| `quoteCancellationRefund(input)` | M1 / UI: show the refund before cancelling (no money moves) | `amountMinor, cancelledAt, pickupDate, freeCancellationHours?` | `{ ratePercent, rule, refundMinor, forfeitedMinor, hoursBeforePickup }` | ✅ Done |
 | `creditReferral(input, session)` | M9 referral reward (Req 99) | `userId, amountMinor, currency, referralId, idempotencyKey` | `{ creditedMinor, balanceMinor, operationId, replayed }` | ✅ Done |
 | `settleForfeiture(input, session)` | M3 damage decision / dispute revision | `reservationId, targetForfeitMinor, idempotencyKey` — applies only the **difference** from what was already forfeited, bounded by the held deposit | `{ forfeitedTotalMinor, deltaMinor, releasedMinor }` | Planned |
 
@@ -99,7 +100,7 @@ Client route (in `client/src/routes/sprint2/member2.routes.jsx`, discovered auto
 ## 5. Data model changes (Member 2 models only)
 
 - **`PaymentOperation`** (new): `idempotencyKey` (unique), `kind`, `purpose`, `user`, `reference{ type, id }`, `amountMinor`, `currency`, `status`, `requestHash`, `result`, `outstandingMinor`, `stripePaymentIntentId`.
-- **`WalletTransaction`** (extended): `amountMinor`, `balanceAfterMinor`, `currency`, `operation`, `reference`. `amount`/`balanceAfter` (EGP) kept.
+- **`WalletTransaction`** (extended): `amountMinor`, `balanceAfterMinor`, `currency`, `operation`, `reference`; new type `lender_payout`. `amount`/`balanceAfter` (EGP) kept.
 - **`AuditLog`** (extended): `amountMinor`, `currency`, `operation`, `inputs`, `result`. `details`/`amount` kept.
 
 Reference types: `checkout`, `reservation`, `membership`, `referral`, `manual`. No changes to `User` or `Reservation` are needed.

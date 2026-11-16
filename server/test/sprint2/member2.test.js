@@ -351,3 +351,105 @@ test('GET /api/payments/policy is public and shows the refund and late-fee rules
   assert.equal(data.policy.cancellation.partialRefundPercent, 50);
   assert.deepEqual(data.policy.lateFee, { graceMinutes: 60, percentOfDepositPerDay: 10, capPercentOfDeposit: 100 });
 });
+
+// ---------------------------------------------------------------- Step 4 (plan step C): refunds (Req 52, 81)
+const { cancel } = require('../../src/services/reservations/cancellation');
+const commands = require('../../src/services/reservations/reservationCommands');
+const { quoteCancellationRefund } = require('../../src/services/payments/refund');
+
+/** A paid reservation as M1's checkout leaves it (deposit held). Dates are UTC midnights like M1 stores them. */
+async function paidReservation({ borrower, status = 'confirmed', startIn = 5, days = 2, deposit = 150, deliveryFee = 0, method = 'wallet' }) {
+  const item = await bookableItem(100);
+  return Reservation.create({
+    item: item._id, borrower: borrower._id, lender: item.owner, status,
+    startDate: new Date(day(startIn)), endDate: new Date(day(startIn + days)),
+    deposit: { amount: deposit, status: 'held' },
+    fulfilment: { method: deliveryFee ? 'delivery' : 'pickup', deliveryFee, ...(deliveryFee && { deliveryAddress: '1 Test St' }) },
+    payment: { method },
+  });
+}
+
+test('Req 81: the refund rate depends on how long before pickup the borrower cancels', () => {
+  const pickupDate = new Date('2026-12-10T00:00:00Z');
+  const at = (hoursBefore) => new Date(pickupDate - hoursBefore * 3600000);
+  assert.deepEqual(quoteCancellationRefund({ amountMinor: 15000, cancelledAt: at(72), pickupDate }).refundMinor, 15000);
+  assert.deepEqual(quoteCancellationRefund({ amountMinor: 15000, cancelledAt: at(48), pickupDate }).refundMinor, 15000); // exactly 48 h = free
+  const late = quoteCancellationRefund({ amountMinor: 15001, cancelledAt: at(47.9), pickupDate });
+  assert.deepEqual([late.rule, late.ratePercent, late.refundMinor, late.forfeitedMinor], ['late_cancellation', 50, 7501, 7500]);
+  assert.equal(quoteCancellationRefund({ amountMinor: 15000, cancelledAt: at(0), pickupDate }).refundMinor, 0);
+});
+
+test('Req 52: cancelling a CARD-paid reservation early credits the full deposit to the wallet, once', async () => {
+  const borrower = await makeUser(0);
+  const reservation = await paidReservation({ borrower, method: 'card', startIn: 5 });
+
+  await cancel({ actorId: borrower._id, reservationId: reservation._id }); // Member 1's real cancel command
+  await cancel({ actorId: borrower._id, reservationId: reservation._id }); // retry: must not pay twice
+
+  assert.equal(await balanceOf(borrower), 15000);
+  const saved = await Reservation.findById(reservation._id);
+  assert.deepEqual([saved.status, saved.deposit.status, saved.cancellation.refundAmount], ['cancelled', 'refunded', 150]);
+  const ledger = await WalletTransaction.find({ user: borrower._id });
+  assert.deepEqual(ledger.map((t) => [t.type, t.amountMinor]), [['refund', 15000]]);
+  const auditRow = await AuditLog.findOne({ action: 'cancellation_refunded' });
+  assert.equal(String(auditRow.reservation), String(reservation._id));
+  assert.deepEqual([auditRow.inputs.heldMinor, auditRow.inputs.freeCancellationHours, auditRow.result.rule], [15000, 48, 'free_cancellation']);
+});
+
+test('Req 81: a late cancellation refunds 50 % to the borrower and pays the rest to the lender', async () => {
+  const borrower = await makeUser(0);
+  const reservation = await paidReservation({ borrower, startIn: 1 }); // pickup tomorrow -> less than 48 h away
+  await cancel({ actorId: borrower._id, reservationId: reservation._id });
+
+  assert.equal(await balanceOf(borrower), 7500);
+  assert.equal(await balanceOf({ _id: reservation.lender }), 7500);
+  const saved = await Reservation.findById(reservation._id);
+  assert.deepEqual([saved.deposit.status, saved.deposit.forfeited, saved.cancellation.refundAmount], ['partially_forfeited', 75, 75]);
+  const lenderRow = await WalletTransaction.findOne({ user: reservation.lender });
+  assert.deepEqual([lenderRow.type, lenderRow.amountMinor], ['lender_payout', 7500]);
+});
+
+test('wallet checkout then cancellation gives the money back (full round trip over HTTP)', async () => {
+  const borrower = await makeUser(200);
+  const item = await bookableItem(100);
+  const selection = { source: 'single', itemId: String(item._id), startDate: day(5), endDate: day(7) };
+  const quote = await send('POST', '/checkout/quote', borrower, selection);
+  const paid = await send('POST', '/checkout', borrower, { ...selection, method: 'wallet', operationKey: 'm2-roundtrip-checkout-1', quoteHash: quote.data.quote.quoteHash });
+  assert.equal(await balanceOf(borrower), 5000);
+
+  const cancelled = await send('POST', `/reservations/${paid.data.checkout.reservationIds[0]}/cancel`, borrower, { reason: 'Plans changed' });
+  assert.equal(cancelled.status, 200, JSON.stringify(cancelled.data));
+  assert.equal(await balanceOf(borrower), 20000);
+});
+
+test('lender rejection refunds the deposit AND the delivery fee in full', async () => {
+  const borrower = await makeUser(0);
+  const reservation = await paidReservation({ borrower, status: 'pending', deposit: 150, deliveryFee: 30 });
+  await commands.transition({ actorId: reservation.lender, reservationId: reservation._id, action: 'reject', reason: 'Not available' });
+
+  assert.equal(await balanceOf(borrower), 18000);
+  const saved = await Reservation.findById(reservation._id);
+  assert.deepEqual([saved.status, saved.deposit.status], ['rejected', 'refunded']);
+  const auditRow = await AuditLog.findOne({ action: 'rejection_refunded' });
+  assert.deepEqual([auditRow.inputs.depositMinor, auditRow.inputs.deliveryMinor], [15000, 3000]);
+});
+
+test('good-condition return releases the deposit to the wallet exactly once', async () => {
+  const borrower = await makeUser(0);
+  const reservation = await paidReservation({ borrower, status: 'active', startIn: -1, days: 4 }); // due in 3 days -> not late
+  await commands.transition({ actorId: reservation.lender, reservationId: reservation._id, action: 'return' });
+  await commands.transition({ actorId: reservation.lender, reservationId: reservation._id, action: 'return' }); // retry
+
+  assert.equal(await balanceOf(borrower), 15000);
+  assert.equal((await Reservation.findById(reservation._id)).deposit.status, 'released');
+  assert.equal(await WalletTransaction.countDocuments({ user: borrower._id, type: 'deposit_release' }), 1);
+  assert.equal(await AuditLog.countDocuments({ action: 'deposit_released' }), 1);
+});
+
+test('refund functions reject inconsistent input before moving money', async () => {
+  const borrower = await makeUser(0);
+  const reservationId = new mongoose.Types.ObjectId();
+  await assert.rejects(payment.refundToWallet({ reservationId, userId: borrower._id, currency: 'EGP', idempotencyKey: 'bad:1', amountMinor: 100, depositMinor: 60, deliveryMinor: 30 }), (e) => e.status === 400);
+  await assert.rejects(payment.settleCancellation({ reservationId, borrowerId: borrower._id, amountMinor: 100, currency: 'EGP', cancelledAt: 'nope', pickupDate: new Date(), idempotencyKey: 'bad:2' }), (e) => e.status === 400);
+  assert.equal(await balanceOf(borrower), 0);
+});

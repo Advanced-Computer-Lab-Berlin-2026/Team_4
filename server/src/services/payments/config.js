@@ -4,6 +4,9 @@
 const { FREE_CANCELLATION_HOURS } = require('../../config/constants');
 
 module.exports = Object.freeze({
+  // Who receives the part of a deposit a borrower loses (late cancellation now; late fees and damage later).
+  // 'lender' = credited to the lender's wallet; 'platform' = kept by ShareShed (no wallet credit). OPEN DECISION.
+  forfeitedFundsTo: 'lender',
   cancellation: Object.freeze({
     freeCancellationHours: FREE_CANCELLATION_HOURS, // full refund if cancelled at least this long before pickup
     partialRefundPercent: 50, // refund when cancelled later than that (but before pickup)

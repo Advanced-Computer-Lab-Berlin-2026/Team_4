@@ -7,7 +7,8 @@ const { Schema } = mongoose;
 const schema = new Schema(
   {
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    type: { type: String, enum: ['deposit_hold', 'deposit_release', 'refund', 'late_fee', 'forfeit', 'membership', 'referral_credit', 'adjustment'], required: true },
+    // lender_payout = money a lender receives from a borrower's forfeited deposit or late fee
+    type: { type: String, enum: ['deposit_hold', 'deposit_release', 'refund', 'late_fee', 'forfeit', 'lender_payout', 'membership', 'referral_credit', 'adjustment'], required: true },
     amount: { type: Number, required: true },   // signed: + credit, - debit (EGP)
     balanceAfter: { type: Number, required: true },
     amountMinor: { type: Number, required: true }, // signed, piastres (source of truth)

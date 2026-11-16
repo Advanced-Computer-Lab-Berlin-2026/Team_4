@@ -166,16 +166,16 @@ Read-only. Lists reservations where I am the **borrower**.
 {
   "_id": "…", "status": "pending|confirmed|active|completed|cancelled|rejected",
   "startDate": "2026-12-01", "endDate": "2026-12-03", "days": 2,
-  "item": { "_id": "…", "title": "…", "photo": "…", "available": true, "category": { "name": "…" } },
+  "item": { "_id": "…", "title": "…", "photo": "…", "available": true, "maxBorrowDays": 5, "category": { "name": "…" } },
   "borrower": { "_id": "…", "name": "…" }, "lender": { "_id": "…", "name": "…" }, "role": "borrower|lender",
   "deposit": { "amount": 400, "status": "held" },
   "fulfilment": { "method": "pickup|delivery", "deliveryStatus": "none" },
-  "pickedUpAt": null, "returnedAt": null, "completedAt": null, "returnCondition": null, "lateFee": 0,
+  "pickedUpAt": null, "returnedAt": null, "completedAt": null, "returnCondition": null, "hasDamageCase": false, "lateFee": 0,
   "rejectionReason": null, "cancellation": null,
   "extension": { "requestId": null, "status": "none|pending|approved|rejected|cancelled|expired", "requestedEndDate": null, "decidedAt": null },
   "flags": { "approvalOverdue": false, "pickupMissed": false, "returnOverdue": false },
   "actions": { "approve": false, "reject": false, "pickup": false, "returnGood": false, "reportDamage": false,
-               "requestExtension": false, "cancelExtension": false, "decideExtension": false },
+               "requestExtension": false, "cancelExtension": false, "decideExtension": false, "approveExtension": false },
   "createdAt": "…"
 }
 ```
@@ -185,7 +185,8 @@ Read-only. Lists reservations where I am the **borrower**.
 - `extension.requestId` is sent back when cancelling, approving or rejecting a request.
 - `item.available` is `false` when the item is archived or removed (its public page doesn't exist); `item` is `null` if it was deleted.
 - `actions.reject` also needs the deposit to be still held (or no deposit), like Member 1's `reject`.
-- `actions.approve` also needs what Member 1's `confirm` re-checks: the item still public, the borrower's trust score at least the item's `minTrustScore`, and the length within the item's `maxBorrowDays`.
+- `actions.approveExtension` (lender) is only `true` when Member 1's extension approval would work: the item still public, the borrower's trust score high enough, the new total within `maxBorrowDays`, and the extra days free. `decideExtension` alone means the lender may still decline. `actions.reportDamage` needs the deposit still held (Member 1's `returnDamaged`). `hasDamageCase` says a damage report exists for this booking.
+- `actions.approve` also needs what Member 1's `confirm` re-checks (including that the dates don't overlap another booking or hold): the item still public, the borrower's trust score at least the item's `minTrustScore`, and the length within the item's `maxBorrowDays`.
 - `role` is the current user's side of this booking. `cancellation` is `{ at, reason }` for a cancelled booking, else `null`.
 - People are shown by name only (no email, phone or address). If the item was deleted, `item` is `null`.
 - **Errors:** `400` with the field for an unknown `status` (the filter word is `upcoming`, not `confirmed`), an invalid `from`/`to` date, or `to` before `from` · `401` not logged in · `403` admin · `404` not my booking (also for someone else's, so it isn't revealed).
@@ -254,7 +255,9 @@ All four call Member 1's `reservationCommands.extend({ actorId, reservationId, a
 - No answer: a request still pending at the original return deadline shows as **expired**; the borrower returns on the original date.
 - No extra cost; no notifications for extensions (none in Member 9's event list).
 
-**POST `/:id/extension`** — `{ requestedEndDate }` (`YYYY-MM-DD`). **Response `201`:** `{ reservation }`.
+**POST `/:id/extension`** — `{ requestedEndDate }` (`YYYY-MM-DD`). **Response `201`:** `{ reservation }`. Before calling Member 1's `extend`, two early checks answer at once: the new **total** length must fit the item's `maxBorrowDays` (`400` on `requestedEndDate`), and the extra days must be free (`409` "Someone has booked part of these extra days", Member 1's `getAvailability` with this booking excluded). His command re-checks both on approval.
+
+**Pages:** the borrower's details page has **Need it longer?** (a date field from the day after the current return date, a live "+N days" line, **Ask for more time**; while pending, the asked date and **Withdraw request**; afterwards the last answer). The lender sees **Request for more time** with **Approve new date** / **Decline** on the details page and on the Booking requests card. Member 1's `extend` has no reason field for extensions.
 **DELETE `/:id/extension`**, **PATCH `/:id/extension/approve`**, **PATCH `/:id/extension/reject`** — `{ requestId }`. **Response `200`:** `{ reservation }`.
 **Errors** (from the command): `409` not active, deadline passed, a request already pending, nothing pending, request no longer current, or days already booked · `400` not later than the current date, or longer than the item allows.
 

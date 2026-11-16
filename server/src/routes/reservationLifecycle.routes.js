@@ -27,6 +27,11 @@ router.patch('/:id/approve', protect, requireVerifiedLender, reservationIdParam,
 router.patch('/:id/reject', protect, requireVerifiedLender, reservationIdParam, validate, c.reject);
 router.patch('/:id/pickup', protect, requireVerifiedLender, reservationIdParam, validate, c.pickup); // Req 59
 router.patch('/:id/return', protect, requireVerifiedLender, reservationIdParam, validate, c.markReturned); // Req 60
+// Req 74 (borrower: any member) and Req 75 (lender: verified). Member 1's extend checks who is the borrower or lender.
+router.post('/:id/extension', ...member, reservationIdParam, validate, c.requestExtension);
+router.delete('/:id/extension', ...member, reservationIdParam, validate, c.cancelExtension);
+router.patch('/:id/extension/approve', protect, requireVerifiedLender, reservationIdParam, validate, c.approveExtension);
+router.patch('/:id/extension/reject', protect, requireVerifiedLender, reservationIdParam, validate, c.rejectExtension);
 router.get('/:id', ...member, param('id').isMongoId().withMessage('Invalid reservation'), validate, c.getOne); // Req 53
 
 module.exports = router;

@@ -1,5 +1,6 @@
 // BOOKING REQUESTS (lender) - Owner: Member 5 - Requirements: 56, 59, 60 (list; the buttons come in Parts 10-12)
-// Requests can be approved or declined (Req 56), pickups (Req 59) and returns (Req 60) marked right on their card.
+// Requests can be approved or declined (Req 56), pickups (Req 59) and returns (Req 60) marked, and requests for
+// more time answered (Req 75) right on their card.
 // Route: /lender/reservations   Access: lender   (registered in src/routes/sprint2/member5.routes.jsx)
 // Every booking of my items. "Needs my answer" shows pending requests and open extension requests, oldest first.
 // Filters (tab, item, dates, page) are kept in the address, so reload and the Back arrow keep them.
@@ -15,6 +16,7 @@ import ReservationCard from '../../components/sprint2/m5/ReservationCard';
 import RequestAnswer from '../../components/sprint2/m5/RequestAnswer';
 import PickupButton from '../../components/sprint2/m5/PickupButton';
 import ReturnActions from '../../components/sprint2/m5/ReturnActions';
+import ExtensionAnswer from '../../components/sprint2/m5/ExtensionAnswer';
 import { isDay, showDay } from '../../components/sprint2/m5/borrowDates';
 import { OPEN_STATUSES } from '../../components/sprint2/m5/reservationText';
 import s from '../../styles/sprint2/member5.module.css';
@@ -126,6 +128,7 @@ export default function LenderReservationsPage() {
           <ReservationCard key={r._id} reservation={r}>
             <RequestAnswer reservation={r} onStale={stale} onDone={done} />
             {r.actions?.pickup && <PickupButton reservation={r} onStale={stale} onDone={done} />}
+            {r.actions?.decideExtension && <ExtensionAnswer reservation={r} onStale={stale} onDone={done} />}
             {r.actions?.returnGood && <ReturnActions reservation={r} onStale={stale} onDone={done} />}
           </ReservationCard>
         ))}

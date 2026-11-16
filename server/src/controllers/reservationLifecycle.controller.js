@@ -44,3 +44,23 @@ exports.pickup = asyncHandler(async (req, res) => {
 exports.markReturned = asyncHandler(async (req, res) => {
   res.json({ reservation: await lifecycle.markReturned(req.user, req.params.id) });
 });
+
+/** POST /api/reservation-lifecycle/:id/extension - Req 74 - borrower: { requestedEndDate } -> 201 { reservation } */
+exports.requestExtension = asyncHandler(async (req, res) => {
+  res.status(201).json({ reservation: await lifecycle.requestExtension(req.user, req.params.id, req.body || {}) });
+});
+
+/** DELETE /api/reservation-lifecycle/:id/extension - Req 74 - borrower withdraws: { requestId } */
+exports.cancelExtension = asyncHandler(async (req, res) => {
+  res.json({ reservation: await lifecycle.answerExtension(req.user, req.params.id, 'cancel', req.body || {}) });
+});
+
+/** PATCH /api/reservation-lifecycle/:id/extension/approve - Req 75 - lender: { requestId } */
+exports.approveExtension = asyncHandler(async (req, res) => {
+  res.json({ reservation: await lifecycle.answerExtension(req.user, req.params.id, 'approve', req.body || {}) });
+});
+
+/** PATCH /api/reservation-lifecycle/:id/extension/reject - Req 75 - lender: { requestId } */
+exports.rejectExtension = asyncHandler(async (req, res) => {
+  res.json({ reservation: await lifecycle.answerExtension(req.user, req.params.id, 'reject', req.body || {}) });
+});

@@ -11,6 +11,7 @@ const { Reservation, DamageReport } = require('../../models');
 const { lifecycleFlags } = require('./returnTiming'); // Member 1's labels for stuck reservations
 const reservationCommands = require('./reservationCommands'); // Member 1: the only writer of reservation status
 const { features } = require('../sprint2/bootstrap'); // Member 1's loader for other members' optional modules
+const { getAvailability } = require('./availability'); // Member 1: bookings and holds on an item (read only)
 const { parsePagination, paginated } = require('../../utils/pagination');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -55,19 +56,19 @@ function overlap({ from, to }) {
   return f;
 }
 
-/** The item checks Member 1's `confirm` repeats (bookingRules.loadBookableItem): item still public, the borrower's
- * trust score still high enough, the length still within the item's maximum. */
-function canStillBook(r) {
+/** The item checks Member 1's `confirm` and extension `approve` repeat (bookingRules.loadBookableItem): item still
+ * public, the borrower's trust score still high enough, the length (up to `endDate`) within the item's maximum. */
+function canStillBook(r, endDate = r.endDate) {
   const item = r.item && typeof r.item === 'object' && r.item.title !== undefined ? r.item : null;
   if (!item || item.isArchived || item.moderationStatus !== 'ok') return false;
   const minTrust = Number(item.rules?.minTrustScore) || 0;
   if (typeof r.borrower?.trustScore === 'number' && r.borrower.trustScore < minTrust) return false;
   const max = Number(item.rules?.maxBorrowDays) || 0;
-  return !max || (new Date(r.endDate) - new Date(r.startDate)) / DAY_MS <= max;
+  return !max || (new Date(endDate) - new Date(r.startDate)) / DAY_MS <= max;
 }
 
 /** Which buttons the current user may use right now. Same rules as Member 1's commands; the command still decides. */
-function actionsFor(r, user, { hasDamageCase }, now) {
+function actionsFor(r, user, { hasDamageCase, approveBlocked, extensionBlocked }, now) {
   const isLender = String(r.lender?._id || r.lender) === String(user._id) && user.role === 'member' && user.lenderStatus === 'verified';
   const isBorrower = String(r.borrower?._id || r.borrower) === String(user._id);
   const flags = lifecycleFlags(r, now);
@@ -75,14 +76,17 @@ function actionsFor(r, user, { hasDamageCase }, now) {
   const extensionPending = flags.extensionStatus === 'pending';
   const depositHeld = !(r.deposit?.amount > 0) || r.deposit?.status === 'held';
   return {
-    approve: isLender && r.status === 'pending' && r.endDate > now && canStillBook(r), // Member 1's confirm re-checks these
+    approve: isLender && r.status === 'pending' && r.endDate > now && canStillBook(r) && !approveBlocked, // Member 1's confirm re-checks these
     reject: isLender && r.status === 'pending' && depositHeld, // Member 1's reject refunds a held deposit
     pickup: isLender && r.status === 'confirmed' && r.startDate <= now && r.endDate > now,
     returnGood: isLender && active && !hasDamageCase && r.returnCondition !== 'damaged' && depositHeld,
-    reportDamage: isLender && active && !hasDamageCase,
+    reportDamage: isLender && active && !hasDamageCase && depositHeld, // Member 1's returnDamaged needs the deposit held
     requestExtension: isBorrower && active && now < r.endDate && !extensionPending,
     cancelExtension: isBorrower && active && extensionPending,
     decideExtension: isLender && active && extensionPending,
+    // Member 1's extension approve re-checks the item, the total length and that the extra days are free.
+    approveExtension: isLender && active && extensionPending && !!r.extension?.requestedEndDate
+      && canStillBook(r, r.extension.requestedEndDate) && !extensionBlocked,
   };
 }
 
@@ -99,6 +103,7 @@ function toDto(r, user, extra, now) {
     item: item ? {
       _id: item._id, title: item.title, photo: item.photos?.[0]?.url || null,
       available: !item.isArchived && item.moderationStatus === 'ok', // public item page exists
+      maxBorrowDays: Number(item.rules?.maxBorrowDays) || null,
       category: item.category ? { _id: item.category._id, name: item.category.name, slug: item.category.slug } : null,
     } : null,
     borrower: person(r.borrower),
@@ -110,6 +115,7 @@ function toDto(r, user, extra, now) {
     returnedAt: r.returnedAt || null,
     completedAt: r.completedAt || null,
     returnCondition: r.returnCondition || null,
+    hasDamageCase: !!extra.hasDamageCase,
     lateFee: r.lateFee || 0,
     rejectionReason: r.rejectionReason || null,
     cancellation: r.status === 'cancelled' ? { at: r.cancellation?.at || null, reason: r.cancellation?.reason || null } : null,
@@ -145,6 +151,29 @@ const populate = (q) => q
   .populate({ path: 'item', select: 'title photos category isArchived moderationStatus rules', populate: { path: 'category', select: 'name slug' } })
   .populate('borrower', 'name trustScore') // trustScore is only used for the approve rule, never sent
   .populate('lender', 'name');
+
+/** True when [start, end) of this item overlaps someone else's booking or hold (Member 1's getAvailability). */
+async function overlapsOthers(r, start, end) {
+  const itemId = r.item?._id || r.item;
+  if (!itemId || !(new Date(end) > new Date(start))) return false;
+  try {
+    const { available } = await getAvailability(itemId, { startDate: new Date(start), endDate: new Date(end) }, { excludeReservationId: String(r._id) });
+    return !available;
+  } catch {
+    return false; // Member 1's command decides anyway
+  }
+}
+
+/** Per booking: what the buttons need beyond the booking itself (damage case, overlaps Member 1 would refuse). */
+async function extrasFor(r, damaged, user, now) {
+  const isLender = String(r.lender?._id || r.lender) === String(user._id);
+  const pendingExt = r.status === 'active' && r.extension?.status === 'pending' && r.endDate > now;
+  return {
+    hasDamageCase: damaged.has(String(r._id)),
+    approveBlocked: isLender && r.status === 'pending' ? await overlapsOthers(r, r.startDate, r.endDate) : false,
+    extensionBlocked: isLender && pendingExt ? await overlapsOthers(r, r.endDate, r.extension.requestedEndDate) : false,
+  };
+}
 
 async function damageCaseIds(ids) {
   if (!ids.length) return new Set();
@@ -237,8 +266,9 @@ async function toDtos(ids, user) {
   const byId = new Map(docs.map((d) => [String(d._id), d]));
   const damaged = await damageCaseIds(ids);
   const now = new Date();
-  return ids.map((id) => byId.get(String(id))).filter(Boolean)
-    .map((r) => toDto(r, user, { hasDamageCase: damaged.has(String(r._id)) }, now));
+  const rows = ids.map((id) => byId.get(String(id))).filter(Boolean);
+  const extras = await Promise.all(rows.map((r) => extrasFor(r, damaged, user, now)));
+  return rows.map((r, n) => toDto(r, user, extras[n], now));
 }
 
 /** One reservation for its borrower or its lender. Anyone else gets 404 so its existence isn't revealed. */
@@ -248,7 +278,8 @@ async function getOne(user, id) {
   })).lean();
   if (!r) throw ApiError.notFound('Reservation not found');
   const damaged = await damageCaseIds([r._id]);
-  return toDto(r, user, { hasDamageCase: damaged.has(String(r._id)) }, new Date());
+  const now = new Date();
+  return toDto(r, user, await extrasFor(r, damaged, user, now), now);
 }
 
 const MAX_REASON = 500;
@@ -287,4 +318,40 @@ async function markReturned(user, id) {
   return getOne(user, id);
 }
 
-module.exports = { listMine, listLending, lendingItems, getOne, decide, markPickedUp, markReturned, parseFilters, STATUS_FILTERS, MAX_REASON };
+const requestIdOf = (body) => {
+  const id = body?.requestId;
+  if (typeof id !== 'string' || !mongoose.isValidObjectId(id)) throw fieldError('requestId', 'This extension request is missing or invalid. Reload the page.');
+  return id;
+};
+
+/**
+ * Req 74: the borrower asks for a later return date (Member 1's `extend` request). Before calling it, two checks give a
+ * clear answer at once instead of an approval that is bound to fail later: the new total length must fit the item's
+ * maximum, and the extra days must be free (Member 1's getAvailability, this booking excluded). His command still
+ * re-checks everything when the lender approves.
+ */
+async function requestExtension(user, id, body = {}) {
+  const newEnd = parseDay(body.requestedEndDate);
+  if (!newEnd) throw fieldError('requestedEndDate', 'Choose a valid new return date (YYYY-MM-DD)');
+  const r = await Reservation.findOne({ _id: id, borrower: user._id }).populate('item', 'rules').lean();
+  if (r && r.status === 'active' && r.endDate > new Date()) {
+    if (newEnd <= r.endDate) throw fieldError('requestedEndDate', 'Choose a date after the current return date');
+    const max = Number(r.item?.rules?.maxBorrowDays) || 0;
+    const total = Math.round((newEnd - r.startDate) / DAY_MS);
+    if (max && total > max) {
+      throw fieldError('requestedEndDate', `This item can be borrowed for at most ${max} day${max === 1 ? '' : 's'} in total. Choose an earlier date.`);
+    }
+    const { available } = r.item ? await getAvailability(r.item._id, { startDate: r.endDate, endDate: newEnd }, { excludeReservationId: id }) : { available: true };
+    if (!available) throw ApiError.conflict('Someone has booked part of these extra days. Choose an earlier date.');
+  }
+  await reservationCommands.extend({ actorId: user._id, reservationId: id, action: 'request', endDate: toDay(newEnd) });
+  return getOne(user, id);
+}
+
+/** Req 74: the borrower withdraws their pending request. Req 75: the lender approves or declines it. */
+async function answerExtension(user, id, action, body = {}) {
+  await reservationCommands.extend({ actorId: user._id, reservationId: id, action, requestId: requestIdOf(body) });
+  return getOne(user, id);
+}
+
+module.exports = { listMine, listLending, lendingItems, getOne, decide, markPickedUp, markReturned, requestExtension, answerExtension, parseFilters, STATUS_FILTERS, MAX_REASON };

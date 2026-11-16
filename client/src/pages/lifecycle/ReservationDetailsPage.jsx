@@ -1,7 +1,8 @@
 // RESERVATION DETAILS - Owner: Member 5 - Requirements: 53 (and the screen for 56-60, 74, 75 in later parts)
 // Route: /reservations/:id   Access: member (the borrower or the lender of this booking; the server checks)
 // Status, progress, dates, deposit, the other person and any extension request. The lender answers a pending request
-// here (Req 56), marks the pickup (Req 59) and the return (Req 60); extensions come in Part 13. Messages and cancellation are Member 1's page (/my-reservations/:id).
+// here (Req 56), marks the pickup (Req 59) and the return (Req 60), and answers requests for more time (Req 75);
+// the borrower asks for more time here (Req 74). Messages and cancellation are Member 1's page (/my-reservations/:id).
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { getErrorMessage } from '../../api/axios';
@@ -13,6 +14,8 @@ import ReservationTimeline from '../../components/sprint2/m5/ReservationTimeline
 import RequestAnswer from '../../components/sprint2/m5/RequestAnswer';
 import PickupButton from '../../components/sprint2/m5/PickupButton';
 import ReturnActions from '../../components/sprint2/m5/ReturnActions';
+import ExtensionRequest from '../../components/sprint2/m5/ExtensionRequest';
+import ExtensionAnswer from '../../components/sprint2/m5/ExtensionAnswer';
 import { dayCount, showDay, showRange } from '../../components/sprint2/m5/borrowDates';
 import { OPEN_STATUSES, depositText, labelsOf, nextStep, statusOf } from '../../components/sprint2/m5/reservationText';
 import s from '../../styles/sprint2/member5.module.css';
@@ -118,6 +121,24 @@ export default function ReservationDetailsPage() {
         </section>
       )}
 
+      {lender && r.actions?.decideExtension && (
+        <section className={`card ${s.answerCard}`} aria-labelledby="res-extanswer-title">
+          <div className="card-body">
+            <h2 id="res-extanswer-title" className={s.cardTitle}>Request for more time</h2>
+            <ExtensionAnswer reservation={r} onStale={(message) => { setNotice(''); setProblem(message); refresh(); }}
+              onDone={(updated, message) => { setR(updated); setProblem(''); setNotice(message); }} />
+          </div>
+        </section>
+      )}
+      {!lender && r.status === 'active' && (
+        <section className={`card ${s.answerCard}`} aria-labelledby="res-extask-title">
+          <div className="card-body">
+            <h2 id="res-extask-title" className={s.cardTitle}>Need it longer?</h2>
+            <ExtensionRequest reservation={r} onStale={(message) => { setNotice(''); setProblem(message); refresh(); }}
+              onDone={(updated, message) => { setR(updated); setProblem(''); setNotice(message); }} />
+          </div>
+        </section>
+      )}
       {lender && r.status === 'active' && (
         <section className={`card ${s.answerCard}`} aria-labelledby="res-return-title">
           <div className="card-body">
@@ -137,7 +158,8 @@ export default function ReservationDetailsPage() {
             </div>
           </section>
 
-          {r.extension?.status && r.extension.status !== 'none' && (
+          {/* while the booking is active, the extension cards above already show the request */}
+          {r.status !== 'active' && r.extension?.status && r.extension.status !== 'none' && (
             <section className="card" aria-labelledby="res-ext-title">
               <div className="card-body">
                 <h2 id="res-ext-title" className={s.cardTitle}>Extension request</h2>

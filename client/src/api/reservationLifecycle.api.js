@@ -25,3 +25,12 @@ export const markPickedUp = (id) => api.patch(`/reservation-lifecycle/${id}/pick
 
 /** PATCH /api/reservation-lifecycle/:id/return - Req 60 - lender records a return in good condition -> { reservation } */
 export const markReturned = (id) => api.patch(`/reservation-lifecycle/${id}/return`).then((r) => r.data);
+
+/** POST /api/reservation-lifecycle/:id/extension - Req 74 - borrower asks for a later return date -> { reservation } */
+export const requestExtension = (id, requestedEndDate) => api.post(`/reservation-lifecycle/${id}/extension`, { requestedEndDate }).then((r) => r.data);
+
+/** DELETE /api/reservation-lifecycle/:id/extension - Req 74 - borrower withdraws the pending request -> { reservation } */
+export const cancelExtension = (id, requestId) => api.delete(`/reservation-lifecycle/${id}/extension`, { data: { requestId } }).then((r) => r.data);
+
+/** PATCH /api/reservation-lifecycle/:id/extension/approve | reject - Req 75 - lender answers -> { reservation } */
+export const answerExtension = (id, decision, requestId) => api.patch(`/reservation-lifecycle/${id}/extension/${decision}`, { requestId }).then((r) => r.data);

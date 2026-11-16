@@ -25,7 +25,7 @@ export default function ReturnActions({ reservation: r, onDone, onStale }) {
   const who = r.borrower?.name || 'the borrower';
   const deposit = Number(r.deposit?.amount) || 0;
   const fee = r.lateFeeIfReturnedNow; // null until Member 2's module is installed
-  const caseOpen = !r.actions?.returnGood && !r.actions?.reportDamage;
+  const caseOpen = !!r.hasDamageCase; // from the server, not guessed from hidden buttons
 
   const confirmText = () => {
     const parts = [`Mark "${title}" as returned in good condition by ${who}?`];

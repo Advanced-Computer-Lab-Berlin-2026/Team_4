@@ -183,3 +183,4 @@
 .counter { margin: -.6rem 0 .6rem; text-align: right; }
 .penaltyNote { margin: 0 0 .6rem; color: var(--danger); font-weight: 600; }
 .answer .row + .answerNote { margin-top: .6rem; } /* a note under the buttons gets some room */
+.extStatus { margin: 0 0 .6rem; }

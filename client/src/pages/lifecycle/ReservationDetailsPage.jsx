@@ -1,0 +1,132 @@
+// RESERVATION DETAILS - Owner: Member 5 - Requirements: 53 (and the screen for 56-60, 74, 75 in later parts)
+// Route: /reservations/:id   Access: member (the borrower or the lender of this booking; the server checks)
+// Status, progress, dates, deposit, the other person and any extension request. Read only for now: the lifecycle buttons
+// come in Parts 10-13. Messages and cancellation are Member 1's page (/my-reservations/:id).
+import { useEffect, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { getErrorMessage } from '../../api/axios';
+import { getReservation } from '../../api/reservationLifecycle.api';
+import { formatDate, formatMoney } from '../../utils/format';
+import Spinner from '../../components/common/Spinner';
+import Alert from '../../components/common/Alert';
+import ReservationTimeline from '../../components/sprint2/m5/ReservationTimeline';
+import { dayCount, showDay, showRange } from '../../components/sprint2/m5/borrowDates';
+import { OPEN_STATUSES, depositText, labelsOf, nextStep, statusOf } from '../../components/sprint2/m5/reservationText';
+import s from '../../styles/sprint2/member5.module.css';
+
+const EXTENSION = { pending: 'Waiting for the lender', approved: 'Approved', rejected: 'Declined', cancelled: 'Withdrawn', expired: 'Not answered in time' };
+
+export default function ReservationDetailsPage() {
+  const { id } = useParams();
+  const [r, setR] = useState(null);
+  const [error, setError] = useState({ text: '', notFound: false });
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let ignore = false;
+    setR(null);
+    setError({ text: '', notFound: false });
+    getReservation(id)
+      .then((d) => { if (!ignore) setR(d.reservation); })
+      .catch((e) => {
+        if (ignore) return;
+        const code = e?.response?.status;
+        setError({ text: getErrorMessage(e), notFound: code === 404 || code === 400 });
+      });
+    return () => { ignore = true; };
+  }, [id, reloadKey]);
+
+  const back = <p className={s.backLink}><Link to="/reservations">← My reservations</Link></p>;
+
+  if (error.text) {
+    return (
+      <div className="container">
+        {back}
+        {error.notFound ? (
+          <div className={`center ${s.empty}`}>
+            <h1>Reservation not found</h1>
+            <p className="muted">It doesn&apos;t exist, or it isn&apos;t one of your bookings.</p>
+            <Link to="/reservations" className="btn">My reservations</Link>
+          </div>
+        ) : (
+          <div className={s.loadError}>
+            <Alert variant="error">{error.text}</Alert>
+            <button type="button" className="btn btn-secondary" onClick={() => setReloadKey((k) => k + 1)}>Try again</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (!r) return <Spinner label="Loading the reservation..." />;
+
+  const title = r.item?.title || 'Unavailable item';
+  const status = statusOf(r);
+  const lender = r.role === 'lender';
+  const other = lender ? { label: 'Borrower', person: r.borrower } : { label: 'Lender', person: r.lender };
+  const labels = labelsOf(r);
+  const open = OPEN_STATUSES.includes(r.status);
+
+  return (
+    <div className="container">
+      {back}
+      <div className={s.detailHead}>
+        <h1 className={s.detailTitle}>{title}</h1>
+        <span className={`badge badge-${status.tone} ${s.badge} ${s.statusBadge}`}>{status.label}</span>
+      </div>
+      <p className={`muted ${s.lead}`}>{lender ? 'A booking of your item.' : 'Your booking.'} {nextStep(r)}</p>
+      {labels.length > 0 && (
+        <ul className={s.labels} aria-label="Notes">
+          {labels.map((l) => <li key={l.key} className={`badge badge-${l.tone} ${s.badge}`}>{l.text}</li>)}
+        </ul>
+      )}
+
+      <div className={s.detailLayout}>
+        <div className={s.detailMain}>
+          <section className="card" aria-labelledby="res-progress-title">
+            <div className="card-body">
+              <h2 id="res-progress-title" className={s.cardTitle}>Progress</h2>
+              <ReservationTimeline reservation={r} />
+            </div>
+          </section>
+
+          {r.extension?.status && r.extension.status !== 'none' && (
+            <section className="card" aria-labelledby="res-ext-title">
+              <div className="card-body">
+                <h2 id="res-ext-title" className={s.cardTitle}>Extension request</h2>
+                <dl className={s.summaryFacts}>
+                  <div><dt>New return date asked</dt><dd>{r.extension.requestedEndDate ? showDay(r.extension.requestedEndDate) : '—'}</dd></div>
+                  <div><dt>Answer</dt><dd>{EXTENSION[r.extension.status] || r.extension.status}</dd></div>
+                  {r.extension.decidedAt && <div><dt>Answered on</dt><dd>{formatDate(r.extension.decidedAt)}</dd></div>}
+                </dl>
+              </div>
+            </section>
+          )}
+        </div>
+
+        <aside className={`card ${s.detailSide}`} aria-labelledby="res-facts-title">
+          <div className={s.detailPhoto}>
+            <img src={r.item?.photo || '/uploads/placeholder.svg'} alt={r.item ? title : ''} />
+          </div>
+          <div className="card-body">
+            <h2 id="res-facts-title" className={s.cardTitle}>Details</h2>
+            <dl className={s.summaryFacts}>
+              <div><dt>Dates</dt><dd>{showRange(r.startDate, r.endDate)}</dd></div>
+              <div><dt>Length</dt><dd>{dayCount(r.days)}</dd></div>
+              <div><dt>Return date</dt><dd>{showDay(r.endDate)}</dd></div>
+              <div><dt>{other.label}</dt><dd>{other.person?.name || 'Unknown'}</dd></div>
+              <div><dt>Handover</dt><dd>{r.fulfilment?.method === 'delivery' ? 'Delivery' : 'Pickup'}</dd></div>
+              {r.item?.category?.name && <div><dt>Category</dt><dd>{r.item.category.name}</dd></div>}
+              <div className={s.summaryTotal}><dt>Deposit</dt><dd>{formatMoney(r.deposit?.amount)}</dd></div>
+              <div><dt>Deposit status</dt><dd>{depositText(r.deposit)}</dd></div>
+              {r.lateFee > 0 && <div><dt>Late fee</dt><dd className={s.penalty}>{formatMoney(r.lateFee)}</dd></div>}
+            </dl>
+            <div className={s.summaryActions}>
+              {r.item && <Link to={`/catalog/${r.item._id}`} className="btn btn-secondary">View item</Link>}
+              <Link to={`/my-reservations/${r._id}`} className="btn btn-secondary">{open ? 'Messages and cancellation' : 'Messages'}</Link>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}

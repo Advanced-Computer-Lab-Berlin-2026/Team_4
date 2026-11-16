@@ -76,3 +76,58 @@
   .facts { grid-column: 2; grid-row: 2; margin-top: .5rem; }
   .entryActions, .editor { grid-column: 1 / -1; }
 }
+
+/* ---------- My reservations (list) ---------- */
+.dateFilter { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: .75rem 1rem .25rem; margin: 0 0 1rem; min-width: 0; }
+.dateFilterLegend { font-weight: 600; padding: 0 .3rem; }
+.dateFilterFoot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .75rem; }
+.dateFilterFoot p { margin: 0; }
+.count { margin: 0 0 .75rem; }
+.resGroups { display: grid; gap: 1.5rem; }
+.updating { opacity: .6; }
+.resCard { display: flex; gap: .9rem; align-items: flex-start; padding: .9rem 1rem; }
+.resCard .thumb { display: block; width: 64px; } /* small on phones so the text keeps its width */
+.resBody { flex: 1; min-width: 0; }
+.resHead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .25rem .75rem; }
+.statusBadge { flex: 0 0 auto; }
+.resDates { margin: .2rem 0 0; font-weight: 600; }
+.resNext { margin: .2rem 0 0; }
+.labels { list-style: none; margin: .45rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: .35rem; }
+.resFacts { margin: .5rem 0 0; display: flex; flex-wrap: wrap; gap: .2rem 1.25rem; }
+.resFacts > div { display: flex; gap: .4rem; align-items: baseline; min-width: 0; }
+.resFacts dt { color: var(--muted); font-size: .92rem; }
+.resFacts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+
+/* ---------- Reservation details ---------- */
+.backLink { margin: 0 0 .5rem; }
+.detailHead { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; }
+.detailTitle { margin: 0; overflow-wrap: anywhere; }
+.detailLayout { display: grid; gap: 1.25rem; margin-top: 1rem; }
+.detailMain { display: grid; gap: 1rem; min-width: 0; align-content: start; }
+.detailPhoto { aspect-ratio: 4 / 3; background: var(--bg); border-bottom: 1px solid var(--border); }
+.detailPhoto img { width: 100%; height: 100%; object-fit: cover; }
+.cardTitle { margin: 0 0 .75rem; }
+.penalty { color: var(--danger); }
+@media (min-width: 900px) {
+  .detailLayout { grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
+  .detailSide { grid-column: 2; grid-row: 1; }
+  .detailMain { grid-column: 1; grid-row: 1; }
+}
+
+/* progress line: Requested -> Approved -> Picked up -> Returned (each step also says Done / Next / Not yet / Ended) */
+.timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.step { position: relative; display: flex; gap: .75rem; align-items: flex-start; padding-bottom: 1rem; }
+.step:last-child { padding-bottom: 0; }
+.step::before { content: ''; position: absolute; left: 8px; top: 20px; bottom: 0; width: 2px; background: var(--border); }
+.step:last-child::before { display: none; }
+.stepDot { flex: 0 0 auto; width: 18px; height: 18px; margin-top: 2px; border-radius: 50%; border: 2px solid var(--border); background: var(--surface); }
+.stepText { display: flex; flex-direction: column; }
+.step_done .stepDot { background: var(--primary); border-color: var(--primary); }
+.step_done::before { background: var(--primary); }
+.step_current .stepDot { border-color: var(--primary); border-width: 4px; }
+.step_current strong { color: var(--primary-dark); }
+.step_stopped .stepDot { background: var(--danger); border-color: var(--danger); }
+.step_todo strong { color: var(--muted); font-weight: 600; }
+@media (min-width: 640px) {
+  .resCard .thumb { width: 132px; }
+}

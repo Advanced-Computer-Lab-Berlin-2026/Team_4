@@ -9,6 +9,7 @@ import Alert from '../../components/common/Alert';
 import FormField from '../../components/common/FormField';
 import Pagination from '../../components/common/Pagination';
 import Spinner from '../../components/common/Spinner';
+import ConditionPhotoPanel from '../../components/sprint2/m3/ConditionPhotoPanel';
 import DamageReportDetails from '../../components/sprint2/m3/DamageReportDetails';
 import { DamageStatusBadge } from '../../components/sprint2/m3/shared';
 import { getErrorMessage, getFieldErrors } from '../../api/axios';
@@ -27,7 +28,7 @@ function NewReport({ reservationId }) {
   const [saving, setSaving] = useState(false);
 
   if (!reservationId) {
-    return <Alert variant="error">Open this page from a returned reservation to report damage.</Alert>;
+    return <Alert variant="error">Open this page from an active reservation to report damage.</Alert>;
   }
 
   const submit = async (e) => {
@@ -48,20 +49,29 @@ function NewReport({ reservationId }) {
   };
 
   return (
-    <form className="card" onSubmit={submit} noValidate>
-      <div className="card-body">
-        <p className="muted">
-          Use this instead of &quot;Returned in good condition&quot; when the item comes back damaged. It records the return and
-          keeps the deposit held until an admin decides how much of it, if any, is kept. Upload return photos on the
-          reservation page first: once you report, the photos are locked as evidence.
-        </p>
-        <FormField label="What is damaged?" error={errors.description} hint={`${description.length}/2000`}>
-          <textarea value={description} onChange={(e) => setDescription(e.target.value)} maxLength={2000} />
-        </FormField>
-        <Alert variant="error">{error}</Alert>
-        <button type="submit" className="btn" disabled={saving}>{saving ? 'Reporting...' : 'Return as damaged'}</button>
-      </div>
-    </form>
+    <>
+      <p className="muted">
+        Use this instead of &quot;Returned in good condition&quot; when the item comes back damaged. It records the return and
+        keeps the deposit held until an admin decides how much of it, if any, is kept.
+      </p>
+      <section className={`card ${styles.section}`} aria-labelledby="evidence-heading">
+        <div className="card-body">
+          <h2 id="evidence-heading">1. Add return photos</h2>
+          <p className="muted">Photograph the damage now. Once you report, the photos are locked as evidence for the admin.</p>
+          <ConditionPhotoPanel reservationId={reservationId} />
+        </div>
+      </section>
+      <form className="card" onSubmit={submit} noValidate>
+        <div className="card-body">
+          <h2>2. Describe the damage</h2>
+          <FormField label="What is damaged?" error={errors.description} hint={`${description.length}/2000`}>
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} maxLength={2000} />
+          </FormField>
+          <Alert variant="error">{error}</Alert>
+          <button type="submit" className="btn" disabled={saving}>{saving ? 'Reporting...' : 'Return as damaged'}</button>
+        </div>
+      </form>
+    </>
   );
 }
 

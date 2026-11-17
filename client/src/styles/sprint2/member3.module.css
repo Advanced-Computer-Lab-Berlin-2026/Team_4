@@ -38,6 +38,16 @@
 .timeline li.timelineDone { border-left-color: var(--primary); }
 .photoGroups { display: grid; gap: 1rem; }
 
+/* ---- condition photos */
+.photoGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: .75rem; margin-bottom: .75rem; }
+.photo { margin: 0; display: grid; gap: .3rem; justify-items: start; }
+.photo a { display: block; width: 100%; }
+.photoImg, .photoPlaceholder {
+  width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border: 1px solid var(--border); border-radius: 8px; background: #e8eef3;
+}
+.photoPlaceholder { display: flex; align-items: center; justify-content: center; font-size: .85rem; color: var(--muted); }
+.photo figcaption { font-size: .8rem; }
+
 @media (min-width: 900px) {
   .twoCol { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
   .photoGroups { grid-template-columns: 1fr 1fr; }

@@ -693,3 +693,201 @@ describe('damage reports API (Req 61, 62, 63, 64, 80)', { skip: !process.env.TES
     assert.equal((await User.findById(borrower._id).lean()).stats.damageReports, before);
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+describe('condition photos API (Req 79, 80)', { skip: !process.env.TEST_MONGO_URI && 'set TEST_MONGO_URI to run' }, () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const sharp = require('sharp');
+  const app = require('../../src/app');
+  const { signToken } = require('../../src/utils/tokens');
+  const { UPLOADS_ROOT } = require('../../src/middleware/upload');
+  const User = require('../../src/models/User');
+  const Item = require('../../src/models/Item');
+  const Category = require('../../src/models/Category');
+  const Reservation = require('../../src/models/Reservation');
+  const DamageReport = require('../../src/models/DamageReport');
+  const DIR = path.join(UPLOADS_ROOT, 'private', 'condition-photos');
+  let server, base, admin, lender, otherLender, borrower, outsider, category, png, jpg;
+  const res = {};
+  const filesBefore = new Set();
+  const diskFiles = () => fs.readdirSync(DIR).filter((f) => !filesBefore.has(f) && f !== '.gitkeep');
+
+  const hoursAgo = (n) => new Date(Date.now() - n * 60 * 60 * 1000);
+  const utcDay = (offset) => { const d = new Date(); d.setUTCHours(0, 0, 0, 0); return new Date(+d + offset * 24 * 60 * 60 * 1000); };
+  const mkUser = async (username, extra = {}) => {
+    const u = new User({ username, name: `Name ${username}`, email: `${username}@example.com`, phone: `+2013${Math.floor(Math.random() * 1e7)}`, address: { street: '1 Test St', city: 'Cairo' }, ...extra });
+    await u.setPassword('Testing123!');
+    return u.save();
+  };
+  const mkReservation = async (fields) => {
+    const item = await Item.create({ owner: lender._id, title: 'Ladder', category: category._id, description: 'For tests', depositAmount: 200 });
+    return Reservation.create({ item: item._id, borrower: borrower._id, lender: lender._id, startDate: utcDay(-2), endDate: utcDay(3), deposit: { amount: 200, status: 'held' }, ...fields });
+  };
+  const auth = (user) => (user ? { Authorization: `Bearer ${signToken(user._id)}` } : {});
+  const call = async (p, { user, method = 'GET' } = {}) => {
+    const r = await fetch(`${base}/api${p}`, { method, headers: auth(user) });
+    const type = r.headers.get('content-type') || '';
+    return { status: r.status, type, data: type.includes('json') ? await r.json() : Buffer.from(await r.arrayBuffer()) };
+  };
+  const upload = async (user, reservation, stage, files) => {
+    const form = new FormData();
+    for (const [name, bytes, mime] of files) form.append('photos', new Blob([bytes], { type: mime }), name);
+    const r = await fetch(`${base}/api/condition-photos/${reservation._id}/${stage}`, { method: 'POST', headers: auth(user), body: form });
+    return { status: r.status, data: await r.json() };
+  };
+  const pngs = (n) => Array.from({ length: n }, (_, i) => [`photo-${i}.png`, png, 'image/png']);
+
+  before(async () => {
+    await mongoose.connect(process.env.TEST_MONGO_URI, { dbName: `member3_photos_${process.pid}` });
+    try {
+      fs.mkdirSync(DIR, { recursive: true });
+      for (const f of fs.readdirSync(DIR)) filesBefore.add(f);
+      await Promise.all(Object.values(require('../../src/models')).map((m) => m.init()));
+      server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
+      base = `http://127.0.0.1:${server.address().port}`;
+      png = await sharp({ create: { width: 8, height: 8, channels: 3, background: '#1f6feb' } }).png().toBuffer();
+      jpg = await sharp({ create: { width: 8, height: 8, channels: 3, background: '#cf3030' } }).jpeg().toBuffer();
+      admin = await mkUser('ph_admin', { role: 'admin' });
+      lender = await mkUser('ph_lender', { lenderStatus: 'verified' });
+      otherLender = await mkUser('ph_other', { lenderStatus: 'verified' });
+      borrower = await mkUser('ph_borrower');
+      outsider = await mkUser('ph_outsider');
+      category = await Category.create({ name: 'Photo tools', slug: 'photo-tools' });
+      res.confirmed = await mkReservation({ status: 'confirmed', startDate: utcDay(1), endDate: utcDay(4) });
+      res.active = await mkReservation({ status: 'active', pickedUpAt: hoursAgo(20) });
+      res.justReturned = await mkReservation({ status: 'completed', returnedAt: hoursAgo(2), completedAt: hoursAgo(2), returnCondition: 'good', deposit: { amount: 200, status: 'released' } });
+      res.longReturned = await mkReservation({ status: 'completed', returnedAt: hoursAgo(72), completedAt: hoursAgo(72), returnCondition: 'good', deposit: { amount: 200, status: 'released' } });
+      res.withCase = await mkReservation({ status: 'active', pickedUpAt: hoursAgo(20) });
+    } catch (err) {
+      await mongoose.disconnect();
+      throw err;
+    }
+  });
+
+  after(async () => {
+    if (mongoose.connection.readyState !== 1) return;
+    try {
+      if (server) await new Promise((resolve) => server.close(resolve));
+      for (const f of diskFiles()) fs.rmSync(path.join(DIR, f), { force: true });
+      for (const c of await mongoose.connection.db.collections()) {
+        await c.deleteMany({});
+        await c.drop().catch(() => {});
+      }
+    } finally {
+      await mongoose.disconnect();
+    }
+  });
+
+  test('participants and admins see the photo list; stages open by reservation state (Req 79)', async () => {
+    assert.equal((await call(`/condition-photos/${res.active._id}`)).status, 401);
+    assert.equal((await call(`/condition-photos/${res.active._id}`, { user: outsider })).status, 404);
+    assert.equal((await call('/condition-photos/not-an-id', { user: lender })).status, 400);
+    const asLender = await call(`/condition-photos/${res.active._id}`, { user: lender });
+    assert.equal(asLender.status, 200);
+    assert.deepEqual(asLender.data.photos, { pickup: [], return: [] });
+    assert.deepEqual(asLender.data.canUpload, { pickup: true, return: true });
+    assert.deepEqual((await call(`/condition-photos/${res.active._id}`, { user: borrower })).data.canUpload, { pickup: false, return: false });
+    assert.equal((await call(`/condition-photos/${res.active._id}`, { user: admin })).status, 200);
+    assert.deepEqual((await call(`/condition-photos/${res.confirmed._id}`, { user: lender })).data.canUpload, { pickup: true, return: false });
+    assert.deepEqual((await call(`/condition-photos/${res.justReturned._id}`, { user: lender })).data.canUpload, { pickup: false, return: true });
+    assert.deepEqual((await call(`/condition-photos/${res.longReturned._id}`, { user: lender })).data.canUpload, { pickup: false, return: false });
+  });
+
+  test('refused uploads never leave files on disk', async () => {
+    assert.equal((await upload(borrower, res.active, 'pickup', pngs(1))).status, 403);
+    assert.equal((await upload(otherLender, res.active, 'pickup', pngs(1))).status, 404);
+    assert.equal((await upload(lender, res.active, 'during', pngs(1))).status, 400);
+    assert.match((await upload(lender, res.confirmed, 'return', pngs(1))).data.message, /once the item has been picked up/);
+    assert.match((await upload(lender, res.longReturned, 'return', pngs(1))).data.message, /up to 48 hours after the return/);
+    assert.match((await upload(lender, res.justReturned, 'pickup', pngs(1))).data.message, /before the item is returned/);
+    assert.match((await upload(lender, res.active, 'pickup', [['fake.jpg', Buffer.from('not an image'), 'image/jpeg']])).data.message, /valid JPEG or PNG/);
+    assert.match((await upload(lender, res.active, 'pickup', [['anim.gif', png, 'image/gif']])).data.message, /Unsupported file type/);
+    assert.equal((await upload(lender, res.active, 'pickup', pngs(6))).status, 400); // preset allows 5 per request
+    assert.match((await upload(lender, res.active, 'pickup', [])).data.message, /at least one photo/);
+    assert.deepEqual(diskFiles(), []);
+  });
+
+  test('lender uploads pickup and return photos; metadata only, never the stored path', async () => {
+    const { status, data } = await upload(lender, res.active, 'pickup', [['front.png', png, 'image/png'], ['side.jpg', jpg, 'image/jpeg']]);
+    assert.equal(status, 201);
+    assert.equal(data.photos.pickup.length, 2);
+    assert.deepEqual(Object.keys(data.photos.pickup[0]).sort(), ['_id', 'mimeType', 'originalName', 'size', 'stage', 'takenAt', 'uploadedBy']);
+    assert.deepEqual(data.photos.pickup.map((p) => p.mimeType), ['image/png', 'image/jpeg']);
+    assert.ok(!JSON.stringify(data).includes('condition-photos/'), 'stored path must not leak');
+    assert.equal((await upload(lender, res.active, 'return', [['after.png', png, 'image/png']])).status, 201);
+    assert.equal((await upload(lender, res.justReturned, 'return', pngs(1))).status, 201);
+    assert.equal(diskFiles().length, 4);
+  });
+
+  test('at most 10 photos per stage', async () => {
+    assert.equal((await upload(lender, res.active, 'pickup', pngs(5))).status, 201); // 7
+    assert.equal((await upload(lender, res.active, 'pickup', pngs(3))).status, 201); // 10
+    const full = await upload(lender, res.active, 'pickup', pngs(1));
+    assert.equal(full.status, 409);
+    assert.match(full.data.message, /at most 10 photos \(10 already added\)/);
+    assert.equal(diskFiles().length, 12); // the refused file was cleaned up
+    const list = (await call(`/condition-photos/${res.active._id}`, { user: lender })).data;
+    assert.equal(list.canUpload.pickup, false); // full...
+    assert.equal(list.canRemove.pickup, true); // ...but photos can still be removed
+  });
+
+  test('photos stream only to participants and admins (Req 80)', async () => {
+    const { photos } = (await call(`/condition-photos/${res.active._id}`, { user: lender })).data;
+    const [first] = photos.pickup;
+    const url = `/condition-photos/${res.active._id}/${first._id}/file`;
+    for (const user of [lender, borrower, admin]) {
+      const r = await call(url, { user });
+      assert.equal(r.status, 200, user.username);
+      assert.equal(r.type, 'image/png');
+      assert.ok(r.data.equals(png), 'streamed bytes match the upload');
+    }
+    assert.equal((await call(url, { user: outsider })).status, 404);
+    assert.equal((await call(url)).status, 401);
+    assert.equal((await call(`/condition-photos/${res.active._id}/${new mongoose.Types.ObjectId()}/file`, { user: lender })).status, 404);
+    const stored = (await Reservation.findById(res.active._id).lean()).conditionPhotos.pickup[0].path;
+    assert.equal((await fetch(`${base}/uploads/${stored}`)).status, 404, 'private folder is never served statically');
+  });
+
+  test('lender removes a photo while the stage is open; the file is deleted', async () => {
+    const { photos } = (await call(`/condition-photos/${res.active._id}`, { user: lender })).data;
+    const target = photos.pickup[0];
+    const stored = (await Reservation.findById(res.active._id).lean()).conditionPhotos.pickup.find((p) => String(p._id) === String(target._id)).path;
+    assert.equal((await call(`/condition-photos/${res.active._id}/${target._id}`, { user: borrower, method: 'DELETE' })).status, 403);
+    const r = await call(`/condition-photos/${res.active._id}/${target._id}`, { user: lender, method: 'DELETE' });
+    assert.equal(r.status, 200);
+    assert.equal(r.data.photos.pickup.length, 9);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(fs.existsSync(path.join(UPLOADS_ROOT, stored)), false);
+    assert.equal((await call(`/condition-photos/${res.active._id}/${target._id}`, { user: lender, method: 'DELETE' })).status, 404);
+  });
+
+  test('a damage report locks the evidence; the report shows the photos to the admin (Req 80)', async () => {
+    assert.equal((await upload(lender, res.withCase, 'return', [['dent.jpg', jpg, 'image/jpeg']])).status, 201);
+    const report = await DamageReport.create({ reservation: res.withCase._id, item: res.withCase.item, reportedBy: lender._id, borrower: borrower._id, description: 'Dent on the top step.' });
+    const photoId = (await Reservation.findById(res.withCase._id).lean()).conditionPhotos.return[0]._id;
+    assert.match((await upload(lender, res.withCase, 'return', pngs(1))).data.message, /locked because a damage report exists/);
+    assert.match((await call(`/condition-photos/${res.withCase._id}/${photoId}`, { user: lender, method: 'DELETE' })).data.message, /locked/);
+    assert.deepEqual((await call(`/condition-photos/${res.withCase._id}`, { user: lender })).data.canUpload, { pickup: false, return: false });
+    const view = await call(`/damage-reports/${report._id}`, { user: admin });
+    assert.equal(view.status, 200);
+    assert.equal(String(view.data.report.photos.return[0]._id), String(photoId));
+    assert.equal((await call(`/condition-photos/${res.withCase._id}/${photoId}/file`, { user: admin })).status, 200);
+  });
+
+  test('if saving fails, uploaded files are removed and nothing is recorded', async () => {
+    const original = Reservation.prototype.save;
+    Reservation.prototype.save = async function failingSave() { throw Object.assign(new Error('Injected write failure'), { status: 503 }); };
+    const countBefore = diskFiles().length;
+    let r;
+    try {
+      r = await upload(lender, res.justReturned, 'return', pngs(2));
+    } finally {
+      Reservation.prototype.save = original;
+    }
+    assert.equal(r.status, 503);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(diskFiles().length, countBefore);
+    assert.equal((await Reservation.findById(res.justReturned._id).lean()).conditionPhotos.return.length, 1);
+  });
+});

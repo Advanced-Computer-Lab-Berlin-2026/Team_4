@@ -147,7 +147,7 @@ Photos are evidence, so they are handled like the Sprint 1 lender documents:
 
 | Method | Path | Handler | Access | Req | Description |
 |---|---|---|---|---|---|
-| GET | `/api/condition-photos/:reservationId` | `listPhotos` | participant or admin | 79, 80 | `{ photos: { pickup: [photo], return: [photo] }, canUpload: { pickup, return } }` |
+| GET | `/api/condition-photos/:reservationId` | `listPhotos` | participant or admin | 79, 80 | `{ photos: { pickup: [photo], return: [photo] }, canUpload: { pickup, return }, canRemove: { pickup, return }, maxPerStage, locked }` |
 | POST | `/api/condition-photos/:reservationId/:stage` | `uploadPhotos` | lender (participant) | 79 | Multipart `photos[]`; `stage` = `pickup` \| `return`. Response `201`: `{ photos }` (all photos for the reservation) |
 | GET | `/api/condition-photos/:reservationId/:photoId/file` | `streamPhoto` | participant or admin | 79, 80 | Streams the image (`Content-Type: image/*`) |
 | DELETE | `/api/condition-photos/:reservationId/:photoId` | `removePhoto` | lender (participant) | 79 | Remove a photo while its stage is still open and no damage report exists |
@@ -288,7 +288,7 @@ The past reviews for Req 91 come from `GET /api/reviews/user/:userId`. It needs 
 | Component (`client/src/components/sprint2/m3/`) | Embedded by | Props |
 |---|---|---|
 | `TrustSummary` | Member 7 — `ItemDetailsPage` (owner's score, Req 91) | `{ userId, compact? }` shows score, rating average, review count and a link to `/users/:userId/trust` |
-| `ConditionPhotoPanel` | Member 5 — lender reservation details page | `{ reservationId, onChange? }` shows pickup/return photos, upload and remove controls when allowed (the server decides through `canUpload`) |
+| `ConditionPhotoPanel` | Member 5 — lender reservation details page (Member 3 also uses it on the damage report form and, read-only, on case pages) | `{ reservationId, readOnly?, onChange? }` shows pickup/return thumbnails (open full size on select), with upload and remove controls when allowed (the server decides through `canUpload` / `canRemove`) |
 | `ReviewForm` | Member 5 — reservation details (after completion) | `{ reservationId, onSuccess? }` with a 1–5 rating and a comment; hides itself if no review is possible |
 
 ### 6.3 Client routes (`client/src/routes/sprint2/member3.routes.jsx`, wired once by Member 1)

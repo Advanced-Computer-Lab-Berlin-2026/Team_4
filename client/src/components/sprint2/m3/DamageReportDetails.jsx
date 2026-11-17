@@ -1,25 +1,9 @@
 // DamageReportDetails - Owner: Member 3 - Requirements: 61-64, 80
 // Props: { report } — read-only case view shared by DamageReportPage (participants) and AdminDamageDecisionPage.
 import { formatDateTime, formatMoney } from '../../../utils/format';
+import ConditionPhotoPanel from './ConditionPhotoPanel';
 import { DamageStatusBadge, personName } from './shared';
 import styles from '../../../styles/sprint2/member3.module.css';
-
-function PhotoGroup({ title, photos }) {
-  return (
-    <div>
-      <h3>{title}</h3>
-      {photos.length === 0 ? (
-        <p className="muted">No photos.</p>
-      ) : (
-        <ul>
-          {photos.map((p) => (
-            <li key={p._id}>{p.originalName || 'Photo'} <span className="muted">· {formatDateTime(p.takenAt)}</span></li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
 
 export default function DamageReportDetails({ report }) {
   const { reservation, decision, dispute, resolution } = report;
@@ -72,14 +56,11 @@ export default function DamageReportDetails({ report }) {
         </ol>
       </section>
 
-      {report.photos && (
+      {reservation?._id && (
         <section className={styles.section} aria-labelledby="photos-heading">
           <h2 id="photos-heading">Condition photos</h2>
-          <div className={styles.photoGroups}>
-            <PhotoGroup title="At pickup (before)" photos={report.photos.pickup} />
-            <PhotoGroup title="At return (after)" photos={report.photos.return} />
-          </div>
-          {/* TODO(Req 79/80): swap the file list for ConditionPhotoPanel once /api/condition-photos exists. */}
+          <p className="muted">Compare the photos taken at pickup with those taken at return. Select a photo to open it full size.</p>
+          <ConditionPhotoPanel reservationId={reservation._id} readOnly />
         </section>
       )}
     </>

@@ -9,7 +9,7 @@ const { Schema } = mongoose;
 const entrySchema = new Schema({
   item: { type: Schema.Types.ObjectId, ref: 'Item', required: true },
   startDate: { type: Date, required: true }, // UTC midnight of the first day
-  endDate: { type: Date, required: true },   // UTC midnight of the last day (inclusive)
+  endDate: { type: Date, required: true },   // UTC midnight of the return day (exclusive)
   addedAt: { type: Date, default: Date.now },
 });
 

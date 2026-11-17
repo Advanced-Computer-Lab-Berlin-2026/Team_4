@@ -246,7 +246,7 @@ test('paid wallet checkout fails safely without Member 2 service; integration re
         assert(session.inTransaction());
         assert.equal(recipients.length, 2);
         assert.equal(data.reservationId, id);
-        if (type === 'reservation_cancelled') notifications += 1;
+        if (type === 'cancelled') notifications += 1;
       },
     },
   };
@@ -358,7 +358,7 @@ test('good return releases the held deposit, recalculates both users and emits c
   assert.equal(+updated.completedAt, +updated.returnedAt);
   assert.equal(settlements, 1);
   assert.deepEqual(recalculated, [borrower.id, lender.id]);
-  assert.deepEqual(emitted, ['reservation_completed', 'availability_changed']);
+  assert.deepEqual(emitted, ['completed', 'availability_changed']);
 });
 
 test('paid rejection rolls back when settlement is unavailable and refunds in full on retry', async () => {

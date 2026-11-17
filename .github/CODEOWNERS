@@ -212,3 +212,28 @@
 /server/test/sprint2/member6/ @SeiffNader
 /client/test/sprint2/member6.test.jsx @SeiffNader
 /docs/sprint2/member6.md @SeiffNader
+
+# Sprint 2 borrow list and reservation lifecycle (Member 5)
+/client/src/api/borrowLists.api.js @Aser005
+/client/src/api/lendingDashboard.api.js @Aser005
+/client/src/api/reservationLifecycle.api.js @Aser005
+/client/src/components/lender/item-editor/item-editor.css @Aser005
+/client/src/components/sprint2/m5/ @Aser005
+/client/src/pages/borrow/BorrowListPage.jsx @Aser005
+/client/src/pages/lender/my-items.css @Aser005
+/client/src/pages/lifecycle/ @Aser005
+/client/src/routes/sprint2/member5.routes.jsx @Aser005
+/client/src/styles/sprint2/member5.module.css @Aser005
+/client/test/sprint2/member5.test.jsx @Aser005
+/docs/sprint2/member5.md @Aser005
+/server/src/controllers/borrowLists.controller.js @Aser005
+/server/src/controllers/lendingDashboard.controller.js @Aser005
+/server/src/controllers/reservationLifecycle.controller.js @Aser005
+/server/src/models/BorrowList.js @Aser005
+/server/src/routes/borrowLists.routes.js @Aser005
+/server/src/routes/lendingDashboard.routes.js @Aser005
+/server/src/routes/reservationLifecycle.routes.js @Aser005
+/server/src/services/borrow/borrowList.js @Aser005
+/server/src/services/reservations/lendingDashboard.js @Aser005
+/server/src/services/reservations/lifecycle.js @Aser005
+/server/test/sprint2/member5.test.js @Aser005

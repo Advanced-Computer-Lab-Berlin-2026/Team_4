@@ -127,7 +127,9 @@ export default function LenderReservationsPage() {
         {rows.map((r) => (
           <ReservationCard key={r._id} reservation={r}>
             <RequestAnswer reservation={r} onStale={stale} onDone={done} />
-            {r.actions?.pickup && <PickupButton reservation={r} onStale={stale} onDone={done} />}
+            {(r.actions?.pickup || (r.status === 'confirmed' && r.fulfilment?.method === 'delivery')) && (
+              <PickupButton reservation={r} onStale={stale} onDone={done} />
+            )}
             {r.actions?.decideExtension && <ExtensionAnswer reservation={r} onStale={stale} onDone={done} />}
             {r.actions?.returnGood && <ReturnActions reservation={r} onStale={stale} onDone={done} />}
           </ReservationCard>

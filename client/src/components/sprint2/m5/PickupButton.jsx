@@ -17,8 +17,6 @@ import s from '../../../styles/sprint2/member5.module.css';
 // Member 6's delivery tracking page, if its route is registered (never a broken link).
 const hasDeliveryPage = routes.some((route) => route.path.startsWith('/delivery-tracking'));
 
-export const DELIVERY_STAGE = { preparing: 'Preparing', out_for_delivery: 'Out for delivery', delivered: 'Delivered' };
-
 export default function PickupButton({ reservation: r, onDone, onStale }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');

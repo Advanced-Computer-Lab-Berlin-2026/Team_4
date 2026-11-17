@@ -8,7 +8,7 @@ process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'disposable-member5-integration';
 const mongoose = require('mongoose');
 const app = require('../../src/app');
-const { User, Category, Item, Reservation, DamageReport } = require('../../src/models');
+const { User, Category, Item, Reservation, ReservationHold, BorrowList, DamageReport } = require('../../src/models');
 const { signToken } = require('../../src/utils/tokens');
 
 let server, base, category, lender, borrower, other, admin;
@@ -41,6 +41,7 @@ const booking = (thing, status, s, e, fields = {}) => Reservation.create({
 
 before(async () => {
   assert(process.env.TEST_MONGO_URI, 'Set TEST_MONGO_URI to a disposable replica set');
+  mongoose.set('strictQuery', true);
   await mongoose.connect(process.env.TEST_MONGO_URI, { dbName: 'member5_test_' + process.pid });
   await Promise.all(Object.values(require('../../src/models')).map((model) => model.init()));
   lender = await user('lender5', 'member', 'verified');
@@ -104,6 +105,8 @@ test('my reservations: status and date filters, only my own', async () => {
   const mine = (q) => request('GET', '/api/reservation-lifecycle/mine' + q, borrower);
   assert.ok((await mine('?status=upcoming')).body.items.some((r) => r._id === up.id));
   assert.equal((await mine('?status=confirmed')).status, 400);
+  assert.equal((await mine('?status=constructor')).status, 400);
+  assert.equal((await mine('?from=2026-02-30')).status, 400);
   assert.ok((await mine(`?from=${ymd(11)}&to=${ymd(11)}`)).body.items.some((r) => r._id === up.id));
   assert.ok(!(await mine(`?from=${ymd(12)}&to=${ymd(12)}`)).body.items.some((r) => r._id === up.id)); // its return day
   assert.equal((await request('GET', '/api/reservation-lifecycle/' + up.id, other)).status, 404);
@@ -154,4 +157,108 @@ test('lending dashboard: loans, deposits and damage rate', async () => {
   assert.ok(d.body.damage.rate > 0 && d.body.damage.rate <= 1);
   assert.equal((await request('GET', '/api/lending-dashboard?period=7d', lender)).status, 400);
   assert.equal((await request('GET', '/api/lending-dashboard', borrower)).status, 403);
+});
+
+test('edits and removes only the borrower’s entries and can repair a legacy draft', async () => {
+  const [drill, saw] = await Promise.all([item('Draft drill'), item('Draft saw')]);
+  const root = '/api/borrow-lists/mine';
+  const create = async (tool) => request('POST', root + '/entries', other, {
+    itemId: tool.id, startDate: ymd(4), endDate: ymd(6),
+  });
+  assert.equal((await create(drill)).status, 201);
+  const added = await create(saw);
+  assert.equal(added.status, 201);
+  assert.equal(added.body.borrowList.count, 2);
+  const entry = added.body.borrowList.entries.find((line) => line.item._id === saw.id);
+  const path = root + '/entries/' + entry._id;
+  const dates = { startDate: ymd(7), endDate: ymd(10) };
+  assert.equal((await request('PATCH', path, borrower, dates)).status, 404);
+  assert.equal((await request('DELETE', path, borrower)).status, 404);
+  const edited = await request('PATCH', path, other, dates);
+  assert.equal(edited.status, 200);
+  assert.equal(edited.body.borrowList.entries.find((line) => line._id === entry._id).days, 3);
+  assert.equal((await request('DELETE', path, other)).body.borrowList.count, 1);
+
+  const draft = await BorrowList.findOne({ user: other.id });
+  await BorrowList.collection.updateOne({ _id: draft._id }, { $unset: { 'entries.0.endDate': 1 } });
+  const old = await request('GET', root, other);
+  assert.equal(old.status, 200);
+  const [legacy] = old.body.borrowList.entries;
+  assert.equal(legacy.problem, 'invalid_dates');
+  assert.equal(legacy.endDate, null);
+  const repaired = await request('PATCH', root + '/entries/' + legacy._id, other, dates);
+  assert.equal(repaired.status, 200);
+  assert.equal(repaired.body.borrowList.entries[0].problem, null);
+});
+
+test('archiving respects active holds and is serialized against checkout', async () => {
+  const held = await item('Hold fixture');
+  const path = '/api/items/' + held.id + '/archive';
+  const hold = await ReservationHold.create({
+    item: held.id, borrower: other.id, startDate: day(5), endDate: day(6), expiresAt: new Date(Date.now() + 60000),
+  });
+  assert.equal((await request('PATCH', path, lender)).status, 409);
+  await ReservationHold.updateOne({ _id: hold.id }, { $set: { expiresAt: new Date(0) } });
+  assert.equal((await request('PATCH', path, lender)).status, 200);
+
+  const raced = await item('Archive race fixture');
+  const selection = { source: 'single', itemId: raced.id, startDate: ymd(8), endDate: ymd(10) };
+  const preview = await request('POST', '/api/checkout/quote', other, selection);
+  assert.equal(preview.status, 200);
+  const [archived, booked] = await Promise.all([
+    request('PATCH', '/api/items/' + raced.id.toUpperCase() + '/archive', lender),
+    request('POST', '/api/checkout', other, {
+      ...selection, method: 'wallet', operationKey: 'member5-archive-race-fixture', quoteHash: preview.body.quote.quoteHash,
+    }),
+  ]);
+  assert.equal([archived, booked].filter((outcome) => outcome.status === 200).length, 1);
+  assert.equal((await Item.findById(raced.id)).isArchived, archived.status === 200);
+  assert.equal(await Reservation.countDocuments({ item: raced.id }), booked.status === 200 ? 1 : 0);
+});
+
+test('delivery details become returnable after delivery handover', async () => {
+  const van = await item('Delivery fixture');
+  const loan = await booking(van, 'confirmed', 0, 3, { fulfilment: {
+    method: 'delivery', deliveryStatus: 'preparing', deliveryFee: 12.5, deliveryAddress: 'Participant address',
+  } });
+  const path = '/api/reservation-lifecycle/' + loan.id;
+  const initial = (await request('GET', path, lender)).body.reservation;
+  assert.equal(initial.actions.pickup, false);
+  assert.equal(initial.fulfilment.deliveryFee, 12.5);
+  assert.equal(initial.fulfilment.deliveryAddress, undefined);
+  assert.equal((await request('PATCH', path + '/pickup', lender)).status, 409);
+  const deliveryPath = '/api/delivery/reservations/' + loan.id;
+  assert.equal((await request('PATCH', deliveryPath, lender, { deliveryStatus: 'out_for_delivery' })).status, 200);
+  assert.equal((await request('PATCH', deliveryPath, lender, { deliveryStatus: 'delivered' })).status, 200);
+  const active = (await request('GET', path, lender)).body.reservation;
+  assert.equal(active.status, 'active');
+  assert.equal(active.actions.returnGood, true);
+});
+
+test('extensions reject overlapping dates and stale decisions after withdrawal', async () => {
+  const desk = await item('Extension overlap fixture');
+  const out = await booking(desk, 'active', 0, 2);
+  const path = '/api/reservation-lifecycle/' + out.id + '/extension';
+  await booking(desk, 'confirmed', 4, 6, { borrower: other.id });
+  const ask = (end) => request('POST', path, borrower, { requestedEndDate: ymd(end) });
+  assert.equal((await ask(5)).status, 409);
+  const first = (await ask(3)).body.reservation.extension.requestId;
+  assert.equal((await request('DELETE', path, borrower, { requestId: first })).body.reservation.extension.status, 'cancelled');
+  const current = (await ask(4)).body.reservation.extension.requestId;
+  assert.equal((await request('PATCH', path + '/approve', lender, { requestId: first })).status, 409);
+  const result = await request('PATCH', path + '/reject', lender, { requestId: current });
+  assert.equal(result.body.reservation.extension.status, 'rejected');
+  assert.equal(result.body.reservation.endDate, ymd(2));
+});
+
+test('an existing damage case prevents a good return and preserves the reservation', async () => {
+  const wrench = await item('Damage guard fixture');
+  const loan = await booking(wrench, 'active', 0, 2);
+  await DamageReport.create({
+    reservation: loan.id, item: wrench.id, reportedBy: lender.id, borrower: borrower.id, description: 'Open case fixture',
+  });
+  const path = '/api/reservation-lifecycle/' + loan.id;
+  assert.equal((await request('GET', path, lender)).body.reservation.actions.returnGood, false);
+  assert.equal((await request('PATCH', path + '/return', lender)).status, 409);
+  assert.equal((await Reservation.findById(loan.id)).status, 'active');
 });

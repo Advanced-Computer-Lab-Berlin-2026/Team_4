@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { getItem, listItems } from '../../api/catalog.api';
 import { getErrorMessage } from '../../api/axios';
+import BorrowListButton from '../../components/sprint2/m5/BorrowListButton';
 import styles from '../../styles/sprint2/member1.module.css';
 
 function ItemPicker() {
@@ -29,7 +30,7 @@ function ItemPicker() {
   return (
     <>
       <h1>Reserve an item</h1>
-      <Link to="/checkout">Checkout borrow list</Link>
+      <Link to="/borrow-list">View borrow list</Link>
       <form className={styles.form} onSubmit={(event) => { event.preventDefault(); load(query.trim(), 1); }}>
         <label className={styles.field}>Find an item
           <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} />
@@ -90,17 +91,20 @@ function ReserveDates({ itemId }) {
       {error && <p className={styles.error} role="alert">{error}</p>}
       {!item && !error && <p role="status">Loading listing…</p>}
       {item && (
-        <form className={styles.form} onSubmit={submit}>
-          <label className={styles.field}>Pickup date
-            <input required type="date" min={new Date().toISOString().slice(0, 10)}
-              value={startDate} onChange={(event) => setStartDate(event.target.value)} />
-          </label>
-          <label className={styles.field}>Return date
-            <input required type="date" min={startDate} value={endDate}
-              onChange={(event) => setEndDate(event.target.value)} />
-          </label>
-          <button className={styles.button}>Review reservation</button>
-        </form>
+        <>
+          <form className={styles.form} onSubmit={submit}>
+            <label className={styles.field}>Pickup date
+              <input required type="date" min={new Date().toISOString().slice(0, 10)}
+                value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+            </label>
+            <label className={styles.field}>Return date
+              <input required type="date" min={startDate} value={endDate}
+                onChange={(event) => setEndDate(event.target.value)} />
+            </label>
+            <button className={styles.button}>Review single reservation</button>
+          </form>
+          <BorrowListButton itemId={item._id} ownerId={item.owner?._id} maxBorrowDays={item.rules?.maxBorrowDays} />
+        </>
       )}
     </>
   );

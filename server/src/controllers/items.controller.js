@@ -9,16 +9,19 @@ const Item = require('../models/Item');
 const Category = require('../models/Category');
 const sharp = require('sharp');
 const { fileInfo, removeFile } = require('../middleware/upload');
-const Reservation = require('../models/Reservation'); // read only: open bookings block archiving (Sprint 2)
-// Bookings that are still open: a request waiting for an answer, booked but not picked up, or borrowed right now.
-const OPEN_BOOKING_STATUSES = ['pending', 'confirmed', 'active'];
+const Reservation = require('../models/Reservation');
+const ReservationHold = require('../models/ReservationHold');
+const { BLOCKING_STATUSES, objectId } = require('../services/reservations/availability');
+const { bookingKeys, transactBooking } = require('../services/reservations/bookingLock');
 
 const MAX_PHOTOS = 8; // per item, across all uploads (decision B)
 const { parsePagination, paginated } = require('../utils/pagination');
 
 /** Load one of the current lender's items (archived included). Another lender's item is a 404, so we don't reveal it exists. */
-const findMyItem = async (req) => {
-  const item = await Item.findOne({ _id: req.params.id, owner: req.user._id }).populate('category', 'name slug');
+const findMyItem = async (req, session) => {
+  const query = Item.findOne({ _id: req.params.id, owner: req.user._id });
+  if (session) query.session(session);
+  const item = await query.populate('category', 'name slug');
   if (!item) throw ApiError.notFound('Item not found');
   return item;
 };
@@ -182,14 +185,17 @@ exports.removePhoto = asyncHandler(async (req, res) => {
  * Flip isArchived in one atomic step (only if it is currently the opposite), so double clicks can't conflict.
  * Nothing is deleted: photos, history and anything that references the item stay (Req 15).
  */
-const setArchived = async (req, archive) => {
+const setArchived = async (req, archive, session) => {
   if (archive) {
     // Sprint 2: an item with open bookings can't be hidden, or borrowers would hold bookings for an item nobody can see.
-    const mine = await findMyItem(req); // 404 first, so another lender's bookings are never revealed
+    const mine = await findMyItem(req, session); // 404 first, so another lender's bookings are never revealed
     if (mine.isArchived) throw ApiError.conflict('Item is already archived');
-    const open = await Reservation.countDocuments({ item: mine._id, status: { $in: OPEN_BOOKING_STATUSES } });
+    const open = await Reservation.countDocuments({ item: mine._id, status: { $in: BLOCKING_STATUSES } }).session(session);
     if (open > 0) {
       throw ApiError.conflict(`This item has ${open} open booking${open === 1 ? '' : 's'} (a request, an upcoming or an active booking). Archive it after ${open === 1 ? 'it finishes' : 'they finish'}; you can decline requests in Booking requests.`);
+    }
+    if (await ReservationHold.exists({ item: mine._id, expiresAt: { $gt: new Date() } }).session(session)) {
+      throw ApiError.conflict('This item has a temporary booking hold. Archive it once the hold clears.');
     }
   }
   const update = archive
@@ -198,10 +204,10 @@ const setArchived = async (req, archive) => {
   const item = await Item.findOneAndUpdate(
     { _id: req.params.id, owner: req.user._id, isArchived: !archive },
     update,
-    { new: true },
+    { new: true, session },
   ).populate('category', 'name slug');
   if (!item) {
-    await findMyItem(req); // 404 if it is not my item
+    await findMyItem(req, session); // 404 if it is not my item
     throw ApiError.conflict(archive ? 'Item is already archived' : 'Item is not archived');
   }
   return item;
@@ -212,7 +218,9 @@ const setArchived = async (req, archive) => {
  * Archive: hidden from search (Item.publicFilter), reservation history kept.
  */
 exports.archiveItem = asyncHandler(async (req, res) => {
-  res.json({ item: await setArchived(req, true) });
+  const id = objectId(req.params.id);
+  const item = await transactBooking(bookingKeys([id]), (session) => setArchived(req, true, session));
+  res.json({ item });
 });
 
 /**

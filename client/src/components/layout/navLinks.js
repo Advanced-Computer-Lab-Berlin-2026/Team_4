@@ -18,6 +18,7 @@ export const guestLinks = [
 export const memberLinks = [
   { to: '/catalog', label: 'Browse items' },
   { to: '/reserve', label: 'Reserve' },
+  ...ifRegistered('/borrow-list', 'Borrow list'),
   { to: isRegistered('/reservations') ? '/reservations' : '/my-reservations', label: 'Reservations' },
   ...ifRegistered('/delivery-tracking', 'Deliveries', '/delivery-tracking/:reservationId?'),
   { to: '/favorites', label: 'Favorites' },
@@ -33,6 +34,7 @@ export const memberLinks = [
 export const lenderLinks = [
   { to: '/lender/items', label: 'My items' },
   ...ifRegistered('/lender/reservations', 'Booking requests'),
+  ...ifRegistered('/lender/dashboard', 'Lending dashboard'),
 ];
 export const applyLink = { to: '/lender/apply', label: 'Become a lender' };
 

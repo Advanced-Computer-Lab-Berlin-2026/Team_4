@@ -30,7 +30,12 @@ const ITEM_FIELDS = 'title photos category depositAmount owner pickup rules isAr
 
 const fieldError = (field, message) => ApiError.badRequest(message, [{ field, message }]);
 const todayUtc = () => { const n = new Date(); return Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()); };
-const toDay = (date) => new Date(date).toISOString().slice(0, 10);
+const toDay = (value) => {
+  const date = value instanceof Date ? value : parseDay(value);
+  if (!date || !Number.isFinite(+date)) return null;
+  const iso = date.toISOString();
+  return iso.endsWith('T00:00:00.000Z') ? iso.slice(0, 10) : null;
+};
 const daysBetween = (start, end) => Math.round((new Date(end) - new Date(start)) / DAY_MS); // end date = return day, not counted
 
 /** "2026-12-01" -> Date at UTC midnight, or null if it isn't a real calendar date (e.g. 2026-02-30). */
@@ -84,6 +89,9 @@ function problemOf(entry, item, context = {}) {
   if (context.userId && item.owner && String(item.owner._id) === String(context.userId)) {
     return ['unavailable', 'This is your own item. Remove it from your list.'];
   }
+  if (!toDay(entry.startDate) || !toDay(entry.endDate)) {
+    return ['invalid_dates', 'Choose valid start and end dates.'];
+  }
   if (new Date(entry.startDate).getTime() < todayUtc()) return ['dates_passed', 'These dates have passed. Choose new dates.'];
   if (daysBetween(entry.startDate, entry.endDate) < 1) {
     return ['invalid_dates', 'The end date must be after the start date. Choose new dates.']; // saved before the end-date rule changed
@@ -102,11 +110,13 @@ function problemOf(entry, item, context = {}) {
 
 const toEntryDto = (entry, item, context) => {
   const problem = problemOf(entry, item, context);
+  const startDate = toDay(entry.startDate);
+  const endDate = toDay(entry.endDate);
   return {
     _id: entry._id,
-    startDate: toDay(entry.startDate),
-    endDate: toDay(entry.endDate),
-    days: daysBetween(entry.startDate, entry.endDate),
+    startDate,
+    endDate,
+    days: startDate && endDate ? daysBetween(entry.startDate, entry.endDate) : null,
     item: item ? {
       _id: item._id, title: item.title, photo: item.photos?.[0]?.url || null, depositAmount: item.depositAmount,
       category: item.category ? { _id: item.category._id, name: item.category.name, slug: item.category.slug } : null,

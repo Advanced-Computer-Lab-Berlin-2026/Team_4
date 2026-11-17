@@ -51,6 +51,10 @@ export function nextStep(r) {
       if (r.flags?.approvalOverdue) return lender ? 'You haven\'t answered this request and its start date has passed.' : 'The lender hasn\'t answered and the start date has passed.';
       return lender ? 'Waiting for your answer.' : 'Waiting for the lender to approve.';
     case 'confirmed':
+      if (r.fulfilment?.method === 'delivery') {
+        if (r.flags?.pickupMissed) return 'The booked days passed before delivery.';
+        return r.fulfilment.deliveryStatus === 'out_for_delivery' ? 'Out for delivery.' : 'Preparing for delivery.';
+      }
       if (r.flags?.pickupMissed) return 'The pickup was missed: the booked days have passed.';
       if (r.startDate > todayUtc()) return `Pickup from ${showDay(r.startDate)} (${whenText(r.startDate)}).`;
       return lender ? 'Ready to be picked up now.' : 'Ready to pick up now.';

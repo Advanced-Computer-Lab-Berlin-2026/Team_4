@@ -211,8 +211,8 @@ export default function DamageReportPage() {
     <div className="container">
       {id && <p><Link to="/damage-reports">← My damage reports</Link></p>}
       <h1>{isNew ? 'Report damage' : id ? 'Damage report' : 'My damage reports'}</h1>
-      {isNew && <NewReport reservationId={params.get('reservation')} />}
-      {id && <ReportView id={id} />}
+      {isNew && <NewReport key={params.get('reservation')} reservationId={params.get('reservation')} />}
+      {id && <ReportView key={id} id={id} />}
       {!id && !isNew && <MyReports />}
     </div>
   );

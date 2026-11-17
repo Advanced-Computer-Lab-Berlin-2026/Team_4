@@ -17,6 +17,7 @@ const { withReservation } = require('../reservations/reservationCommands');
 /** Decision D6 in the contract. Per-file limits (type, size, 5 per upload) come from the upload preset. */
 const PHOTO_CONFIG = Object.freeze({ maxPerStage: 10, returnWindowHours: 48 });
 const STAGES = ['pickup', 'return'];
+const isEvidencePath = (path) => typeof path === 'string' && /^private\/condition-photos\/[\w.-]+\.(?:jpe?g|png)$/i.test(path);
 
 const sameId = (a, b) => a != null && b != null && String(a?._id ?? a) === String(b?._id ?? b);
 const isAdmin = (user) => user.role === ROLES.ADMIN;
@@ -114,7 +115,15 @@ async function addPhotos(user, reservationId, stage, files = []) {
     });
     return photosDto(saved);
   } catch (err) {
-    for (const file of files) removeFile(fileInfo(file).path); // nothing was saved: don't leave orphaned evidence files
+    const record = await Reservation.findById(reservationId).select('conditionPhotos').lean().catch(() => undefined);
+    // If the commit outcome could not be confirmed, preserve evidence referenced by a committed reservation.
+    if (record !== undefined) {
+      const recorded = new Set(STAGES.flatMap((name) => (record?.conditionPhotos?.[name] || []).map((photo) => photo.path)));
+      for (const file of files) {
+        const path = fileInfo(file).path;
+        if (!recorded.has(path)) removeFile(path);
+      }
+    }
     throw err;
   }
 }
@@ -135,7 +144,7 @@ async function removePhoto(user, reservationId, photoId) {
     photo.deleteOne();
     return record.save({ session });
   });
-  removeFile(removedPath);
+  if (isEvidencePath(removedPath)) removeFile(removedPath);
   return photosDto(saved);
 }
 
@@ -144,7 +153,7 @@ async function getPhotoFile(user, reservationId, photoId) {
   const reservation = await loadForViewer(user, reservationId);
   for (const stage of STAGES) {
     const photo = (reservation.conditionPhotos?.[stage] || []).find((p) => sameId(p._id, photoId));
-    if (photo) return { absPath: absolutePath(photo.path), mimeType: photo.mimeType, originalName: photo.originalName };
+    if (photo && isEvidencePath(photo.path)) return { absPath: absolutePath(photo.path), mimeType: photo.mimeType, originalName: photo.originalName };
   }
   throw ApiError.notFound('Photo not found');
 }

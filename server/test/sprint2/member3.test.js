@@ -404,6 +404,8 @@ describe('damage reports API (Req 61, 62, 63, 64, 80)', { skip: !process.env.TES
   const ApiError = require('../../src/utils/ApiError');
   const settlement = require('../../src/services/damage/settlement');
   const damage = require('../../src/services/damage/damage');
+  const commands = require('../../src/services/reservations/reservationCommands');
+  const { features } = require('../../src/services/sprint2/bootstrap');
   const User = require('../../src/models/User');
   const Item = require('../../src/models/Item');
   const Category = require('../../src/models/Category');
@@ -468,6 +470,7 @@ describe('damage reports API (Req 61, 62, 63, 64, 80)', { skip: !process.env.TES
       const category = await Category.create({ name: 'Damage tools', slug: 'damage-tools' });
       item = await Item.create({ owner: lender._id, title: 'Angle grinder', category: category._id, description: 'For tests', depositAmount: 400 });
       const photo = { path: 'private/condition-photos/secret.jpg', takenAt: hoursAgo(40), uploadedBy: lender._id, originalName: 'pickup-front.jpg', mimeType: 'image/jpeg', size: 2048 };
+      settlement.setSettlementProvider(fakePayments);
       res.main = await mkActive({ conditionPhotos: { pickup: [photo], return: [] } });
       res.zero = await mkActive();
       res.noPayments = await mkActive();
@@ -483,7 +486,7 @@ describe('damage reports API (Req 61, 62, 63, 64, 80)', { skip: !process.env.TES
   });
 
   after(async () => {
-    settlement.setSettlementProvider(null);
+    settlement.setSettlementProvider();
     if (mongoose.connection.readyState !== 1) return;
     try {
       if (server) await new Promise((resolve) => server.close(resolve));
@@ -496,8 +499,9 @@ describe('damage reports API (Req 61, 62, 63, 64, 80)', { skip: !process.env.TES
     }
   });
 
-  test('without Member 2 payment service, a decision fails visibly (501) and changes nothing', async () => {
+  test('without Member 2 payment service, a decision fails visibly (501) and changes nothing', async (t) => {
     settlement.setSettlementProvider(null);
+    t.after(() => settlement.setSettlementProvider(fakePayments));
     const created = await report(lender, res.noPayments);
     assert.equal(created.status, 201);
     const r = await decide(admin, created.data.report._id, 100);
@@ -506,7 +510,6 @@ describe('damage reports API (Req 61, 62, 63, 64, 80)', { skip: !process.env.TES
     const saved = await DamageReport.findById(created.data.report._id).lean();
     assert.equal(saved.status, 'open');
     assert.equal(saved.decision?.decidedAt, undefined);
-    settlement.setSettlementProvider(fakePayments); // the rest of the suite uses the fake
   });
 
   test('only the verified lender of the reservation can report (Req 61)', async () => {
@@ -526,7 +529,9 @@ describe('damage reports API (Req 61, 62, 63, 64, 80)', { skip: !process.env.TES
     assert.equal(await DamageReport.countDocuments(), 1); // only noPayments' report from the first test
   });
 
-  test('an overdue damaged return fails visibly until Member 2 provides late fees, and changes nothing', async () => {
+  test('an overdue damaged return fails visibly until Member 2 provides late fees, and changes nothing', async (t) => {
+    const transition = commands.transition;
+    t.mock.method(commands, 'transition', (input) => transition(input, { ...features(), payment: undefined }));
     const r = await report(lender, res.overdue);
     assert.equal(r.status, 503);
     assert.match(r.data.message, /Late fee processing is unavailable/);
@@ -590,6 +595,7 @@ describe('damage reports API (Req 61, 62, 63, 64, 80)', { skip: !process.env.TES
     assert.equal((await decide(borrower, reports.main, 100)).status, 403);
     assert.equal((await decide(lender, reports.main, 100)).status, 403);
     assert.equal((await decide(admin, reports.main, -5)).status, 400);
+    assert.equal((await decide(admin, reports.main, 400.001)).status, 400);
     assert.equal((await decide(admin, reports.main, 100, '')).status, 400);
     const tooMuch = await decide(admin, reports.main, 400.01);
     assert.equal(tooMuch.status, 400);
@@ -603,6 +609,8 @@ describe('damage reports API (Req 61, 62, 63, 64, 80)', { skip: !process.env.TES
     assert.equal(status, 200);
     assert.equal(data.report.status, 'decided');
     assert.equal(data.report.decision.forfeitAmount, 150);
+    assert.equal(data.report.reservation.deposit.status, 'partially_forfeited');
+    assert.equal((await Reservation.findById(res.main._id).lean()).deposit.forfeited, 150);
     assert.equal(data.report.decision.decidedBy.username, 'dm_admin');
     assert.ok(data.report.disputeDeadline);
     const settled = callsFor(`damage:${reports.main}:decision`);
@@ -666,6 +674,8 @@ describe('damage reports API (Req 61, 62, 63, 64, 80)', { skip: !process.env.TES
     assert.equal(status, 200);
     assert.equal(data.report.status, 'resolved');
     assert.equal(data.report.resolution.finalForfeitAmount, 100);
+    assert.equal(data.report.reservation.deposit.status, 'partially_forfeited');
+    assert.equal((await Reservation.findById(res.main._id).lean()).deposit.forfeited, 100);
     assert.equal(data.report.resolution.resolvedBy.username, 'dm_admin');
     const refunds = callsFor(`damage:${reports.main}:resolution`);
     assert.equal(refunds.length, 1);
@@ -689,8 +699,75 @@ describe('damage reports API (Req 61, 62, 63, 64, 80)', { skip: !process.env.TES
     await decide(admin, id, 80);
     assert.equal((await User.findById(borrower._id).lean()).stats.damageReports, before + 1);
     await dispute(borrower, id);
-    await resolve(admin, id, 0);
+    const cleared = await resolve(admin, id, 0);
+    assert.equal(cleared.data.report.reservation.deposit.status, 'released');
+    assert.equal((await Reservation.findById(extra._id).lean()).deposit.forfeited, 0);
     assert.equal((await User.findById(borrower._id).lean()).stats.damageReports, before);
+  });
+
+  test('simultaneous damaged returns create one report, including when no deposit was charged', async () => {
+    const free = await mkActive({ deposit: { amount: 0, status: 'none' } });
+    const responses = await Promise.all([report(lender, free), report(lender, free)]);
+    assert.deepEqual(responses.map(({ status }) => status).sort(), [200, 201]);
+    const id = responses[0].data.report._id;
+    assert.equal(responses[1].data.report._id, id);
+    assert.equal(await DamageReport.countDocuments({ reservation: free._id }), 1);
+    assert.equal((await decide(admin, id, 0.01)).status, 400);
+    settlement.setSettlementProvider(null);
+    try {
+      const result = await decide(admin, id, 0);
+      assert.equal(result.status, 200);
+      assert.equal(result.data.report.reservation.deposit.status, 'none');
+    } finally {
+      settlement.setSettlementProvider(fakePayments);
+    }
+  });
+
+  test('real wallet decision and appeal settle once and publish supported outbox events', async (t) => {
+    const { payment, events } = features();
+    if (!payment) return t.skip('Member 2 payment provider is optional');
+    settlement.setSettlementProvider();
+    t.after(() => settlement.setSettlementProvider(fakePayments));
+    const { PaymentOperation, EventOutbox, WalletTransaction } = require('../../src/models');
+    await User.updateOne({ _id: borrower._id }, { $set: { walletBalance: 400 } });
+    const paid = await mkActive();
+    const reference = { type: 'reservation', id: paid._id };
+    await payment.charge({ userId: borrower._id, amountMinor: 40000, purpose: 'deposit', reference, idempotencyKey: 'member3:real:deposit' });
+    const opened = await report(lender, paid);
+    assert.equal(opened.status, 201);
+    const id = opened.data.report._id;
+    const { status, data } = await decide(admin, id, 400);
+    assert.equal(status, 200, data.message);
+    assert.equal(data.report.reservation.deposit.status, 'forfeited');
+    assert.equal((await decide(admin, id, 400)).status, 409);
+    assert.equal((await dispute(borrower, id)).status, 200);
+    const resolved = await resolve(admin, id, 100);
+    assert.equal(resolved.status, 200, resolved.data.message);
+    assert.equal(resolved.data.report.reservation.deposit.status, 'partially_forfeited');
+    assert.equal((await resolve(admin, id, 100)).status, 409);
+    const row = await Reservation.findById(paid._id).lean();
+    assert.equal(row.deposit.forfeited, 100);
+    assert.equal((await User.findById(borrower._id).lean()).walletBalance, 300);
+    assert.equal((await User.findById(lender._id).lean()).walletBalance, 100);
+    assert.equal(await PaymentOperation.countDocuments({ 'reference.id': paid._id, purpose: 'damage', status: 'succeeded' }), 2);
+    const borrowerLedger = await WalletTransaction.find({ reservation: paid._id, user: borrower._id }).sort('amountMinor').lean();
+    assert.deepEqual(borrowerLedger.map(({ amountMinor }) => amountMinor), [-40000, 30000]);
+    if (events) {
+      const outcomes = await EventOutbox.find({ aggregateId: id }).sort('type').lean();
+      assert.deepEqual(outcomes.map(({ type }) => type), ['damage_decision', 'damage_resolved']);
+      for (const outcome of outcomes) {
+        assert.deepEqual(outcome.recipients.map(String).sort(), [String(borrower._id), String(lender._id)].sort());
+      }
+    }
+    const late = await report(lender, res.overdue);
+    assert.equal(late.status, 201, late.data.message);
+    assert.equal((await report(lender, res.overdue)).status, 200);
+    const overdue = await Reservation.findById(res.overdue._id).lean();
+    assert.ok(overdue.lateFee > 0);
+    assert.equal(overdue.deposit.status, 'held');
+    assert.equal((await PaymentOperation.countDocuments({
+      kind: 'late_fee', status: 'succeeded', 'reference.id': overdue._id,
+    })), 1);
   });
 });
 
@@ -873,6 +950,15 @@ describe('condition photos API (Req 79, 80)', { skip: !process.env.TEST_MONGO_UR
     assert.equal(view.status, 200);
     assert.equal(String(view.data.report.photos.return[0]._id), String(photoId));
     assert.equal((await call(`/condition-photos/${res.withCase._id}/${photoId}/file`, { user: admin })).status, 200);
+  });
+
+  test('a stored path outside the condition-photo folder cannot be streamed as evidence', async () => {
+    const item = await mkReservation({
+      status: 'active',
+      conditionPhotos: { pickup: [{ path: '../package.json', originalName: 'outside.png', mimeType: 'image/png', uploadedBy: lender._id, size: 64 }] },
+    });
+    const photoId = item.conditionPhotos.pickup[0]._id;
+    assert.equal((await call(`/condition-photos/${item._id}/${photoId}/file`, { user: admin })).status, 404);
   });
 
   test('if saving fails, uploaded files are removed and nothing is recorded', async () => {

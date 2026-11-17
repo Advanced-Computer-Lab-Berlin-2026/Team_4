@@ -62,7 +62,7 @@ Checkout payment input includes `attemptId, borrowerId, idempotencyKey, amountMi
 
 - The shared reserve page mounts Member 5's `BorrowListButton`. Navigation shows the borrow list and lender dashboard when their routes are registered. Member 7 can also embed the button on catalog details.
 - Archiving checks open bookings and unexpired holds under the shared booking lock. Older drafts without valid dates stay visible and can be edited or removed.
-- Reservation details show Member 3's optional review form for completed bookings and mount the condition-photo panel on open lender bookings when that component exists.
+- Reservation details show Member 3's optional review form for completed bookings and mount the condition-photo panel on confirmed, active and completed bookings when the component exists. The API controls the lender's upload windows and borrowers see the evidence read-only.
 
 ## Member 4 moderation, analytics and support
 

@@ -19,12 +19,8 @@ const PERSON = 'username name';
 
 const sameId = (a, b) => String(a?._id ?? a) === String(b?._id ?? b);
 
-/**
- * When the reservation was completed.
- * TODO(M1): use Reservation.completedAt once added (requested in contract §8); until then the return time,
- * or the last update for reservations completed without one.
- */
-const completedAtOf = (r) => r.completedAt || r.returnedAt || r.updatedAt;
+// Older completed reservations recorded the return without a separate completion timestamp.
+const completedAtOf = (r) => r.completedAt || r.returnedAt;
 const reviewDeadline = (r) => new Date(new Date(completedAtOf(r)).getTime() + REVIEW_WINDOW_DAYS * DAY_MS);
 
 /** The caller's side of a reservation, or null if they didn't take part. */
@@ -60,13 +56,13 @@ const populateReview = (query) =>
 
 /** Req 89, 90 - create a review and refresh the reviewee's trust score atomically. */
 async function createReview(actor, { reservationId, rating, comment }) {
-  const reservation = await Reservation.findById(reservationId).select('borrower lender status returnedAt updatedAt completedAt').lean();
+  const reservation = await Reservation.findById(reservationId).select('borrower lender status returnedAt completedAt').lean();
   if (!reservation) throw ApiError.notFound('Reservation not found');
   const side = sideOf(reservation, actor._id);
   if (!side) throw ApiError.forbidden('Only the borrower or lender of this reservation can review it');
   if (sameId(side.reviewee, actor._id)) throw ApiError.badRequest('You cannot review yourself');
   if (reservation.status !== 'completed') throw ApiError.conflict('You can review only after the reservation is completed');
-  if (Date.now() > reviewDeadline(reservation).getTime()) {
+  if (!(Date.now() <= reviewDeadline(reservation).getTime())) {
     throw ApiError.conflict(`The review window closed ${REVIEW_WINDOW_DAYS} days after completion`);
   }
 
@@ -107,14 +103,12 @@ async function listUserReviews(userId, { skip, limit }) {
 /** Completed reservations the user can still review (inside the window, not reviewed yet). */
 async function listPendingReviews(userId) {
   const cutoff = new Date(Date.now() - REVIEW_WINDOW_DAYS * DAY_MS);
-  const recent = [{ returnedAt: { $gte: cutoff } }, { returnedAt: null, updatedAt: { $gte: cutoff } }];
-  // strictQuery drops unknown paths, which would turn this branch into {} (match all) - only use it once M1 adds the field.
-  if (Reservation.schema.path('completedAt')) recent.unshift({ completedAt: { $gte: cutoff } });
+  const recent = [{ completedAt: { $gte: cutoff } }, { completedAt: null, returnedAt: { $gte: cutoff } }];
   const candidates = await Reservation.find({
     status: 'completed',
     $and: [{ $or: [{ borrower: userId }, { lender: userId }] }, { $or: recent }],
   })
-    .select('item borrower lender returnedAt updatedAt completedAt')
+    .select('item borrower lender returnedAt completedAt')
     .populate('item', 'title')
     .populate('borrower', PERSON)
     .populate('lender', PERSON)

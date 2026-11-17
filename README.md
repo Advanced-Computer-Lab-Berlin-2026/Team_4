@@ -71,7 +71,7 @@ In dev, the **DEV** button (bottom-right) logs you in as any of them in one clic
 | `OTP_EXPIRY_MINUTES` | no | Password-reset OTP lifetime (default 10) |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Sprint 2 | Stripe **test-mode** keys |
 
-`client/.env`: `VITE_API_URL` (only if the API is on another origin), `VITE_STRIPE_PUBLISHABLE_KEY` (Sprint 2).
+`client/.env`: set `VITE_API_URL` only if the API is on another origin. Card payments redirect to Stripe-hosted Checkout and use server-side Stripe configuration.
 
 ## Scripts
 | Command | What it does |

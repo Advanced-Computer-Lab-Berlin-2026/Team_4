@@ -5,6 +5,7 @@ import { getErrorMessage, getFieldErrors } from '../../../api/axios';
 import { setPickup, setRules } from '../../../api/itemPolicies.api';
 import Alert from '../../common/Alert';
 import FormField from '../../common/FormField';
+import ItemDeliverySettings from '../../sprint2/m6/ItemDeliverySettings';
 
 const fieldErrorMap = (err) =>
     Object.fromEntries(getFieldErrors(err).map((fieldError) => [fieldError.field, fieldError.message]));
@@ -153,6 +154,7 @@ function ItemPickupRulesForm({ item, onSaved }) {
             </button>
           </div>
         </form>
+        <ItemDeliverySettings item={item} onSaved={onSaved} />
       </div>
   );
 }

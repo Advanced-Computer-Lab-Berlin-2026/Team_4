@@ -42,14 +42,14 @@ export default function ReportFilters({
                         </div>
 
                         <div className={styles.filterGroup}>
-                            <label className={styles.label} htmlFor="filter-item">Item ID</label>
+                            <label className={styles.label} htmlFor="filter-item">Item</label>
                             <input
                                 id="filter-item"
                                 type="text"
-                                placeholder="Optional Item ObjectId"
+                                placeholder="Item name or ID"
                                 className={styles.input}
-                                value={filters.itemId || ''}
-                                onChange={(e) => update('itemId', e.target.value)}
+                                value={filters.item || ''}
+                                onChange={(e) => update('item', e.target.value)}
                             />
                         </div>
                     </>
@@ -67,20 +67,25 @@ export default function ReportFilters({
                                 <option value="open">Open</option>
                                 <option value="disputed">Disputed</option>
                                 <option value="resolved">Resolved</option>
-                                <option value="closed">Closed</option>
+                                <option value="decided">Decided</option>
                             </select>
                         </div>
 
                         <div className={styles.filterGroup}>
                             <label className={styles.label} htmlFor="filter-resolution">Resolution</label>
-                            <input
+                            <select
                                 id="filter-resolution"
-                                type="text"
-                                placeholder="e.g. forfeited, refunded"
-                                className={styles.input}
+                                className={styles.select}
                                 value={filters.resolution || ''}
                                 onChange={(e) => update('resolution', e.target.value)}
-                            />
+                            >
+                                <option value="">All Outcomes</option>
+                                <option value="pending">Pending decision</option>
+                                <option value="full_refund">Full refund</option>
+                                <option value="partial_forfeit">Partial forfeiture</option>
+                                <option value="full_forfeit">Full forfeiture</option>
+                                <option value="no_deposit">No deposit</option>
+                            </select>
                         </div>
                     </>
                 )}

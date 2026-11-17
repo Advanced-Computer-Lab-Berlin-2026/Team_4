@@ -7,9 +7,9 @@ exports.getReports = asyncHandler(async (req, res) => {
 });
 
 exports.createReport = asyncHandler(async (req, res) => {
+    const { targetType, targetId, reason, details } = req.body ?? {};
     const entity = await moderationService.createReport({
-        reporterId: req.user._id,
-        ...req.body,
+        reporterId: req.user._id, targetType, targetId, reason, details,
     });
     res.status(201).json({ success: true, entity });
 });

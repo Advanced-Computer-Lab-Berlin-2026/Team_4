@@ -94,7 +94,7 @@ export default function MySupportTicketsPage() {
                         <select
                             className={styles.select}
                             value={form.category}
-                            onChange={(e) => setForm({ ...form, category: e.target.value })}
+                            onChange={(e) => setForm({ ...form, category: e.target.value, relatedTargetType: 'none', relatedTargetId: '' })}
                         >
                             <option value="reservation">Reservation Issue</option>
                             <option value="payment">Payment / Wallet</option>
@@ -118,7 +118,7 @@ export default function MySupportTicketsPage() {
                                 onChange={(e) =>
                                     setForm({
                                         ...form,
-                                        relatedTargetType: form.category === 'listing_report' ? 'item' : 'user',
+                                        relatedTargetType: !e.target.value ? 'none' : form.category === 'listing_report' ? 'item' : 'user',
                                         relatedTargetId: e.target.value,
                                     })
                                 }

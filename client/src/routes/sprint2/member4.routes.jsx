@@ -1,44 +1,10 @@
-// Member 4 Sprint 2 Client Routes - Owner: Member 4
-// Exported for Member 1 to wire into AppRoutes.jsx
-import React from 'react';
-import AdminModerationPage from '../../pages/admin/AdminModerationPage';
-import AdminUsageReportPage from '../../pages/admin/AdminUsageReportPage';
-import AdminDamageReportPage from '../../pages/admin/AdminDamageReportPage';
-import AdminSupportPage from '../../pages/admin/AdminSupportPage';
-import MySupportTicketsPage from '../../pages/support/MySupportTicketsPage';
-import SupportTicketPage from '../../pages/support/SupportTicketPage';
+import { lazy } from 'react';
 
-export const member4Routes = [
-    {
-        path: '/support',
-        element: <MySupportTicketsPage />,
-        roles: ['member', 'lender', 'admin'],
-    },
-    {
-        path: '/support/:id',
-        element: <SupportTicketPage />,
-        roles: ['member', 'lender', 'admin'],
-    },
-    {
-        path: '/admin/moderation',
-        element: <AdminModerationPage />,
-        roles: ['admin'],
-    },
-    {
-        path: '/admin/reports/usage',
-        element: <AdminUsageReportPage />,
-        roles: ['admin'],
-    },
-    {
-        path: '/admin/reports/damage',
-        element: <AdminDamageReportPage />,
-        roles: ['admin'],
-    },
-    {
-        path: '/admin/support',
-        element: <AdminSupportPage />,
-        roles: ['admin'],
-    },
+export default [
+  { path: '/support', access: 'member', element: lazy(() => import('../../pages/support/MySupportTicketsPage')) },
+  { path: '/support/:id', access: 'auth', element: lazy(() => import('../../pages/support/SupportTicketPage')) },
+  { path: '/admin/moderation', access: 'admin', element: lazy(() => import('../../pages/admin/AdminModerationPage')) },
+  { path: '/admin/reports/usage', access: 'admin', element: lazy(() => import('../../pages/admin/AdminUsageReportPage')) },
+  { path: '/admin/reports/damage', access: 'admin', element: lazy(() => import('../../pages/admin/AdminDamageReportPage')) },
+  { path: '/admin/support', access: 'admin', element: lazy(() => import('../../pages/admin/AdminSupportPage')) },
 ];
-
-export default member4Routes;

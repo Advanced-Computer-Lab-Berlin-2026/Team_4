@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import routes from '../../routes/routeConfig';
 import { getDamageReport, downloadDamageReportExport } from '../../api/analytics.api';
 import ReportFilters from '../../components/sprint2/m4/ReportFilters';
 import styles from '../../styles/sprint2/member4.module.css';
+
+const hasDamageDecision = routes.some(({ path }) => path === '/admin/damage-reports/:id');
 
 function triggerDownload(blob, filename) {
     const url = window.URL.createObjectURL(blob);
@@ -82,7 +86,7 @@ export default function AdminDamageReportPage() {
                 onReset={() => setFilters({ status: '', resolution: '', startDate: '', endDate: '' })}
                 onExportCsv={() => handleExport('csv')}
                 onExportPdf={() => handleExport('pdf')}
-                exporting={exporting}
+                exporting={exporting || loading}
             />
 
             <div className={styles.summaryGrid}>
@@ -121,25 +125,29 @@ export default function AdminDamageReportPage() {
                                 <th>Resolution Outcome</th>
                                 <th>Held (EGP)</th>
                                 <th>Forfeited (EGP)</th>
+                                <th>Refunded (EGP)</th>
                             </tr>
                             </thead>
                             <tbody>
                             {report.items.length === 0 ? (
                                 <tr>
-                                    <td colSpan="9">No damage or dispute records found.</td>
+                                    <td colSpan="10">No damage or dispute records found.</td>
                                 </tr>
                             ) : (
                                 report.items.map((row) => (
                                     <tr key={row.caseId}>
                                         <td>{row.createdAt}</td>
-                                        <td>{row.itemTitle}</td>
+                                        <td>{hasDamageDecision ? (
+                                            <Link to={'/admin/damage-reports/' + row.caseId}>{row.itemTitle}</Link>
+                                        ) : row.itemTitle}</td>
                                         <td>{row.borrowerName}</td>
                                         <td>{row.lenderName}</td>
                                         <td>{row.status}</td>
                                         <td>{row.isDisputed ? 'Yes' : 'No'}</td>
                                         <td>{row.resolution}</td>
-                                        <td>{row.heldDeposit}</td>
-                                        <td>{row.forfeitedAmount}</td>
+                                        <td>{row.heldDeposit ?? '—'}</td>
+                                        <td>{row.forfeitedAmount ?? '—'}</td>
+                                        <td>{row.refundedAmount ?? '—'}</td>
                                     </tr>
                                 ))
                             )}

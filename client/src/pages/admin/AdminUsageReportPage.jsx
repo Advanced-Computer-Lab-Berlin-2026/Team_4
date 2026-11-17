@@ -18,7 +18,7 @@ export default function AdminUsageReportPage() {
     const [filters, setFilters] = useState({
         month: '',
         category: '',
-        itemId: '',
+        item: '',
         startDate: '',
         endDate: '',
     });
@@ -29,7 +29,7 @@ export default function AdminUsageReportPage() {
             cancelledOrRejectedCount: 0,
             totalDepositVolume: 0,
         },
-        items: [],
+        items: [], categories: [],
     });
     const [loading, setLoading] = useState(false);
     const [exporting, setExporting] = useState(false);
@@ -43,7 +43,7 @@ export default function AdminUsageReportPage() {
         setError('');
         try {
             const res = await getUsageReport(cleanedParams());
-            setReport({ summary: res.summary || {}, items: res.items || [] });
+            setReport({ summary: res.summary || {}, items: res.items || [], categories: res.categories || [] });
         } catch (err) {
             setError(err.response?.data?.message || 'Failed to load usage report.');
         } finally {
@@ -74,7 +74,7 @@ export default function AdminUsageReportPage() {
                 <div>
                     <h2 className={styles.title}>Monthly Platform Usage Report</h2>
                     <p className={styles.subtitle}>
-                        Reservation volume grouped by month, item, and category.
+                        Reservations counted by their UTC start date.
                     </p>
                 </div>
             </div>
@@ -86,11 +86,11 @@ export default function AdminUsageReportPage() {
                 filters={filters}
                 onChange={setFilters}
                 onReset={() =>
-                    setFilters({ month: '', category: '', itemId: '', startDate: '', endDate: '' })
+                    setFilters({ month: '', category: '', item: '', startDate: '', endDate: '' })
                 }
                 onExportCsv={() => handleExport('csv')}
                 onExportPdf={() => handleExport('pdf')}
-                exporting={exporting}
+                exporting={exporting || loading}
             />
 
             <div className={styles.summaryGrid}>
@@ -111,6 +111,17 @@ export default function AdminUsageReportPage() {
                     <div className={styles.statValue}>{report.summary.totalDepositVolume || 0}</div>
                 </div>
             </div>
+
+            {!loading && report.categories.length > 0 && (
+                <section className={styles.card} aria-label="Reservations by category">
+                    <h3>Reservations by category</h3>
+                    <ul>{report.categories.map((group) => (
+                        <li key={group.month + ':' + group.category}>
+                            {group.month} · {group.category} · {group.totalReservations}
+                        </li>
+                    ))}</ul>
+                </section>
+            )}
 
             <div className={styles.card}>
                 {loading ? (

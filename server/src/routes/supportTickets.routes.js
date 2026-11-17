@@ -5,8 +5,8 @@ const { requireRole } = require('../middleware/roles');
 
 router.use(protect);
 
-router.post('/', c.submitTicket);
-router.get('/mine', c.getMyTickets);
+router.post('/', requireRole('member'), c.submitTicket);
+router.get('/mine', requireRole('member'), c.getMyTickets);
 router.get('/', requireRole('admin'), c.getAllTickets);
 router.get('/:id', c.getTicket);
 router.post('/:id/messages', c.replyTicket);

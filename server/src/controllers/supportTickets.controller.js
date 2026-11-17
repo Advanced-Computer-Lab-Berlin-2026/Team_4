@@ -2,10 +2,9 @@ const asyncHandler = require('../utils/asyncHandler');
 const supportService = require('../services/support/support');
 
 exports.submitTicket = asyncHandler(async (req, res) => {
+    const { subject, category, description, relatedTargetType, relatedTargetId } = req.body ?? {};
     const entity = await supportService.createTicket({
-        userId: req.user._id,
-        userRole: req.user.role,
-        ...req.body,
+        userId: req.user._id, subject, category, description, relatedTargetType, relatedTargetId,
     });
     res.status(201).json({ success: true, entity });
 });

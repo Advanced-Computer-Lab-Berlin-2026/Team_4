@@ -14,10 +14,9 @@ exports.getDamageReport = asyncHandler(async (req, res) => {
 
 exports.exportUsage = asyncHandler(async (req, res) => {
     const reportData = await queryUsageReport(req.query);
-    const { buffer, mimeType, filename } = exportUsageReport({
+    const { buffer, mimeType, filename } = await exportUsageReport({
         format: req.query.format || 'csv',
         reportData,
-        filters: req.query,
     });
 
     res.setHeader('Content-Type', mimeType);
@@ -27,10 +26,9 @@ exports.exportUsage = asyncHandler(async (req, res) => {
 
 exports.exportDamage = asyncHandler(async (req, res) => {
     const reportData = await queryDamageReport(req.query);
-    const { buffer, mimeType, filename } = exportDamageReport({
+    const { buffer, mimeType, filename } = await exportDamageReport({
         format: req.query.format || 'csv',
         reportData,
-        filters: req.query,
     });
 
     res.setHeader('Content-Type', mimeType);

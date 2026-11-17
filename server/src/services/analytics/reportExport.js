@@ -1,192 +1,100 @@
-// Generates RFC-4180 CSV and valid self-contained PDF 1.4 buffers from shared query rows.
-
-function escapeCsvCell(val) {
-    if (val === null || val === undefined) return '';
-    const str = String(val);
-    if (/[",\r\n]/.test(str)) {
-        return `"${str.replace(/"/g, '""')}"`;
-    }
-    return str;
-}
-
-function buildCsvBuffer(columns, rows) {
-    const header = columns.map((c) => escapeCsvCell(c.label)).join(',');
-    const lines = rows.map((row) =>
-        columns.map((c) => escapeCsvCell(row[c.key])).join(',')
-    );
-    const content = [header, ...lines].join('\r\n');
-    return Buffer.from(content, 'utf8');
-}
-
-function sanitizePdfText(text) {
-    return String(text ?? '')
-        .replace(/[^\x20-\x7E]/g, '?')
-        .replace(/\\/g, '\\\\')
-        .replace(/\(/g, '\\(')
-        .replace(/\)/g, '\\)');
-}
-
-/**
- * Build a multi-page valid PDF 1.4 binary buffer using standard Helvetica font
- */
-function buildPdfBuffer(title, subtitle, columns, rows) {
-    const pageWidth = 612;
-    const pageHeight = 792;
-    const marginLeft = 36;
-    const startY = 740;
-    const lineHeight = 15;
-    const rowsPerPage = 40;
-
-    const formattedLines = [];
-    formattedLines.push({ text: title, font: 'F2', size: 14 });
-    formattedLines.push({ text: subtitle, font: 'F1', size: 9 });
-    formattedLines.push({ text: '-'.repeat(95), font: 'F1', size: 8 });
-
-    const headerLine = columns.map((c) => c.label.slice(0, c.width || 16).padEnd(c.width || 16)).join(' ');
-    formattedLines.push({ text: headerLine, font: 'F2', size: 8 });
-    formattedLines.push({ text: '-'.repeat(95), font: 'F1', size: 8 });
-
-    if (rows.length === 0) {
-        formattedLines.push({ text: 'No records match the selected filters.', font: 'F1', size: 9 });
-    } else {
-        for (const row of rows) {
-            const line = columns
-                .map((c) => String(row[c.key] ?? '').slice(0, c.width || 16).padEnd(c.width || 16))
-                .join(' ');
-            formattedLines.push({ text: line, font: 'F1', size: 8 });
-        }
-    }
-
-    // Chunk into pages
-    const pages = [];
-    for (let i = 0; i < formattedLines.length; i += rowsPerPage) {
-        pages.push(formattedLines.slice(i, i + rowsPerPage));
-    }
-
-    const objects = [];
-    const addObject = (body) => {
-        objects.push(body);
-        return objects.length; // 1-based object number
-    };
-
-    const catalogObj = addObject('<< /Type /Catalog /Pages 2 0 R >>');
-    const pagesObj = addObject('<< /Type /Pages /Kids [] /Count 0 >>'); // placeholder
-    const fontRegularObj = addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
-    const fontBoldObj = addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>');
-
-    const pageObjectNums = [];
-
-    for (const pageLines of pages) {
-        let stream = 'BT\n';
-        let y = startY;
-        for (const item of pageLines) {
-            stream += `/${item.font} ${item.size} Tf\n`;
-            stream += `1 0 0 1 ${marginLeft} ${y} Tm\n`;
-            stream += `(${sanitizePdfText(item.text)}) Tj\n`;
-            y -= lineHeight;
-        }
-        stream += 'ET\n';
-
-        const contentObj = addObject(
-            `<< /Length ${Buffer.byteLength(stream, 'utf8')} >>\nstream\n${stream}endstream`
-        );
-
-        const pageObj = addObject(
-            `<< /Type /Page /Parent ${pagesObj} 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] ` +
-            `/Resources << /Font << /F1 ${fontRegularObj} 0 R /F2 ${fontBoldObj} 0 R >> >> ` +
-            `/Contents ${contentObj} 0 R >>`
-        );
-        pageObjectNums.push(pageObj);
-    }
-
-    // Update Pages object
-    objects[pagesObj - 1] = `<< /Type /Pages /Kids [${pageObjectNums
-        .map((n) => `${n} 0 R`)
-        .join(' ')}] /Count ${pageObjectNums.length} >>`;
-
-    // Serialize PDF with xref
-    let pdf = '%PDF-1.4\n';
-    const offsets = [0];
-    for (let i = 0; i < objects.length; i++) {
-        offsets.push(Buffer.byteLength(pdf, 'utf8'));
-        pdf += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
-    }
-
-    const xrefOffset = Buffer.byteLength(pdf, 'utf8');
-    pdf += `xref\n0 ${objects.length + 1}\n`;
-    pdf += '0000000000 65535 f \n';
-    for (let i = 1; i <= objects.length; i++) {
-        pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
-    }
-    pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogObj} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-
-    return Buffer.from(pdf, 'utf8');
-}
+const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
+const ApiError = require('../../utils/ApiError');
 
 const USAGE_COLUMNS = [
-    { key: 'month', label: 'Month', width: 9 },
-    { key: 'itemTitle', label: 'Item', width: 22 },
-    { key: 'category', label: 'Category', width: 15 },
-    { key: 'totalReservations', label: 'Total', width: 7 },
-    { key: 'completedCount', label: 'Done', width: 7 },
-    { key: 'cancelledOrRejectedCount', label: 'Canc/Rej', width: 9 },
-    { key: 'totalDepositVolume', label: 'Deposit(EGP)', width: 13 },
+  ['month', 'Month', 58], ['itemTitle', 'Item', 153], ['category', 'Category', 126],
+  ['totalReservations', 'Reservations', 84], ['completedCount', 'Completed', 72],
+  ['activeOrConfirmedCount', 'Active / Confirmed', 100], ['cancelledOrRejectedCount', 'Cancelled / Rejected', 104],
+  ['totalDepositVolume', 'Deposits (EGP)', 87],
 ];
-
 const DAMAGE_COLUMNS = [
-    { key: 'createdAt', label: 'Date', width: 11 },
-    { key: 'itemTitle', label: 'Item', width: 18 },
-    { key: 'borrowerName', label: 'Borrower', width: 14 },
-    { key: 'status', label: 'Status', width: 10 },
-    { key: 'resolution', label: 'Resolution', width: 15 },
-    { key: 'heldDeposit', label: 'Held', width: 8 },
-    { key: 'forfeitedAmount', label: 'Forfeit', width: 8 },
+  ['createdAt', 'Date', 70], ['itemTitle', 'Item', 125], ['borrowerName', 'Borrower', 94], ['lenderName', 'Lender', 94],
+  ['status', 'Status', 63], ['isDisputed', 'Disputed', 57], ['resolution', 'Resolution', 111],
+  ['heldDeposit', 'Deposit (EGP)', 70], ['forfeitedAmount', 'Forfeited (EGP)', 71], ['refundedAmount', 'Refunded (EGP)', 71],
 ];
 
-function exportUsageReport({ format = 'csv', reportData, filters = {} }) {
-    const fmt = String(format).toLowerCase();
-    if (fmt === 'pdf') {
-        const subtitle = `Generated: ${new Date().toISOString()} | Total Reservations: ${
-            reportData.summary.totalReservations
-        } | Filters: ${JSON.stringify(filters)}`;
-        return {
-            buffer: buildPdfBuffer('ShareShed - Usage Report', subtitle, USAGE_COLUMNS, reportData.items),
-            mimeType: 'application/pdf',
-            filename: `usage-report-${Date.now()}.pdf`,
-        };
-    }
-    return {
-        buffer: buildCsvBuffer(USAGE_COLUMNS, reportData.items),
-        mimeType: 'text/csv; charset=utf-8',
-        filename: `usage-report-${Date.now()}.csv`,
-    };
+function value(raw) {
+  return raw == null ? '' : typeof raw === 'boolean' ? (raw ? 'Yes' : 'No') : String(raw);
 }
 
-function exportDamageReport({ format = 'csv', reportData, filters = {} }) {
-    const fmt = String(format).toLowerCase();
-    if (fmt === 'pdf') {
-        const subtitle = `Generated: ${new Date().toISOString()} | Total Cases: ${
-            reportData.summary.totalCases
-        } | Disputed: ${reportData.summary.disputedCases} | Filters: ${JSON.stringify(filters)}`;
-        return {
-            buffer: buildPdfBuffer(
-                'ShareShed - Damage & Dispute Resolution Report',
-                subtitle,
-                DAMAGE_COLUMNS,
-                reportData.items
-            ),
-            mimeType: 'application/pdf',
-            filename: `damage-report-${Date.now()}.pdf`,
-        };
-    }
-    return {
-        buffer: buildCsvBuffer(DAMAGE_COLUMNS, reportData.items),
-        mimeType: 'text/csv; charset=utf-8',
-        filename: `damage-report-${Date.now()}.csv`,
-    };
+function csvCell(raw) {
+  let str = value(raw);
+  if (typeof raw === 'string' && (/^[\t\r\n]/.test(str) || /^[\s\uFEFF]*[=+@-]/.test(str))) str = "'" + str;
+  return /[",\r\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
 }
 
-module.exports = {
-    exportUsageReport,
-    exportDamageReport,
-};
+function csv(columns, rows) {
+  return Buffer.from([
+    columns.map(([, label]) => csvCell(label)).join(','),
+    ...rows.map((row) => columns.map(([key]) => csvCell(row[key])).join(',')),
+  ].join('\r\n'), 'utf8');
+}
+
+function wrap(raw, font, size, width) {
+  const safe = Array.from(value(raw).replace(/\s+/g, ' '), (char) => {
+    try { font.encodeText(char); return char; } catch { return '?'; }
+  }).join('');
+  const lines = [];
+  let line = '';
+  for (const char of safe) {
+    if (line && font.widthOfTextAtSize(line + char, size) > width) {
+      lines.push(line.trimEnd());
+      line = '';
+    }
+    line += char;
+  }
+  return [...lines, line.trim()];
+}
+
+async function pdf(title, columns, rows) {
+  const doc = await PDFDocument.create();
+  const normal = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const size = 9;
+  const margin = 28;
+  const pageWidth = columns.reduce((sum, [, , width]) => sum + width, margin * 2);
+  let page;
+  let y;
+
+  function nextPage() {
+    page = doc.addPage([pageWidth, 595]);
+    page.drawText(title, { x: margin, y: 558, font: bold, size: 16 });
+    y = 530;
+    let x = margin;
+    for (const [, label, width] of columns) {
+      page.drawText(label, { x, y, font: bold, size });
+      x += width;
+    }
+    page.drawLine({ start: { x: margin, y: y - 5 }, end: { x: pageWidth - margin, y: y - 5 }, color: rgb(0.7, 0.7, 0.7) });
+    y -= 24;
+  }
+
+  nextPage();
+  if (!rows.length) page.drawText('No records match the selected filters.', { x: margin, y, font: normal, size });
+  for (const row of rows) {
+    const cells = columns.map(([key, , width]) => wrap(row[key], normal, size, width - 8));
+    const height = Math.max(...cells.map((lines) => lines.length)) * 13 + 6;
+    if (y - height < margin) nextPage();
+    let x = margin;
+    for (const [index, lines] of cells.entries()) {
+      for (const [lineIndex, line] of lines.entries()) page.drawText(line, { x, y: y - lineIndex * 13, font: normal, size });
+      x += columns[index][2];
+    }
+    y -= height;
+  }
+  return Buffer.from(await doc.save());
+}
+
+async function exportReport({ format = 'csv', reportData }, columns, name, title) {
+  if (!['csv', 'pdf'].includes(format)) throw ApiError.badRequest('Export format must be csv or pdf');
+  return {
+    buffer: format === 'pdf' ? await pdf(title, columns, reportData.items) : csv(columns, reportData.items),
+    mimeType: format === 'pdf' ? 'application/pdf' : 'text/csv; charset=utf-8',
+    filename: name + '.' + format,
+  };
+}
+
+const exportUsageReport = (input) => exportReport(input, USAGE_COLUMNS, 'usage-report', 'ShareShed - Usage Report');
+const exportDamageReport = (input) => exportReport(input, DAMAGE_COLUMNS, 'damage-report', 'ShareShed - Damage and Dispute Report');
+
+module.exports = { exportUsageReport, exportDamageReport };

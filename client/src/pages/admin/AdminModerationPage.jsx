@@ -9,6 +9,8 @@ import styles from '../../styles/sprint2/member4.module.css';
 export default function AdminModerationPage() {
     const [filters, setFilters] = useState({ status: '', targetType: '' });
     const [reports, setReports] = useState([]);
+    const [page, setPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [feedback, setFeedback] = useState('');
@@ -28,8 +30,10 @@ export default function AdminModerationPage() {
             const cleaned = Object.fromEntries(
                 Object.entries(filters).filter(([, v]) => v !== '')
             );
-            const res = await listModerationReports(cleaned);
+            const res = await listModerationReports({ ...cleaned, page });
             setReports(res.items || []);
+            setTotalPages(res.totalPages || 1);
+            if (page > res.totalPages) setPage(res.totalPages);
         } catch (err) {
             setError(err.response?.data?.message || 'Failed to load moderation reports.');
         } finally {
@@ -39,10 +43,11 @@ export default function AdminModerationPage() {
 
     useEffect(() => {
         loadReports();
-    }, [filters]);
+    }, [filters, page]);
 
     const handleAction = async (reportId, action) => {
-        const adminNotes = window.prompt(`Optional admin note for "${action}" action:`) ?? '';
+        const adminNotes = window.prompt(`Optional admin note for "${action}" action:`);
+        if (adminNotes === null) return;
         setError('');
         setFeedback('');
         try {
@@ -140,7 +145,7 @@ export default function AdminModerationPage() {
                         <select
                             className={styles.select}
                             value={filters.status}
-                            onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                            onChange={(e) => { setPage(1); setFilters({ ...filters, status: e.target.value }); }}
                         >
                             <option value="">All Statuses</option>
                             <option value="open">Open</option>
@@ -154,7 +159,7 @@ export default function AdminModerationPage() {
                         <select
                             className={styles.select}
                             value={filters.targetType}
-                            onChange={(e) => setFilters({ ...filters, targetType: e.target.value })}
+                            onChange={(e) => { setPage(1); setFilters({ ...filters, targetType: e.target.value }); }}
                         >
                             <option value="">All Types</option>
                             <option value="item">Listing</option>
@@ -203,13 +208,15 @@ export default function AdminModerationPage() {
                                             </td>
                                             <td>{r.reporter?.name || r.reporter?.username || 'System'}</td>
                                             <td>
-                                                <span className={badgeClass(r.status)}>{r.status}</span>
+                                                <span className={badgeClass(r.status)}>{r.status === 'actioned' ? r.action : r.status}</span>
+                                                {r.adminNotes && <div className={styles.subtitle}>{r.adminNotes}</div>}
                                             </td>
                                             <td>
                                                 <div className={styles.buttonGroup}>
                                                     <button
                                                         type="button"
                                                         className={styles.btnWarning}
+                                                        disabled={r.status !== 'open' || r.targetUser?.role === 'admin'}
                                                         onClick={() => handleAction(r._id, 'flag')}
                                                     >
                                                         Flag
@@ -217,6 +224,7 @@ export default function AdminModerationPage() {
                                                     <button
                                                         type="button"
                                                         className={styles.btnDanger}
+                                                        disabled={(r.status !== 'open' && r.action !== 'flagged') || r.targetUser?.role === 'admin'}
                                                         onClick={() => handleAction(r._id, 'remove')}
                                                     >
                                                         Remove
@@ -224,6 +232,7 @@ export default function AdminModerationPage() {
                                                     <button
                                                         type="button"
                                                         className={styles.btnSecondary}
+                                                        disabled={r.status !== 'open'}
                                                         onClick={() => handleAction(r._id, 'dismiss')}
                                                     >
                                                         Dismiss
@@ -239,6 +248,15 @@ export default function AdminModerationPage() {
                     </div>
                 )}
             </div>
+            {totalPages > 1 && (
+                <nav aria-label="Moderation report pages" className={styles.buttonGroup}>
+                    <button type="button" className={styles.btnSecondary} disabled={page === 1 || loading}
+                        onClick={() => setPage(page - 1)}>Previous</button>
+                    <span>Page {page} of {totalPages}</span>
+                    <button type="button" className={styles.btnSecondary} disabled={page === totalPages || loading}
+                        onClick={() => setPage(page + 1)}>Next</button>
+                </nav>
+            )}
         </div>
     );
 }

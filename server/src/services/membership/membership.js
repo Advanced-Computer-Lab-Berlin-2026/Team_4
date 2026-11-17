@@ -21,6 +21,8 @@ const {
 } = require('./entitlements');
 
 const PAYMENT_LABEL = 'Membership payment';
+/** Member 2 replays a repeated idempotency key as { replayed: true } and changes nothing. */
+const alreadyApplied = (outcome) => Boolean(outcome?.replayed || outcome?.alreadyApplied);
 const PAYMENT_METHODS = ['wallet', 'card'];
 const CLIENT_RETURN_PATH = '/membership';
 
@@ -142,9 +144,11 @@ async function payByWallet(userId, tier, payment, deps) {
   const charge = requireFeature(deps.payment, 'chargeMembership', PAYMENT_LABEL);
   await mongoose.connection.transaction(async (session) => {
     const user = await loadMember(userId, session);
-    const outcome = await charge(payment, session);
-    // A replayed key was charged and applied before: never charge or extend twice.
-    if (outcome?.alreadyApplied) return;
+    const { userId: payer, amountMinor, currency, reference, idempotencyKey } = payment;
+    const outcome = await charge({ userId: payer, amountMinor, currency, reference, idempotencyKey }, session);
+    // The charge and the activation commit together, so a replayed key was already applied:
+    // never extend the membership a second time.
+    if (alreadyApplied(outcome)) return;
     await activate(user, tier, new Date(), session);
   });
 }
@@ -157,11 +161,15 @@ async function payByCard(userId, tier, payment, deps) {
   await loadMember(userId);
 
   // Provider calls stay outside any database transaction. Starting is idempotent per key.
-  const started = await start(payment);
+  const { userId: payer, amountMinor, currency, reference, idempotencyKey } = payment;
+  const started = await start({
+    purpose: 'membership', userId: payer, reference, amountMinor, currency, idempotencyKey,
+    title: payment.title, returnPath: payment.returnPath,
+  });
   if (started?.state === 'pending' && started.redirectUrl) {
     return { state: 'pending', redirectUrl: started.redirectUrl };
   }
-  const provider = await check(payment);
+  const provider = await check({ idempotencyKey });
   if (provider?.state === 'pending') {
     return { state: 'pending', ...(provider.redirectUrl && { redirectUrl: provider.redirectUrl }) };
   }
@@ -172,8 +180,12 @@ async function payByCard(userId, tier, payment, deps) {
 
   await mongoose.connection.transaction(async (session) => {
     const user = await loadMember(userId, session);
-    const outcome = await record({ ...payment, paymentReference: provider.reference }, session);
-    if (outcome?.alreadyApplied) return;
+    // Recording is its own payment operation: reusing the card payment's key would collide with it.
+    const outcome = await record({
+      userId: payer, amountMinor, currency, reference,
+      paymentReference: provider.reference, idempotencyKey: idempotencyKey + ':record',
+    }, session);
+    if (alreadyApplied(outcome)) return;
     await activate(user, tier, new Date(), session);
   });
   return null;
@@ -199,17 +211,15 @@ async function subscribe({ userId, tierId, method, operationKey }, deps = featur
 
   const id = String(userId);
   const key = ['membership', id, String(tier._id), operationKey].join(':');
+  // Member 2 contract (docs/sprint2/member2.md, section 3). The reference names the paying member;
+  // the idempotency key identifies this payment attempt for this tier.
   const payment = {
-    purpose: 'membership',
-    attemptId: key,
     userId: id,
-    borrowerId: id,
-    tierId: String(tier._id),
-    tierName: tier.name,
     amountMinor,
     currency: CURRENCY,
-    reference: key,
+    reference: { type: 'membership', id },
     idempotencyKey: key,
+    title: 'ShareShed ' + tier.name + ' membership (1 year)',
     returnPath: CLIENT_RETURN_PATH,
   };
 

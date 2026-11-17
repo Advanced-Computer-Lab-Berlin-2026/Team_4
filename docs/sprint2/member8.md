@@ -55,7 +55,7 @@ Consumers should use `discountPercent` as given and must not look up household l
 
 **Existing reservations.** Expiry, cancellation and unlinking never change a reservation that already exists; its deposit keeps the discount it was quoted with. A member who is over a lower limit keeps their bookings and cannot add new ones until they are under it.
 
-**Payment.** Membership fees go only through Member 2's payment service, with the idempotency key `membership:<userId>:<tierId>:<operationKey>`. The membership is updated in the same transaction as the wallet debit, or after a verified card payment whose amount and currency match the tier. A retry with the same `operationKey` never charges or extends twice. While the payment service or one of the operations below is not installed, subscribing returns **503** and the membership is unchanged. A payment is never simulated.
+**Payment.** Membership fees go only through Member 2's payment service (`docs/sprint2/member2.md`, section 3). Each attempt has the idempotency key `membership:<userId>:<tierId>:<operationKey>`, so a retry with the same `operationKey` is replayed by Member 2 and never charged twice. The membership is updated in the same transaction as the wallet debit, or as the recording of a verified card payment whose amount and currency match the tier. When Member 2 answers `replayed: true` the payment was already applied, and the membership is not activated or extended again. While the payment service or one of its functions is missing (card functions exist only while a Stripe test key is configured), subscribing returns **503** and the membership is unchanged. A payment is never simulated.
 
 **Event.** After a successful subscribe, renew, switch or cancel, `membership_changed` is passed to Member 9's `enqueueEvent` when the outbox is installed: aggregate ID and recipient are the user ID, payload is `{ userId, tierId, tierName, status, renewsAt }`, and the event key is the payment idempotency key or `membership:<userId>:cancel:<renewsAt>`. It is sent after commit and is best effort: a missing or failing outbox never fails the membership change.
 
@@ -79,16 +79,23 @@ Client routes: `/membership` (member) and `/admin/membership-report` (admin), de
 
 | Owner | Request |
 | --- | --- |
-| 2 | In `services/payments/payment.js`: `chargeMembership(input, session)` debits the wallet and writes a `membership` ledger row in the supplied session. It throws a conflict error on insufficient funds and returns `{ reference, alreadyApplied }`, with `alreadyApplied: true` and no new debit when the idempotency key was used before. |
-| 2 | `startCardPayment(input)` and `getCardPayment(input)` accept a membership payment: `input.purpose` is `'membership'` and `input.returnPath` is `/membership` instead of the checkout status page. |
-| 2 | `recordMembershipPayment(input, session)` writes ledger and audit rows for a verified card payment (`input.paymentReference`) and returns `{ alreadyApplied }` in the same way. |
+| 2 | Done on `aly_sprint2Features`: `chargeMembership`, `startCardPayment` / `getCardPayment` with `purpose: 'membership'` and `returnPath: '/membership'`, and `recordMembershipPayment`. Membership payments work once that branch is merged and a Stripe test key is set for card payments. |
 | 1 | `navLinks.js`: add `{ to: '/membership', label: 'Membership' }` to `memberLinks` and `{ to: '/admin/membership-report', label: 'Memberships' }` to `adminLinks`. Optionally a card on the admin dashboard. |
 | 1 | `SPRINT2_CONTRACT.md`: replace the M8 line's `{discountPercent,maxConcurrentReservations, ...}` with the shape above. Add the new Member 8 paths to `CODEOWNERS`. |
 | 6 | `depositQuote.js` uses `entitlements.discountPercent` unchanged. |
 | 7 | The waitlist uses `entitlements.waitlistPriority`. It is the member's own tier and is not inherited through household links. |
 | 9 | Handle the `membership_changed` event. The renewal reminder can read `User.membership.renewsAt` for members with status `active`. |
 
-Payment input sent to Member 2: `{ purpose: 'membership', attemptId, userId, borrowerId, tierId, tierName, amountMinor, currency, reference, idempotencyKey, returnPath }`. `attemptId`, `reference` and `idempotencyKey` hold the same value.
+Calls to Member 2, with `key = membership:<userId>:<tierId>:<operationKey>` and `reference = { type: 'membership', id: <userId> }`:
+
+| Function | Input from Member 8 | Treated as already applied when |
+| --- | --- | --- |
+| `chargeMembership(input, session)` (wallet) | `{ userId, amountMinor, currency: 'EGP', reference, idempotencyKey: key }`, inside the membership transaction | `replayed: true` |
+| `startCardPayment(input)` (card) | `{ purpose: 'membership', userId, reference, amountMinor, currency, idempotencyKey: key, title, returnPath: '/membership' }`, outside any transaction | — |
+| `getCardPayment(input)` (card) | `{ idempotencyKey: key }`, outside any transaction | — |
+| `recordMembershipPayment(input, session)` (card) | `{ userId, amountMinor, currency, reference, paymentReference, idempotencyKey: key + ':record' }`, inside the membership transaction | `replayed: true` |
+
+The record call has its own key because the card payment is already a payment operation under `key`; reusing it would be refused as a different payment. The older `alreadyApplied: true` flag is honoured as well.
 
 No `User.js` change is needed. Membership fields are written only by `services/membership/membership.js`, with field-scoped compare-and-set updates.
 
@@ -101,7 +108,7 @@ TEST_MONGO_URI='mongodb://localhost:27017/?replicaSet=rs0' npm run test:sprint2 
 npm run build --prefix client
 ```
 
-`server/test/sprint2/member8.test.js` covers: default and Premium limits, expired and cancelled tiers, pending / declined / removed / accepted links, no stacking, no transitive links, counted statuses, 503 without the payment service, single charge on retried keys, card confirmation, optional outbox, cancellation and the admin report. One test goes through Member 1's checkout quote end to end: Premium is refused at five counted reservations, Basic at three, and the deposit changes only for an accepted household link. Payment tests use a stand-in for Member 2's service.
+`server/test/sprint2/member8.test.js` covers: default and Premium limits, expired and cancelled tiers, pending / declined / removed / accepted links, no stacking, no transitive links, counted statuses, 503 without the payment service, single charge on retried keys, card confirmation, optional outbox, cancellation and the admin report. One test goes through Member 1's checkout quote end to end: Premium is refused at five counted reservations, Basic at three, and the deposit changes only for an accepted household link. Payment tests use a stand-in that follows Member 2's real rules: it refuses a reference that is not `{ type: 'membership', id }`, answers a reused key with `replayed: true`, and refuses a key reused for a different operation. Tests cover the exact inputs sent, the `:record` key, and that a replayed charge never extends `renewsAt`.
 
 The Atlas user in `server/.env` cannot run `dropDatabase`. This suite falls back to dropping its collections. Member 1's suite does not yet, so on Atlas it passes but does not exit; run it with a time limit or use a local replica set. On networks whose DNS refuses Atlas SRV lookups, preload the repository's `dns-fix.js` with `NODE_OPTIONS="--require <repo>/dns-fix.js"`. There is no client test file because the client has no test runner.
 

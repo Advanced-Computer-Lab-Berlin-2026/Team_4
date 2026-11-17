@@ -55,23 +55,96 @@ const input = (user, tier, method = 'wallet', operationKey = randomUUID()) => ({
   userId: user.id, tierId: tier.id, method, operationKey,
 });
 
-/** Stand-in for Member 2's service: idempotent per key, like the real ledger must be. */
-function fakePayment(overrides = {}) {
-  const seen = new Set();
-  const calls = { charges: 0, records: 0 };
-  const once = (name) => async (payment, session) => {
-    assert(session.inTransaction(), 'payment must run inside the membership transaction');
-    assert.equal(payment.currency, 'EGP');
-    assert.equal(payment.purpose, 'membership');
-    if (seen.has(payment.idempotencyKey)) return { reference: payment.reference, alreadyApplied: true };
-    seen.add(payment.idempotencyKey);
-    calls[name] += 1;
-    return { reference: payment.reference, alreadyApplied: false };
+/**
+ * Stand-in for Member 2's payments/payment.js and card.js (docs/sprint2/member2.md, section 3), with the
+ * same rules as their PaymentOperation engine:
+ * - reference must be { type: 'membership', id: <ObjectId> }, otherwise 400;
+ * - a repeated idempotency key with the same request returns { replayed: true } and changes nothing;
+ * - a key reused for a different request or a different kind of operation is a 409. A record call that
+ *   reuses the card payment's key therefore fails, exactly as it does against the real card_payment operation.
+ *
+ * options.card: { state: () => 'pending' | 'paid' | 'failed', paidMinor?: number } drives the card page.
+ * options.overrides replaces individual functions.
+ */
+function fakePayment({ card = { state: () => 'pending' }, overrides = {} } = {}) {
+  const operations = new Map();
+  const calls = { charges: 0, records: 0, starts: 0, inputs: [] };
+
+  function checkInput(input) {
+    const { reference, userId, idempotencyKey, amountMinor, currency } = input || {};
+    if (!reference || typeof reference !== 'object' || reference.type !== 'membership' ||
+      !mongoose.isValidObjectId(reference.id)) {
+      throw ApiError.badRequest('A valid reference { type, id } is required');
+    }
+    if (!mongoose.isValidObjectId(userId)) throw ApiError.badRequest('A valid user id is required');
+    if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim()) throw ApiError.badRequest('idempotencyKey is required');
+    if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw ApiError.badRequest('Invalid amount');
+    if (currency !== 'EGP') throw ApiError.badRequest('Unsupported currency');
+  }
+
+  function runOperation(kind, input) {
+    const hash = JSON.stringify([kind, String(input.userId), input.reference.type, String(input.reference.id),
+      input.amountMinor, input.currency]);
+    const existing = operations.get(input.idempotencyKey);
+    if (existing) {
+      if (existing.kind !== kind || existing.hash !== hash) {
+        throw ApiError.conflict('This idempotency key was already used for a different payment');
+      }
+      return { operation: existing, replayed: true };
+    }
+    const operation = { kind, hash, input };
+    operations.set(input.idempotencyKey, operation);
+    return { operation, replayed: false };
+  }
+
+  function cardResult(operation) {
+    const state = card.state();
+    if (state === 'paid') {
+      operation.paid = { reference: 'pi_' + operation.input.idempotencyKey.slice(-8), amountMinor: card.paidMinor ?? operation.input.amountMinor, currency: 'EGP' };
+      return { state, ...operation.paid };
+    }
+    return state === 'pending' ? { state, redirectUrl: 'https://stripe.test/pay' } : { state };
+  }
+
+  const payment = {
+    async chargeMembership(input, session) {
+      assert(session?.inTransaction(), 'the wallet charge must join the membership transaction');
+      calls.inputs.push(['chargeMembership', input]);
+      checkInput(input);
+      const { replayed } = runOperation('charge', input);
+      if (!replayed) calls.charges += 1;
+      return { chargedMinor: input.amountMinor, balanceMinor: 0, operationId: 'op', replayed };
+    },
+    async startCardPayment(input) {
+      calls.inputs.push(['startCardPayment', input]);
+      if (input?.purpose !== 'membership') throw ApiError.badRequest("purpose must be 'deposit' or 'membership'");
+      if ((input.returnPath || '/membership') !== '/membership') throw ApiError.badRequest('Unknown return page');
+      checkInput(input);
+      const { operation } = runOperation('card_payment', input);
+      calls.starts += 1;
+      return cardResult(operation);
+    },
+    async getCardPayment(input) {
+      calls.inputs.push(['getCardPayment', input]);
+      const operation = operations.get(input?.idempotencyKey);
+      if (!operation) return { state: 'pending' };
+      if (operation.kind !== 'card_payment') throw ApiError.conflict('This is not a card payment');
+      return cardResult(operation);
+    },
+    async recordMembershipPayment(input, session) {
+      assert(session?.inTransaction(), 'recording must join the membership transaction');
+      calls.inputs.push(['recordMembershipPayment', input]);
+      checkInput(input);
+      const paid = [...operations.values()].find((op) => op.kind === 'card_payment' &&
+        op.paid?.reference === input.paymentReference && String(op.input.userId) === String(input.userId));
+      if (!paid) throw ApiError.conflict('No verified card payment matches this request');
+      const { replayed } = runOperation('charge', input);
+      if (!replayed) calls.records += 1;
+      return { chargedMinor: input.amountMinor, paymentReference: input.paymentReference, replayed };
+    },
+    ...overrides,
   };
-  return {
-    calls,
-    payment: { chargeMembership: once('charges'), recordMembershipPayment: once('records'), ...overrides },
-  };
+  return { calls, payment };
 }
 
 before(async () => {
@@ -331,11 +404,92 @@ test('wallet subscription activates for one year and a retried key is charged on
   assert.equal(switched.usage.limit, 5);
 });
 
+test('a replayed wallet charge never extends the renewal date', async () => {
+  const user = await member();
+  const fake = fakePayment();
+  const attempt = input(user, plus);
+  const first = await membership.subscribe(attempt, fake);
+  const once = first.membership.renewsAt.getTime();
+
+  // Member 2 answers the reused key with { replayed: true }: no charge and no extra year.
+  const replay = await membership.subscribe(attempt, fake);
+  assert.equal(fake.calls.charges, 1);
+  assert.equal(replay.membership.renewsAt.getTime(), once);
+  assert.equal((await stored(user)).renewsAt.getTime(), once);
+
+  // A fresh key is a real renewal (so the check above is meaningful)...
+  const renewed = await membership.subscribe(input(user, plus), fake);
+  const twice = renewed.membership.renewsAt.getTime();
+  assert(twice > once);
+  assert.equal(fake.calls.charges, 2);
+
+  // ...and replaying the first key again, even after that renewal, still changes nothing.
+  const late = await membership.subscribe(attempt, fake);
+  assert.equal(late.membership.renewsAt.getTime(), twice);
+  assert.equal(fake.calls.charges, 2);
+
+  // The older `alreadyApplied` flag is honoured the same way.
+  const legacy = fakePayment({ overrides: {
+    chargeMembership: async () => ({ chargedMinor: 15000, alreadyApplied: true }),
+  } });
+  const unchanged = await membership.subscribe(input(user, plus), legacy);
+  assert.equal(unchanged.membership.renewsAt.getTime(), twice);
+});
+
+test('payment calls follow the Member 2 contract', async () => {
+  const user = await member();
+  const fake = fakePayment();
+  const wallet = input(user, plus);
+  await membership.subscribe(wallet, fake);
+  const [[, charged]] = fake.calls.inputs;
+  const walletKey = ['membership', user.id, plus.id, wallet.operationKey].join(':');
+  assert.deepEqual(charged, {
+    userId: user.id, amountMinor: 15000, currency: 'EGP',
+    reference: { type: 'membership', id: user.id }, idempotencyKey: walletKey,
+  });
+
+  let state = 'pending';
+  const card = fakePayment({ card: { state: () => state } });
+  const cardAttempt = input(user, premium, 'card');
+  const cardKey = ['membership', user.id, premium.id, cardAttempt.operationKey].join(':');
+  await membership.subscribe(cardAttempt, card);
+  state = 'paid';
+  await membership.subscribe(cardAttempt, card);
+  const byName = (name) => card.calls.inputs.filter(([fn]) => fn === name).map(([, value]) => value);
+  const [start] = byName('startCardPayment');
+  assert.equal(start.purpose, 'membership');
+  assert.equal(start.returnPath, '/membership');
+  assert.deepEqual(start.reference, { type: 'membership', id: user.id });
+  assert.equal(start.idempotencyKey, cardKey);
+  assert.match(start.title, /Premium/);
+  assert(byName('getCardPayment').every((call) => call.idempotencyKey === cardKey));
+  const [recorded] = byName('recordMembershipPayment');
+  assert.equal(recorded.idempotencyKey, cardKey + ':record');
+  assert.deepEqual(recorded.reference, { type: 'membership', id: user.id });
+  assert.match(recorded.paymentReference, /^pi_/);
+
+  // The stand-in is as strict as Member 2's code: a string reference and a record call that
+  // reuses the card payment's key are both refused.
+  const strict = fakePayment({ card: { state: () => 'paid' } });
+  const base = { userId: user.id, amountMinor: 30000, currency: 'EGP', idempotencyKey: 'k:strict' };
+  await mongoose.connection.transaction(async (session) => {
+    await assert.rejects(strict.payment.chargeMembership({ ...base, reference: 'membership:' + user.id }, session), { status: 400 });
+  });
+  const started = await strict.payment.startCardPayment({
+    ...base, purpose: 'membership', reference: { type: 'membership', id: user.id }, returnPath: '/membership',
+  });
+  await mongoose.connection.transaction(async (session) => {
+    await assert.rejects(strict.payment.recordMembershipPayment({
+      ...base, reference: { type: 'membership', id: user.id }, paymentReference: started.reference,
+    }, session), { status: 409 });
+  });
+});
+
 test('a failed wallet charge leaves the membership unchanged', async () => {
   const user = await member();
-  const fake = fakePayment({
+  const fake = fakePayment({ overrides: {
     chargeMembership: async () => { throw ApiError.conflict('Insufficient wallet balance'); },
-  });
+  } });
   await assert.rejects(membership.subscribe(input(user, premium), fake), { status: 409 });
   assert.equal((await stored(user)).tier, undefined);
   assert.equal((await entitlements.getEntitlements(user.id)).discountPercent, 0);
@@ -367,14 +521,7 @@ test('the event outbox is optional and can never fail a subscription', async () 
 test('card subscription waits for a verified payment and applies it once', async () => {
   const user = await member();
   let state = 'pending';
-  const fake = fakePayment({
-    startCardPayment: async (payment) => {
-      assert.equal(payment.returnPath, '/membership');
-      return state === 'pending' ? { state, redirectUrl: 'https://stripe.test/pay' } : { state };
-    },
-    getCardPayment: async (payment) => (state === 'paid'
-      ? { state, reference: 'pi_test', amountMinor: payment.amountMinor, currency: payment.currency } : { state }),
-  });
+  const fake = fakePayment({ card: { state: () => state } });
   const attempt = input(user, premium, 'card');
 
   assert.deepEqual(await membership.subscribe(attempt, fake), {
@@ -382,10 +529,7 @@ test('card subscription waits for a verified payment and applies it once', async
   });
   assert.equal((await stored(user)).tier, undefined);
 
-  state = 'failed';
-  await assert.rejects(membership.subscribe(attempt, fake), { status: 409 });
-  assert.equal((await stored(user)).tier, undefined);
-
+  // Back from Stripe: the same key now reads as paid and is recorded once.
   state = 'paid';
   const paid = await membership.subscribe(attempt, fake);
   assert.equal(paid.membership.tier.name, 'Premium');
@@ -393,13 +537,17 @@ test('card subscription waits for a verified payment and applies it once', async
   assert.equal(fake.calls.records, 1);
   assert.equal(again.membership.renewsAt.getTime(), paid.membership.renewsAt.getTime());
 
+  // A failed or expired payment page activates nothing.
+  const declined = await member();
+  state = 'failed';
+  await assert.rejects(membership.subscribe(input(declined, premium, 'card'), fake), { status: 409 });
+  assert.equal((await stored(declined)).tier, undefined);
+
   // A provider amount that does not match the tier fee is never accepted.
   const other = await member();
-  const wrong = fakePayment({
-    startCardPayment: async () => ({ state: 'paid' }),
-    getCardPayment: async () => ({ state: 'paid', reference: 'pi_low', amountMinor: 100, currency: 'EGP' }),
-  });
+  const wrong = fakePayment({ card: { state: () => 'paid', paidMinor: 100 } });
   await assert.rejects(membership.subscribe(input(other, premium, 'card'), wrong), { status: 409 });
+  assert.equal(wrong.calls.records, 0);
   assert.equal((await stored(other)).tier, undefined);
 
   // Card needs every card operation from Member 2.

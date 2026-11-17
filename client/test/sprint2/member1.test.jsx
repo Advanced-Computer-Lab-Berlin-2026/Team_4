@@ -18,6 +18,7 @@ vi.mock('../../src/api/checkout.api', () => ({
 vi.mock('../../src/api/axios', () => ({
   default: {
     get: vi.fn(async (path) => {
+      if (path === '/delivery/items/item-1') return { data: { item: { id: 'item-1', offered: false, fee: 0 } } };
       if (path !== '/payments/policy') throw new Error('Unexpected test request: ' + path);
       return { data: { policy: {
         cancellation: { freeCancellationHours: 48, partialRefundPercent: 50 },
@@ -42,7 +43,10 @@ describe('shared Sprint 2 UI', () => {
   it('offers wallet payment in checkout and submits the chosen method with the quote', async () => {
     getCheckoutQuote.mockResolvedValue({
       amountMinor: 12000, currency: 'EGP', paymentMethods: ['wallet'],
-      quoteHash: 'example-quote', lines: [],
+      quoteHash: 'example-quote', lines: [{
+        entryId: 'entry-1', itemId: 'item-1', title: 'Tool', startDate: '2030-01-01', endDate: '2030-01-02',
+        deposit: { amount: 120 }, fulfilment: { method: 'pickup', deliveryFee: 0 },
+      }],
     });
     submitCheckout.mockResolvedValue({ id: 'checkout-1', status: 'completed' });
     render(<MemoryRouter initialEntries={['/checkout']} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -64,6 +68,8 @@ describe('shared Sprint 2 UI', () => {
       [memberLinks, '/account/late-fees', 'Late fees'],
       [memberLinks, '/membership', 'Membership'],
       [adminLinks, '/admin/membership-report', 'Membership report'],
+      [adminLinks, '/admin/promo-codes', 'Promo codes'],
+      [adminLinks, '/admin/promo-usage', 'Promo usage'],
     ]) {
       const link = menu.find((entry) => entry.to === path);
       expect(link).toEqual(routes.some((route) => route.path === path) ? { to: path, label } : undefined);

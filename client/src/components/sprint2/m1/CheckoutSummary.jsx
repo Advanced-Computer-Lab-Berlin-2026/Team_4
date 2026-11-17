@@ -9,11 +9,14 @@ export default function CheckoutSummary({ quote }) {
     <>
       <h2>Reservation summary</h2>
       <ul className={styles.list}>{quote.lines.map((line) => (
-        <li key={line.itemId + ':' + line.startDate}>
+        <li key={line.entryId ?? (line.itemId + ':' + line.startDate)}>
           <strong>{line.title}</strong>
           <div>{line.startDate.slice(0, 10)} to {line.endDate.slice(0, 10)}</div>
           <div>Deposit {money(Math.round(line.deposit.amount * 100), quote.currency)}</div>
-          {line.fulfilment.deliveryFee > 0 && (
+          {line.deposit.promoDiscount > 0 && (
+            <div>Promo discount {money(Math.round(line.deposit.promoDiscount * 100), quote.currency)}</div>
+          )}
+          {line.fulfilment.method === 'delivery' && (
             <div>Delivery {money(Math.round(line.fulfilment.deliveryFee * 100), quote.currency)}</div>
           )}
         </li>

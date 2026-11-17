@@ -36,7 +36,7 @@ export default function PickupInfo({ item }) {
           </>
         )}
         {canReserve && <p>
-          <Link to={`/checkout/delivery-promos?itemId=${encodeURIComponent(item._id)}`}>Reserve with delivery or a promo code</Link>
+          <Link to={`/reserve/${encodeURIComponent(item._id)}`}>Reserve with delivery or a promo code</Link>
           {' · '}
           <Link to="/delivery-tracking">Track a delivery</Link>
         </p>}

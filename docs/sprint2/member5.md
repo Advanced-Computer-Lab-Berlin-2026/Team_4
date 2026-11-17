@@ -386,6 +386,8 @@ None of these are in the requirement sheet. The project description allows the t
 - **Damage:** a good return is refused while a damage case is open; **Report damage** opens Member 3's form only while the reservation is active.
 - **Extensions:** extending into someone else's booking fails; only one pending request; overdue reservations can't be extended; an unanswered request is shown as expired after the end date.
 - **Borrow list:** your own items, duplicates, an 11th entry, invalid or past dates, an end date not after the start, and archived items are all refused; stale entries are kept and marked, and **Check out** stays disabled until they are fixed or removed.
-- **Archive:** an item with open bookings can't be archived.
+- **Archive:** an item with open bookings or an unexpired booking hold can't be archived.
 - **Dashboard:** figures match the reservations and damage reports exactly; other lenders' data never appears.
 - **Phone width:** every Member 5 page works at 375 px.
+
+The shared **Reserve** page offers the borrow-list form. Reservation details show Member 6's delivery panel directly, and Booking requests links to the delivery tracking page. The ordinary pickup action remains available for pickup bookings.

@@ -27,11 +27,11 @@ function requireFeature(module, operation, label) {
 }
 
 const CHECKOUT_EVENTS = {
-  cancelled: 'reservation_cancelled',
-  confirmed: 'reservation_confirmed',
-  rejected: 'reservation_rejected',
-  active: 'reservation_picked_up',
-  completed: 'reservation_completed',
+  cancelled: 'cancelled',
+  confirmed: 'confirmed',
+  rejected: 'rejected',
+  active: 'picked_up',
+  completed: 'completed',
 };
 
 async function enqueueReservationEvent(events, reservation, status, session) {
@@ -39,7 +39,7 @@ async function enqueueReservationEvent(events, reservation, status, session) {
   const id = String(reservation._id);
   const recipients = [reservation.borrower, reservation.lender].map(String);
   const payload = {
-    reservationId: id, itemId: String(reservation.item), status,
+    reservationId: id, itemId: String(reservation.item), borrowerId: String(reservation.borrower), status,
     startDate: reservation.startDate, endDate: reservation.endDate,
     returnedAt: reservation.returnedAt, completedAt: reservation.completedAt,
     returnCondition: reservation.returnCondition,

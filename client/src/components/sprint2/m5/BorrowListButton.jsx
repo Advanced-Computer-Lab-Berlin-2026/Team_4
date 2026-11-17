@@ -87,7 +87,7 @@ export default function BorrowListButton({ itemId, ownerId, maxBorrowDays, onAdd
         <Alert variant="error">{error}</Alert>
         <p className={s.addState}>
           <span className={`badge badge-green ${s.badge}`}>In your borrow list</span>
-          <span><strong>{showRange(entry.startDate, entry.endDate)}</strong> · {dayCount(entry.days)}</span>
+          <span>{entry.days == null ? 'Dates needed' : <><strong>{showRange(entry.startDate, entry.endDate)}</strong> · {dayCount(entry.days)}</>}</span>
         </p>
         {entry.problemMessage && <p className={s.problemText}>{entry.problemMessage}</p>}
         <p className={`muted ${s.addNote}`}>You can change the dates or remove it in your borrow list.</p>

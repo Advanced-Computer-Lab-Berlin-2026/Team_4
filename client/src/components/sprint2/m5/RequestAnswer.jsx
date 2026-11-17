@@ -28,7 +28,8 @@ export default function RequestAnswer({ reservation: r, onDone, onStale }) {
   const title = r.item?.title || 'this item';
   const who = r.borrower?.name || 'the borrower';
   const when = showRange(r.startDate, r.endDate);
-  const refund = r.deposit?.amount > 0 ? ` ${who} gets the deposit of ${formatMoney(r.deposit.amount)} back in full.` : '';
+  const totalRefund = (r.deposit?.amount || 0) + (r.fulfilment?.deliveryFee || 0);
+  const refund = totalRefund > 0 ? ` ${who} gets ${formatMoney(totalRefund)} back in full.` : '';
 
   const run = async (kind, call, message) => {
     setBusy(kind);
@@ -55,7 +56,10 @@ export default function RequestAnswer({ reservation: r, onDone, onStale }) {
 
   const approve = () => {
     if (!window.confirm(`Approve the request from ${who} for "${title}", ${when}?`)) return;
-    run('approve', () => approveReservation(r._id), `Approved. ${who} can pick up "${title}" from ${showDay(r.startDate)}.`);
+    const handover = r.fulfilment?.method === 'delivery'
+      ? `Arrange delivery for "${title}" from ${showDay(r.startDate)}.`
+      : `${who} can pick up "${title}" from ${showDay(r.startDate)}.`;
+    run('approve', () => approveReservation(r._id), `Approved. ${handover}`);
   };
   const decline = (e) => {
     e.preventDefault();

@@ -34,7 +34,7 @@ function parseDay(value) {
 /** Validated filters from the query string. Throws 400 with the field that is wrong. */
 function parseFilters(query = {}) {
   const status = query.status === undefined || query.status === '' ? 'all' : query.status;
-  if (status !== 'all' && !STATUS_FILTERS[status]) {
+  if (status !== 'all' && !Object.hasOwn(STATUS_FILTERS, status)) {
     throw fieldError('status', 'Choose a status: all, pending, upcoming, active, completed, cancelled or rejected');
   }
   const from = query.from ? parseDay(query.from) : null;
@@ -111,8 +111,11 @@ function toDto(r, user, extra, now) {
     lender: person(r.lender),
     role: String(r.borrower?._id || r.borrower) === String(user._id) ? 'borrower' : 'lender',
     deposit: { amount: r.deposit?.amount ?? 0, status: r.deposit?.status || 'none' },
-    // Same stage Member 1 shows (reservationCommands.deliveryStage): a delivery that hasn't moved yet is "preparing".
-    fulfilment: { method: r.fulfilment?.method || 'pickup', deliveryStatus: r.fulfilment?.method === 'delivery' ? (r.fulfilment?.deliveryStatus && r.fulfilment.deliveryStatus !== 'none' ? r.fulfilment.deliveryStatus : 'preparing') : 'none' },
+    fulfilment: {
+      method: r.fulfilment?.method || 'pickup',
+      deliveryStatus: reservationCommands.deliveryStage(r),
+      deliveryFee: r.fulfilment?.deliveryFee ?? 0,
+    },
     pickedUpAt: r.pickedUpAt || null,
     returnedAt: r.returnedAt || null,
     completedAt: r.completedAt || null,

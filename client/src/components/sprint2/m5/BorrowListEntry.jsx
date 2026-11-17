@@ -24,7 +24,7 @@ export default function BorrowListEntry({ entry, showLocation = true, editing, b
   const { item, problem } = entry;
   const title = item?.title || 'Unavailable item';
   const canChangeDates = !!item && !['unavailable', 'trust_too_low'].includes(problem); // new dates can't fix these
-  const stored = { startDate: entry.startDate, endDate: entry.endDate };
+  const stored = { startDate: entry.startDate ?? '', endDate: entry.endDate ?? '' };
 
   const [dates, setDates] = useState(stored);
   const [errors, setErrors] = useState({});
@@ -87,7 +87,9 @@ export default function BorrowListEntry({ entry, showLocation = true, editing, b
           </div>
         </div>
         <dl className={s.facts}>
-          <div><dt>Dates</dt><dd>{showRange(entry.startDate, entry.endDate)} <span className={s.days}>· {dayCount(entry.days)}</span></dd></div>
+          <div><dt>Dates</dt><dd>{entry.days == null ? 'Dates needed' : (
+            <>{showRange(entry.startDate, entry.endDate)} <span className={s.days}>· {dayCount(entry.days)}</span></>
+          )}</dd></div>
           {item && <div><dt>Deposit</dt><dd>{formatMoney(item.depositAmount)}</dd></div>}
           {item && problem && <div><dt>Lender</dt><dd>{item.owner?.name || 'Unknown'}</dd></div>}
           {item && showLocation && <div><dt>Pickup</dt><dd>{item.pickup?.location || 'The lender has not set a pickup location yet'}</dd></div>}

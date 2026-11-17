@@ -12,13 +12,22 @@ import Spinner from '../../components/common/Spinner';
 import Alert from '../../components/common/Alert';
 import ReservationTimeline from '../../components/sprint2/m5/ReservationTimeline';
 import RequestAnswer from '../../components/sprint2/m5/RequestAnswer';
-import PickupButton, { DELIVERY_STAGE } from '../../components/sprint2/m5/PickupButton';
+import PickupButton from '../../components/sprint2/m5/PickupButton';
 import ReturnActions from '../../components/sprint2/m5/ReturnActions';
 import ExtensionRequest from '../../components/sprint2/m5/ExtensionRequest';
 import ExtensionAnswer from '../../components/sprint2/m5/ExtensionAnswer';
+import DeliveryStatusPanel from '../../components/sprint2/m6/DeliveryStatusPanel';
 import { dayCount, showDay, showRange } from '../../components/sprint2/m5/borrowDates';
 import { OPEN_STATUSES, depositText, labelsOf, nextStep, statusOf } from '../../components/sprint2/m5/reservationText';
 import s from '../../styles/sprint2/member5.module.css';
+
+const {
+  '../../components/sprint2/m3/ConditionPhotoPanel.jsx': ConditionPhotoPanel,
+  '../../components/sprint2/m3/ReviewForm.jsx': ReviewForm,
+} = import.meta.glob([
+  '../../components/sprint2/m3/ConditionPhotoPanel.jsx',
+  '../../components/sprint2/m3/ReviewForm.jsx',
+], { eager: true, import: 'default' });
 
 const EXTENSION = { pending: 'Waiting for the lender', approved: 'Approved', rejected: 'Declined', cancelled: 'Withdrawn', expired: 'Not answered in time' };
 const EXTENSION_FOR_LENDER = { ...EXTENSION, pending: 'Waiting for your answer', rejected: 'You declined it' };
@@ -81,6 +90,7 @@ export default function ReservationDetailsPage() {
   const title = r.item?.title || 'Unavailable item';
   const status = statusOf(r);
   const lender = r.role === 'lender';
+  const delivery = r.fulfilment?.method === 'delivery';
   const other = lender ? { label: 'Borrower', person: r.borrower } : { label: 'Lender', person: r.lender };
   const labels = labelsOf(r);
   const open = OPEN_STATUSES.includes(r.status);
@@ -111,12 +121,10 @@ export default function ReservationDetailsPage() {
         </section>
       )}
 
-      {lender && r.status === 'confirmed' && !r.flags?.pickupMissed && (
+      {lender && !delivery && r.status === 'confirmed' && !r.flags?.pickupMissed && (
         <section className={`card ${s.answerCard}`} aria-labelledby="res-pickup-title">
           <div className="card-body">
-            <h2 id="res-pickup-title" className={s.cardTitle}>
-              {r.fulfilment?.method === 'delivery' ? `Delivery · ${DELIVERY_STAGE[r.fulfilment.deliveryStatus] || 'Preparing'}` : 'Pickup'}
-            </h2>
+            <h2 id="res-pickup-title" className={s.cardTitle}>Pickup</h2>
             <PickupButton reservation={r} onStale={(message) => { setNotice(''); setProblem(message); refresh(); }}
               onDone={(updated, message) => { setR(updated); setProblem(''); setNotice(message); }} />
           </div>
@@ -159,6 +167,14 @@ export default function ReservationDetailsPage() {
               <ReservationTimeline reservation={r} />
             </div>
           </section>
+
+          {delivery && <DeliveryStatusPanel reservationId={r._id} onChange={refresh} />}
+          {ConditionPhotoPanel && lender && open && (
+            <ConditionPhotoPanel key={r._id} reservationId={r._id} onChange={refresh} />
+          )}
+          {ReviewForm && r.status === 'completed' && (
+            <ReviewForm key={r._id} reservationId={r._id} otherPartyName={other.person?.name} />
+          )}
 
           {/* while the booking is active, the extension cards above already show the request */}
           {r.status !== 'active' && r.extension?.status && r.extension.status !== 'none' && (

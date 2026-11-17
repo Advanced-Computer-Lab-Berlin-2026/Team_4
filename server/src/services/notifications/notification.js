@@ -35,16 +35,15 @@ function getDetails(event) {
 async function processEvent(event) {
   const details = getDetails(event);
   const recipientIds = [...new Set(event.recipients.map(String))];
-  const users = await User.find({ _id: { $in: recipientIds } });
-
-  for (const user of users) {
-    await createOrDeliver(user, event, details);
-  }
-
   if (event.type === 'completed') {
     const reservation = await Reservation.findById(event.aggregateId).select('borrower');
     const userId = event.payload.borrowerId || reservation?.borrower;
     if (userId) await rewardForFirstCompletion(userId, event.aggregateId);
+  }
+
+  const users = await User.find({ _id: { $in: recipientIds } });
+  for (const user of users) {
+    await createOrDeliver(user, event, details);
   }
 }
 

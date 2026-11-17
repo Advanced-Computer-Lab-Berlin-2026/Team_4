@@ -2,6 +2,8 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const net = require('node:net');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const mongoose = require('mongoose');
 const User = require('../../src/models/User');
 const Referral = require('../../src/models/Referral');
@@ -10,6 +12,7 @@ const EventOutbox = require('../../src/models/EventOutbox');
 const Reservation = require('../../src/models/Reservation');
 let smtpServer;
 let smtpPort;
+let rejectSmtpMessages = false;
 let referralService;
 let eventOutbox;
 let notificationService;
@@ -30,7 +33,7 @@ function startSmtpServer() {
         if (readingMessage) {
           if (line === '.') {
             readingMessage = false;
-            socket.write('250 2.0.0 queued\r\n');
+            socket.write(rejectSmtpMessages ? '550 5.0.0 simulated delivery failure\r\n' : '250 2.0.0 queued\r\n');
           }
         } else if (/^(EHLO|HELO)\b/i.test(line)) {
           socket.write('250-localhost\r\n250 SIZE 100000\r\n');
@@ -116,7 +119,7 @@ test('outbox deduplicates event keys and preference opt-out retains in-app notif
 
 test('referral rewards only after completion, blocks self-referral, and credits once', { skip: !process.env.TEST_MONGO_URI }, async () => {
   const referrer = await makeMember('201', { referralCode: 'REFERRAL201' });
-  const referee = await makeMember('202', { notificationPrefs: { reservations: false } });
+  const referee = await makeMember('202');
   const referral = await referralService.captureReferral({ userId: referee._id, code: referrer.referralCode });
   assert.equal(referral.status, 'registered');
   await assert.rejects(
@@ -149,8 +152,9 @@ test('referral rewards only after completion, blocks self-referral, and credits 
     startDate: new Date(Date.now() - 48 * 60 * 60 * 1000),
     endDate: new Date(Date.now() - 24 * 60 * 60 * 1000),
     status: 'completed',
+    completedAt: new Date('2026-01-02T00:00:00.000Z'),
+    returnedAt: new Date('2026-01-02T00:00:00.000Z'),
   });
-  await new Promise((resolve) => setTimeout(resolve, 10));
   const laterCompletedReservation = await Reservation.create({
     item: new mongoose.Types.ObjectId(),
     borrower: referee._id,
@@ -158,7 +162,12 @@ test('referral rewards only after completion, blocks self-referral, and credits 
     startDate: new Date(Date.now() - 48 * 60 * 60 * 1000),
     endDate: new Date(Date.now() - 24 * 60 * 60 * 1000),
     status: 'completed',
+    returnedAt: new Date('2026-01-01T00:00:00.000Z'),
   });
+  await Reservation.collection.updateOne(
+    { _id: laterCompletedReservation._id },
+    { $set: { updatedAt: new Date('2026-02-01T00:00:00.000Z') } }
+  );
   const completionEvent = {
     type: 'completed',
     aggregateId: laterCompletedReservation._id,
@@ -166,14 +175,21 @@ test('referral rewards only after completion, blocks self-referral, and credits 
     eventKey: 'test:reservation-completed-later',
     payload: { borrowerId: referee._id },
   };
+  rejectSmtpMessages = true;
+  try {
+    await assert.rejects(notificationService.processEvent(completionEvent), /simulated delivery failure/);
+  } finally {
+    rejectSmtpMessages = false;
+  }
+  assert.equal(credits, 1);
   await notificationService.processEvent(completionEvent);
-  assert.equal(credits, 0);
+  assert.equal(credits, 1);
+
   const firstCompletionEvent = {
     ...completionEvent,
     aggregateId: firstCompletedReservation._id,
     eventKey: 'test:reservation-completed-first',
   };
-  await notificationService.processEvent(firstCompletionEvent);
   await notificationService.processEvent(firstCompletionEvent);
   assert.equal(credits, 1);
   assert.equal((await Referral.findById(referral._id)).status, 'converted');
@@ -192,6 +208,50 @@ test('referral rewards only after completion, blocks self-referral, and credits 
     referralService.captureReferral({ userId: previousBorrower._id, code: referrer.referralCode }),
     (error) => error.status === 400
   );
+});
+
+test('password-reset email may use the development console fallback, but notifications still require SMTP', () => {
+  const script = `
+    const { sendEmail } = require('./src/utils/email');
+    (async () => {
+      await sendEmail({ to: 'member@example.test', subject: 'Reset code', text: 'Code: 123456', consoleFallback: true });
+      try {
+        await sendEmail({ to: 'member@example.test', subject: 'Notification', text: 'Hello' });
+        process.exitCode = 1;
+      } catch (error) {
+        if (!error.message.includes('SMTP is not configured')) throw error;
+        console.log('SMTP_REQUIRED');
+      }
+    })().catch((error) => { console.error(error); process.exitCode = 1; });
+  `;
+  const output = execFileSync(process.execPath, ['-e', script], {
+    cwd: path.resolve(__dirname, '../..'),
+    env: { ...process.env, NODE_ENV: 'development', SMTP_HOST: '' },
+    encoding: 'utf8',
+  });
+  assert.match(output, /email:development-fallback/);
+  assert.match(output, /Code: 123456/);
+  assert.match(output, /SMTP_REQUIRED/);
+
+  const productionScript = `
+    const { sendEmail } = require('./src/utils/email');
+    (async () => {
+      try {
+        await sendEmail({ to: 'member@example.test', subject: 'Reset code', text: 'Code: 123456', consoleFallback: true });
+        throw new Error('Production unexpectedly allowed console fallback');
+      } catch (error) {
+        if (error.message === 'Production unexpectedly allowed console fallback') throw error;
+        if (!error.message.includes('SMTP is not configured')) throw error;
+        console.log('PRODUCTION_REJECTED');
+      }
+    })().catch((error) => { console.error(error); process.exitCode = 1; });
+  `;
+  const productionOutput = execFileSync(process.execPath, ['-e', productionScript], {
+    cwd: path.resolve(__dirname, '../..'),
+    env: { ...process.env, NODE_ENV: 'production', SMTP_HOST: '' },
+    encoding: 'utf8',
+  });
+  assert.match(productionOutput, /PRODUCTION_REJECTED/);
 });
 
 test('reminder enqueue is restart-safe and SMTP delivery stores a sub-60-second timestamp', { skip: !process.env.TEST_MONGO_URI }, async () => {

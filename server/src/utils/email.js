@@ -14,8 +14,12 @@ if (env.SMTP_HOST) {
   });
 }
 
-async function sendEmail({ to, subject, text, html }) {
+async function sendEmail({ to, subject, text, html, consoleFallback = false }) {
   if (!transporter) {
+    if (consoleFallback && env.NODE_ENV !== 'production') {
+      console.info(`[email:development-fallback]\nTo: ${to}\nSubject: ${subject}\n\n${text || html || ''}`);
+      return;
+    }
     throw new Error('SMTP is not configured; email delivery is unavailable');
   }
   return transporter.sendMail({ from: env.EMAIL_FROM, to, subject, text, html });

@@ -90,9 +90,19 @@ async function captureReferral({ userId, code }) {
 
 async function rewardForFirstCompletion(userId, reservationId) {
   if (!mongoose.isValidObjectId(userId)) throw new TypeError('A valid member id is required');
-  const firstCompletion = await Reservation.findOne({ borrower: userId, status: 'completed' })
-    .sort({ updatedAt: 1, _id: 1 })
-    .select('_id');
+  const [firstCompletion] = await Reservation.aggregate([
+    {
+      $match: {
+        borrower: new mongoose.Types.ObjectId(userId),
+        status: 'completed',
+        $or: [{ completedAt: { $type: 'date' } }, { returnedAt: { $type: 'date' } }],
+      },
+    },
+    { $addFields: { referralCompletionDate: { $ifNull: ['$completedAt', '$returnedAt'] } } },
+    { $sort: { referralCompletionDate: 1, _id: 1 } },
+    { $limit: 1 },
+    { $project: { _id: 1 } },
+  ]);
   if (!firstCompletion || (reservationId && String(firstCompletion._id) !== String(reservationId))) return null;
 
   const referral = await Referral.findOne({ referee: userId, status: 'registered' });

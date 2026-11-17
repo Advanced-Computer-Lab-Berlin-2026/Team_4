@@ -4,6 +4,7 @@ import { getErrorMessage } from '../../api/axios';
 import { cancelReservation, getReservation, listReservations } from '../../api/reservations.api';
 import { useAuth } from '../../context/AuthContext';
 import ReservationChatPanel from '../../components/sprint2/m1/ReservationChatPanel';
+import DeliveryStatusPanel from '../../components/sprint2/m6/DeliveryStatusPanel';
 import styles from '../../styles/sprint2/member1.module.css';
 
 function List() {
@@ -96,7 +97,7 @@ function Details({ reservationId }) {
       {reservation && (
         <>
           <p role="status">Status: {reservation.status}</p>
-          <p>Pickup {reservation.startDate.slice(0, 10)} · Return {reservation.endDate.slice(0, 10)}</p>
+          <p>{reservation.fulfilmentMethod === 'delivery' ? 'Delivery' : 'Pickup'} {reservation.startDate.slice(0, 10)} · Return {reservation.endDate.slice(0, 10)}</p>
           {canCancel && !confirming && <button className={styles.button} onClick={() => setConfirming(true)}>Cancel reservation</button>}
           {canCancel && confirming && (
             <div aria-label="Confirm cancellation" role="group">
@@ -107,8 +108,13 @@ function Details({ reservationId }) {
               </div>
             </div>
           )}
-          {reservation.status === 'cancelled' && reservation.depositAmount > 0 && (
+          {reservation.status === 'cancelled' && (reservation.depositAmount > 0 || reservation.refundAmount > 0) && (
             <p>Wallet refund: {reservation.refundAmount} EGP</p>
+          )}
+          {reservation.fulfilmentMethod === 'delivery' && (
+            <DeliveryStatusPanel reservationId={reservationId} onChange={(record) => {
+              setReservation((current) => ({ ...current, status: record.reservationStatus }));
+            }} />
           )}
           {open && (reservation.status === 'active' || new Date(reservation.endDate) > new Date()) && (
             <ReservationChatPanel reservationId={reservationId} userId={userId} />

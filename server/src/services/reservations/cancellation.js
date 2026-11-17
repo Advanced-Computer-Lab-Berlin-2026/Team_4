@@ -9,29 +9,44 @@ async function cancel({ actorId, reservationId, reason = '', session }, deps = f
     if (!reservation.borrower.equals(actor._id)) throw ApiError.forbidden('Only the borrower can cancel this reservation');
     if (reservation.status === 'cancelled') return reservation;
     const now = new Date();
-    if (!['pending', 'confirmed'].includes(reservation.status) || reservation.pickedUpAt || now >= reservation.startDate) {
+    const wasHandedOver = reservation.pickedUpAt || reservation.fulfilment?.deliveryStatus === 'delivered';
+    if (!['pending', 'confirmed'].includes(reservation.status) || wasHandedOver || now >= reservation.startDate) {
       throw ApiError.conflict('You can only cancel before the pickup date');
     }
 
     const heldMinor = Math.round((reservation.deposit?.amount || 0) * 100);
+    const deliveryMinor = Math.round((reservation.fulfilment?.deliveryFee || 0) * 100);
     let refundMinor = 0;
-    if (heldMinor > 0) {
-      if (reservation.deposit.status !== 'held') throw ApiError.conflict('The reservation deposit is no longer held');
+    let deliveryRefundMinor = 0;
+    if (heldMinor > 0 || deliveryMinor > 0) {
+      if (heldMinor > 0 && reservation.deposit.status !== 'held') {
+        throw ApiError.conflict('The reservation deposit is no longer held');
+      }
       const settle = requireFeature(deps.payment, 'settleCancellation', 'Cancellation refunds');
       const settlement = await settle({
         reservationId: String(reservation._id), borrowerId: String(actor._id),
-        amountMinor: heldMinor, currency: CURRENCY, cancelledAt: now, pickupDate: reservation.startDate,
+        amountMinor: heldMinor, deliveryMinor, currency: CURRENCY, cancelledAt: now, pickupDate: reservation.startDate,
         freeCancellationHours: FREE_CANCELLATION_HOURS, idempotencyKey: 'cancel:' + reservation._id,
       }, transaction);
       refundMinor = settlement.refundMinor;
       if (!Number.isSafeInteger(refundMinor) || refundMinor < 0 || refundMinor > heldMinor) {
         throw new Error('Invalid cancellation refund amount');
       }
-      reservation.deposit.forfeited = (heldMinor - refundMinor) / 100;
-      reservation.deposit.status = refundMinor === heldMinor ? 'refunded' :
-        refundMinor === 0 ? 'forfeited' : 'partially_forfeited';
+      deliveryRefundMinor = settlement.deliveryRefundMinor ?? 0;
+      if (deliveryRefundMinor !== deliveryMinor) {
+        // An older payment service must not finalize an incomplete refund.
+        throw new ApiError(503, 'Delivery refunds are unavailable. Please try again later.');
+      }
+      if (heldMinor > 0) {
+        reservation.deposit.forfeited = (heldMinor - refundMinor) / 100;
+        reservation.deposit.status = refundMinor === heldMinor ? 'refunded' :
+          refundMinor === 0 ? 'forfeited' : 'partially_forfeited';
+      }
     }
-    reservation.cancellation = { at: now, by: actor._id, reason: reason.trim(), refundAmount: refundMinor / 100 };
+    reservation.cancellation = {
+      at: now, by: actor._id, reason: reason.trim(),
+      refundAmount: (refundMinor + deliveryRefundMinor) / 100,
+    };
     reservation.status = 'cancelled';
     await reservation.save({ session: transaction });
     await enqueueReservationEvent(deps.events, reservation, 'cancelled', transaction);

@@ -4,9 +4,23 @@ const ApiError = require('../utils/ApiError');
 const User = require('../models/User');
 const { USER_STATUS } = require('../config/constants');
 const { setAuthCookie, clearAuthCookie } = require('../utils/tokens');
+const { features } = require('../services/sprint2/bootstrap');
+
+async function captureSignupReferral(userId, code) {
+  try {
+    const capture = features().referral?.captureReferral;
+    if (typeof capture !== 'function') return 'unavailable';
+    await capture({ userId, code });
+    return 'captured';
+  } catch (err) {
+    if ([400, 403, 404, 409].includes(err.status)) return 'invalid';
+    console.error('Signup referral capture failed:', err.message);
+    return 'unavailable';
+  }
+}
 
 exports.register = asyncHandler(async (req, res) => {
-  const { username, name, email, password, phone, address } = req.body;
+  const { username, name, email, password, phone, address, ref } = req.body;
   // Explicitly select writable fields: guests cannot grant themselves privileges.
   const user = new User({ username, name, email, phone, address: {
     street: address.street, city: address.city, state: address.state,
@@ -14,8 +28,9 @@ exports.register = asyncHandler(async (req, res) => {
   }, role: 'member' });
   await user.setPassword(password);
   await user.save();
+  const referralCapture = ref ? await captureSignupReferral(user._id, ref) : undefined;
   setAuthCookie(res, user._id);
-  res.status(201).json({ user });
+  res.status(201).json({ user, ...(referralCapture && { referralCapture }) });
 });
 
 exports.login = asyncHandler(async (req, res) => {

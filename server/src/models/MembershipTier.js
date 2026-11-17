@@ -7,7 +7,12 @@ const schema = new mongoose.Schema(
     annualFee: { type: Number, default: 0, min: 0 },             // EGP/year
     depositDiscountPercent: { type: Number, default: 0, min: 0, max: 100 },
     waitlistPriority: { type: Number, required: true },          // 1 = top priority
-    maxConcurrentReservations: { type: Number },                 // undefined = platform default
+    // undefined = platform default (see services/membership/entitlements.js). Optional; a set value must be a whole number >= 0.
+    maxConcurrentReservations: {
+      type: Number,
+      min: 0,
+      validate: { validator: (v) => v == null || Number.isInteger(v), message: 'maxConcurrentReservations must be a whole number' },
+    },
     description: String,
     isActive: { type: Boolean, default: true },
   },

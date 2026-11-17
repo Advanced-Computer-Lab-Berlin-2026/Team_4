@@ -17,6 +17,18 @@ const { '../../components/sprint2/m2/PaymentMethodPicker.jsx': PaymentMethodPick
 const reservationPath = routes.some((route) => route.path === '/reservations/:id')
   ? '/reservations/' : '/my-reservations/';
 
+const checkoutStorageKey = (id) => `shareshed-checkout-attempt:${id}`;
+const checkoutEnded = (status) => status === 'completed' || status === 'failed';
+
+function forgetCheckout(id) {
+  const attemptKey = checkoutStorageKey(id);
+  const stored = sessionStorage.getItem(attemptKey);
+  if (!stored) return;
+  const [key, operationKey] = JSON.parse(stored);
+  if (sessionStorage.getItem(key) === operationKey) sessionStorage.removeItem(key);
+  sessionStorage.removeItem(attemptKey);
+}
+
 function CheckoutResult({ id }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
@@ -28,6 +40,7 @@ function CheckoutResult({ id }) {
       try {
         const data = await getCheckoutStatus(id);
         if (!current) return;
+        if (checkoutEnded(data.status)) forgetCheckout(id);
         setResult(data);
         setError('');
         if (data.status === 'awaiting_payment' || data.status === 'refund_due') timer = setTimeout(refresh, 8000);
@@ -136,11 +149,16 @@ function CheckoutForm({ selection }) {
         sessionStorage.setItem(key, operationKey);
       }
       const result = await submitCheckout({ ...request, method, operationKey, quoteHash: quote.quoteHash });
+      if (checkoutEnded(result.status)) {
+        sessionStorage.removeItem(key);
+        forgetCheckout(result.id);
+      } else {
+        sessionStorage.setItem(checkoutStorageKey(result.id), JSON.stringify([key, operationKey]));
+      }
       if (result.redirectUrl) {
         window.location.assign(result.redirectUrl);
         return;
       }
-      if (result.status === 'completed' || result.status === 'failed') sessionStorage.removeItem(key);
       navigate('/checkout/status/' + result.id, { replace: true });
     } catch (failure) {
       setSubmitError(getErrorMessage(failure));

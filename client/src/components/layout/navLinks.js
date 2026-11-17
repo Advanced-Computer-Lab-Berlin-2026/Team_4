@@ -18,7 +18,10 @@ export const guestLinks = [
 export const memberLinks = [
   { to: '/catalog', label: 'Browse items' },
   { to: '/reserve', label: 'Reserve' },
+  ...ifRegistered('/borrow-list', 'Borrow list'),
   { to: isRegistered('/reservations') ? '/reservations' : '/my-reservations', label: 'Reservations' },
+  ...ifRegistered('/damage-reports', 'Damage cases'),
+  ...ifRegistered('/reviews/mine', 'My reviews'),
   ...ifRegistered('/delivery-tracking', 'Deliveries', '/delivery-tracking/:reservationId?'),
   { to: '/favorites', label: 'Favorites' },
   { to: '/household', label: 'Household' },
@@ -27,12 +30,15 @@ export const memberLinks = [
   { to: '/account/wallet', label: 'Wallet' },
   ...ifRegistered('/account/late-fees', 'Late fees'),
   ...ifRegistered('/membership', 'Membership'),
+  ...ifRegistered('/referrals', 'Referrals'),
+  ...ifRegistered('/account/notification-preferences', 'Email preferences'),
 ];
 
 // extra links shown only to verified lenders / members who can still apply
 export const lenderLinks = [
   { to: '/lender/items', label: 'My items' },
   ...ifRegistered('/lender/reservations', 'Booking requests'),
+  ...ifRegistered('/lender/dashboard', 'Lending dashboard'),
 ];
 export const applyLink = { to: '/lender/apply', label: 'Become a lender' };
 
@@ -47,7 +53,9 @@ export const adminLinks = [
   ...ifRegistered('/admin/moderation', 'Moderation'),
   ...ifRegistered('/admin/reports/usage', 'Usage report'),
   ...ifRegistered('/admin/reports/damage', 'Damage report'),
+  ...ifRegistered('/admin/damage-reports', 'Damage cases'),
   ...ifRegistered('/admin/membership-report', 'Membership report'),
+  ...ifRegistered('/admin/referrals', 'Referral report'),
   ...ifRegistered('/admin/promo-codes', 'Promo codes'),
   ...ifRegistered('/admin/promo-usage', 'Promo usage'),
 ];

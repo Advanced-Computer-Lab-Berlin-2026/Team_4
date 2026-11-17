@@ -8,6 +8,8 @@ const ApiError = require('../utils/ApiError');
 const User = require('../models/User');
 const PasswordResetOtp = require('../models/PasswordResetOtp');
 const { CURRENCY } = require('../config/constants');
+const { toMinor, fromMinor } = require('../services/payments/money');
+const lateFee = require('../services/payments/lateFee');
 
 const ADDRESS_KEYS = ['street', 'city', 'state', 'postalCode', 'country'];
 
@@ -57,8 +59,11 @@ exports.updateProfile = asyncHandler(async (req, res) => {
 
 /**
  * GET /api/account/wallet - Req 36 - member
- * Returns the current wallet balance. (The transaction history arrives in Sprint 2.)
+ * Returns the current wallet balance, plus any late fees still owed (Sprint 2, Req 78).
+ * The history itself is GET /api/wallet-ledger.
  */
 exports.getWallet = asyncHandler(async (req, res) => {
-  res.json({ balance: req.user.walletBalance || 0, currency: CURRENCY });
+  const balanceMinor = toMinor(req.user.walletBalance);
+  const outstandingLateFeesMinor = await lateFee.outstandingTotalMinor(req.user._id);
+  res.json({ balance: fromMinor(balanceMinor), balanceMinor, currency: CURRENCY, outstandingLateFeesMinor });
 });

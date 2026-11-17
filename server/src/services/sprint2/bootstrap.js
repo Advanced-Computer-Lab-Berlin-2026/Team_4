@@ -8,6 +8,7 @@ function optionalFeature(relativePath) {
 }
 
 function features() {
+  const outbox = optionalFeature('notifications/eventOutbox');
   return {
     payment: optionalFeature('payments/payment'),
     policy: optionalFeature('policies/bookingPolicy'),
@@ -15,7 +16,11 @@ function features() {
     membership: optionalFeature('membership/entitlements'),
     promo: optionalFeature('promotions/promo'),
     trust: optionalFeature('reviews/trust'),
-    events: optionalFeature('notifications/eventOutbox'),
+    referral: optionalFeature('referrals/referral'),
+    events: outbox && {
+      ...outbox,
+      enqueueAvailabilityChanged: optionalFeature('../controllers/favorites.controller')?.enqueueAvailabilityChanged,
+    },
   };
 }
 
@@ -27,28 +32,30 @@ function requireFeature(module, operation, label) {
 }
 
 const CHECKOUT_EVENTS = {
-  cancelled: 'reservation_cancelled',
-  confirmed: 'reservation_confirmed',
-  rejected: 'reservation_rejected',
-  active: 'reservation_picked_up',
-  completed: 'reservation_completed',
+  cancelled: 'cancelled',
+  confirmed: 'confirmed',
+  rejected: 'rejected',
+  active: 'picked_up',
+  completed: 'completed',
 };
 
 async function enqueueReservationEvent(events, reservation, status, session) {
-  if (!events?.enqueueEvent) return;
+  if (!events) return;
   const id = String(reservation._id);
   const recipients = [reservation.borrower, reservation.lender].map(String);
   const payload = {
-    reservationId: id, itemId: String(reservation.item), status,
+    reservationId: id, itemId: String(reservation.item), borrowerId: String(reservation.borrower), status,
     startDate: reservation.startDate, endDate: reservation.endDate,
     returnedAt: reservation.returnedAt, completedAt: reservation.completedAt,
     returnCondition: reservation.returnCondition,
   };
-  if (CHECKOUT_EVENTS[status]) {
+  if (events.enqueueEvent && CHECKOUT_EVENTS[status]) {
     await events.enqueueEvent(CHECKOUT_EVENTS[status], id, recipients, payload, id + ':' + status, session);
   }
-  if (['cancelled', 'rejected', 'completed'].includes(status)) {
-    await events.enqueueEvent('availability_changed', id, recipients, payload, id + ':availability:' + status, session);
+  if (events.enqueueAvailabilityChanged && ['cancelled', 'rejected', 'completed'].includes(status)) {
+    await events.enqueueAvailabilityChanged(
+      reservation.item, { itemId: payload.itemId }, id + ':availability:' + status, session,
+    );
   }
 }
 
@@ -56,8 +63,13 @@ function stripeWebhook(req, res, next) {
   const checkout = require('../reservations/checkout');
   const verify = requireFeature(features().payment, 'verifyCheckoutWebhook', 'Stripe webhook integration');
   Promise.resolve().then(async () => {
-    const attemptId = await verify(req.body, req.get('Stripe-Signature'));
-    if (attemptId) await checkout.reconcileCard(attemptId);
+    const target = await verify(req.body, req.get('Stripe-Signature'));
+    if (typeof target === 'string') await checkout.reconcileCard(target);
+    if (target?.membershipOperationId) {
+      const membership = optionalFeature('membership/membership');
+      const reconcile = requireFeature(membership, 'reconcileCardMembership', 'Membership payment');
+      await reconcile(target);
+    }
     res.sendStatus(204);
   }).catch(next);
 }

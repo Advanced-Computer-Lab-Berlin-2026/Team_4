@@ -23,7 +23,14 @@ const MONEY_REGEX = /^\d{1,7}(\.\d{1,2})?$/;
 const MAX_DEPOSIT = 1000000;
 const IMAGE_TYPES = ['image/jpeg', 'image/png'];
 const IMAGE_EXT = /\.(jpe?g|png)$/i;
-const FIELDS = ['title', 'description', 'category', 'depositAmount', 'conditionNotes'];
+const FIELDS = ['title', 'description', 'category', 'depositAmount', 'conditionNotes', 'tags'];
+// Tags (Sprint 2, Req 92): same rules as the server (items.routes.js) - optional, up to 10, each 1-30 characters.
+const MAX_TAGS = 10;
+const MAX_TAG_LENGTH = 30;
+const TAG_REGEX = /^[\p{L}\p{M}\p{N}](?:[\p{L}\p{M}\p{N} -]*[\p{L}\p{M}\p{N}])?$/u;
+const TAG_FORMAT_MESSAGE = `Tags can contain letters, numbers, spaces and hyphens (up to ${MAX_TAG_LENGTH} characters)`;
+const cleanTag = (t) => t.trim().replace(/\s+/g, ' ').toLowerCase();
+const sameValue = (a, b) => (Array.isArray(a) ? JSON.stringify(a) === JSON.stringify(b) : a === b);
 
 const toForm = (item) => ({
   title: item?.title || '',
@@ -31,6 +38,7 @@ const toForm = (item) => ({
   category: item?.category?._id || item?.category || '',
   depositAmount: item ? String(item.depositAmount ?? '') : '',
   conditionNotes: item?.conditionNotes || '',
+  tags: item?.tags ? [...item.tags] : [],
 });
 
 // Client-side checks (for quick feedback only - the server checks everything again).
@@ -64,6 +72,19 @@ function checkFiles(files) {
 const serverFieldErrors = (err) =>
   getFieldErrors(err).reduce((acc, e) => (e.field && !acc[e.field] ? { ...acc, [e.field]: e.message } : acc), {});
 
+// Adds the tag(s) typed in `text` (a comma separates several) to `current`. Returns the new list, or an error.
+function mergeTags(current, text) {
+  const tags = [...current];
+  let notice = '';
+  for (const tag of text.split(',').map(cleanTag).filter(Boolean)) {
+    if (tag.length > MAX_TAG_LENGTH || !TAG_REGEX.test(tag)) return { error: TAG_FORMAT_MESSAGE };
+    if (tags.includes(tag)) { notice = `"${tag}" is already added`; continue; }
+    if (tags.length >= MAX_TAGS) return { error: `You can add up to ${MAX_TAGS} tags` };
+    tags.push(tag);
+  }
+  return { tags, notice };
+}
+
 function Counter({ value, max }) {
   const over = value.length > max;
   return <div className={`item-editor-counter ${over ? 'is-over' : ''}`} aria-live={over ? 'polite' : 'off'}>{value.length} / {max}</div>;
@@ -93,8 +114,10 @@ export default function ItemInfoTab({ item, onSaved }) {
   const [photoBusy, setPhotoBusy] = useState('');
 
   const baseline = useMemo(() => toForm(item), [item]);
-  const changed = FIELDS.filter((f) => form[f] !== baseline[f]);
-  const dirty = isEdit ? changed.length > 0 : changed.length > 0 || newPhotos.length > 0;
+  const [tagDraft, setTagDraft] = useState('');
+  const [tagNotice, setTagNotice] = useState('');
+  const changed = FIELDS.filter((f) => !sameValue(form[f], baseline[f]));
+  const dirty = (isEdit ? changed.length > 0 : changed.length > 0 || newPhotos.length > 0) || !!tagDraft.trim();
   const photoCount = isEdit ? item.photos.length : newPhotos.length;
   const busy = saving || !!photoBusy;
   const blocker = useBlocker(({ currentLocation, nextLocation }) =>
@@ -145,6 +168,27 @@ export default function ItemInfoTab({ item, onSaved }) {
     const { value } = e.target;
     setForm((f) => ({ ...f, [name]: value }));
     setErrors((errs) => (errs[name] ? { ...errs, [name]: undefined } : errs));
+    setSuccess('');
+  };
+
+  // ---------- tags ----------
+  const addTagDraft = () => {
+    if (!tagDraft.trim()) return;
+    const r = mergeTags(form.tags, tagDraft);
+    if (r.error) { setErrors((errs) => ({ ...errs, tags: r.error })); setTagNotice(''); return; }
+    setForm((f) => ({ ...f, tags: r.tags }));
+    setTagDraft('');
+    setTagNotice(r.notice);
+    setErrors((errs) => ({ ...errs, tags: undefined }));
+    setSuccess('');
+  };
+  const onTagKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTagDraft(); } // Enter must not submit the form
+  };
+  const removeTag = (tag) => {
+    setForm((f) => ({ ...f, tags: f.tags.filter((t) => t !== tag) }));
+    setTagNotice('');
+    setErrors((errs) => ({ ...errs, tags: undefined }));
     setSuccess('');
   };
 
@@ -213,7 +257,15 @@ export default function ItemInfoTab({ item, onSaved }) {
     e.preventDefault();
     setFormError('');
     setSuccess('');
+    // A tag still typed in the box (not added yet) is added now, so it isn't lost.
+    let toSave = form;
     const errs = validate(form);
+    if (tagDraft.trim()) {
+      const r = mergeTags(form.tags, tagDraft);
+      if (r.error) errs.tags = r.error;
+      else { toSave = { ...form, tags: r.tags }; setForm(toSave); setTagDraft(''); }
+    }
+    const toSend = FIELDS.filter((f) => !sameValue(toSave[f], baseline[f]));
     if (!isEdit && newPhotos.length === 0) errs.photos = 'Add at least one photo';
     if (Object.keys(errs).length) {
       setErrors(errs);
@@ -221,12 +273,12 @@ export default function ItemInfoTab({ item, onSaved }) {
       setFocusError(true);
       return;
     }
-    if (isEdit && changed.length === 0) { setSuccess('No changes to save'); return; }
+    if (isEdit && toSend.length === 0) { setSuccess('No changes to save'); return; }
 
     setSaving(true);
     try {
       if (isEdit) {
-        const body = Object.fromEntries(changed.map((f) => [f, form[f].trim()]));
+        const body = Object.fromEntries(toSend.map((f) => [f, f === 'tags' ? toSave.tags : toSave[f].trim()]));
         const d = await updateItem(item._id, body);
         onSaved(d.item);
         setForm(toForm(d.item));
@@ -234,7 +286,8 @@ export default function ItemInfoTab({ item, onSaved }) {
         setSuccess('Changes saved');
       } else {
         const fd = new FormData();
-        FIELDS.forEach((f) => fd.append(f, form[f].trim()));
+        FIELDS.filter((f) => f !== 'tags').forEach((f) => fd.append(f, toSave[f].trim()));
+        toSave.tags.forEach((t) => fd.append('tags', t)); // one `tags` field per tag
         newPhotos.forEach((p) => fd.append('photos', p.file));
         const d = await createItem(fd);
         newPhotos.forEach((p) => URL.revokeObjectURL(p.url));
@@ -308,6 +361,38 @@ export default function ItemInfoTab({ item, onSaved }) {
           <textarea value={form.conditionNotes} onChange={setField('conditionNotes')} />
         </FormField>
         <Counter value={form.conditionNotes} max={LIMITS.conditionNotes} />
+
+        <div className="field item-editor-tags">
+          <label htmlFor="item-tag-input">Tags (optional)</label>
+          {form.tags.length > 0 && (
+            <ul className="item-editor-tag-list" aria-label="Tags">
+              {form.tags.map((t) => (
+                <li key={t} className="badge badge-grey item-editor-tag">
+                  <span>{t}</span>
+                  <button type="button" className="item-editor-tag-remove" onClick={() => removeTag(t)}
+                    aria-label={`Remove tag ${t}`} disabled={busy}>×</button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {form.tags.length < MAX_TAGS ? (
+            <div className="row item-editor-tag-row">
+              <input id="item-tag-input" type="text" value={tagDraft} autoComplete="off" disabled={busy}
+                placeholder="e.g. cordless" aria-invalid={!!errors.tags} aria-describedby="item-tag-help"
+                onChange={(e) => { setTagDraft(e.target.value); setTagNotice(''); if (errors.tags) setErrors((x) => ({ ...x, tags: undefined })); }}
+                onKeyDown={onTagKeyDown} />
+              <button type="button" className="btn btn-secondary" onClick={addTagDraft} disabled={busy || !tagDraft.trim()}>Add</button>
+            </div>
+          ) : (
+            <p className="muted">You have reached the limit of {MAX_TAGS} tags.</p>
+          )}
+          <div id="item-tag-help">
+            {errors.tags
+              ? <div className="field-error">{errors.tags}</div>
+              : <div className="field-hint">{tagNotice || 'Words that describe the item, e.g. cordless, 18v. Press Enter or Add. They help borrowers find similar items.'}</div>}
+          </div>
+          <div className="item-editor-counter item-editor-tag-counter">{form.tags.length} / {MAX_TAGS}</div>
+        </div>
 
         <fieldset className="item-editor-photos" aria-describedby="item-photos-hint">
           <legend>Photos <span className="muted">({photoCount} of {MAX_PHOTOS})</span></legend>

@@ -1,0 +1,187 @@
+/* Sprint 2 - Member 5 feature styles (CSS module). Built only from the global tokens (docs/UI_README.md):
+   no hard-coded colours, mobile first, extra breakpoint only where the layout needs it. */
+
+/* ---------- shared: date pair (BorrowDateFields) ---------- */
+.dates { margin-bottom: .75rem; }
+.dateRow { display: grid; gap: 0 .75rem; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.dateRow > div { margin-bottom: .6rem; min-width: 0; }
+.dateSummary { margin: 0; }
+.badge { text-transform: none; }
+
+/* ---------- BorrowListButton (item details page) ---------- */
+.addBox { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.addTitle { margin: 0 0 .6rem; }
+.addState { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; margin: 0 0 .5rem; }
+.addNote { margin: .6rem 0; }
+
+/* ---------- Borrow list page ---------- */
+.pageTitle { margin-bottom: .25rem; }
+.lead { margin: 0 0 1rem; }
+.loadError { margin-bottom: 1rem; }
+.empty { padding: 1.5rem 0; }
+.empty p { margin: 0 0 .75rem; }
+
+.layout { display: grid; gap: 1.25rem; }
+.entries { display: grid; gap: 1.5rem; min-width: 0; }
+@media (min-width: 900px) {
+  .layout { grid-template-columns: minmax(0, 1fr) 320px; align-items: start; }
+  .summary { grid-column: 2; grid-row: 1; position: sticky; top: 4.5rem; }
+  .entries { grid-column: 1; grid-row: 1; }
+}
+
+/* trip summary */
+.summaryTitle { margin: 0 0 .5rem; }
+.capacity { margin: 0 0 .35rem; }
+.meter { height: 8px; border-radius: 999px; background: var(--border); overflow: hidden; margin-bottom: 1rem; }
+.meter span { display: block; height: 100%; border-radius: 999px; background: var(--primary); }
+.summaryFacts { margin: 0 0 .75rem; display: grid; gap: .45rem; }
+.summaryFacts > div { display: flex; justify-content: space-between; gap: 1rem; }
+.summaryFacts dt { color: var(--muted); font-size: .92rem; }
+.summaryFacts dd { margin: 0; font-weight: 600; text-align: right; }
+.summaryTotal { border-top: 1px solid var(--border); padding-top: .55rem; margin-top: .1rem; }
+.summaryTotal dd { font-size: 1.1rem; }
+.tripNote { margin: 0 0 .75rem; }
+.summaryActions { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+.summaryActions .btn { flex: 1 1 auto; }
+.summaryActions p { flex-basis: 100%; margin: 0; }
+
+/* groups and entries */
+.groupTitle { margin: 0; overflow-wrap: anywhere; }
+.groupNote { margin: .1rem 0 .6rem; overflow-wrap: anywhere; }
+.list { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+.entry { padding: .9rem 1rem; }
+.entryStale { border-left: 4px solid var(--warn); padding-left: calc(1rem - 3px); }
+.entryGone { border-left: 4px solid var(--danger); padding-left: calc(1rem - 3px); }
+.entryMain { display: flex; gap: .9rem; align-items: flex-start; }
+.thumb { flex: 0 0 auto; width: 88px; aspect-ratio: 4 / 3; border-radius: 8px; overflow: hidden; background: var(--bg); border: 1px solid var(--border); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; }
+.entryInfo { flex: 1; min-width: 0; }
+.entryTitle { margin: 0 0 .1rem; overflow-wrap: anywhere; }
+.entryTitle a { color: var(--text); }
+.problem { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .5rem; margin: .4rem 0 0; }
+.problemText { color: var(--text); font-size: .92rem; margin: 0; }
+.facts { margin: .75rem 0 0; display: grid; gap: .25rem; }
+.facts > div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: .5rem; align-items: baseline; }
+.facts dt { color: var(--muted); font-size: .92rem; }
+.facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.days { white-space: nowrap; }
+.entryActions { margin-top: .9rem; }
+.editor { margin-top: .9rem; padding-top: .9rem; border-top: 1px solid var(--border); }
+@media (min-width: 640px) {
+  /* wider screens: photo on the left; title, facts beside it; buttons and the date editor across the bottom */
+  .entry { display: grid; grid-template-columns: 132px minmax(0, 1fr); column-gap: .9rem; align-items: start; }
+  .entryMain { display: contents; }
+  .thumb { width: 132px; grid-column: 1; grid-row: 1 / span 2; }
+  .entryInfo { grid-column: 2; grid-row: 1; }
+  .facts { grid-column: 2; grid-row: 2; margin-top: .5rem; }
+  .entryActions, .editor { grid-column: 1 / -1; }
+}
+
+/* ---------- My reservations (list) ---------- */
+.dateFilter { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: .75rem 1rem .25rem; margin: 0 0 1rem; min-width: 0; }
+.dateFilterLegend { font-weight: 600; padding: 0 .3rem; }
+.dateFilterFoot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .75rem; }
+.dateFilterFoot p { margin: 0; }
+.count { margin: 0 0 .75rem; }
+.resGroups { display: grid; gap: 1.5rem; }
+.updating { opacity: .6; }
+.resCard { display: flex; gap: .9rem; align-items: flex-start; padding: .9rem 1rem; }
+.resCard .thumb { display: block; width: 64px; } /* small on phones so the text keeps its width */
+.resBody { flex: 1; min-width: 0; }
+.resHead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .25rem .75rem; }
+.statusBadge { flex: 0 0 auto; }
+.resDates { margin: .2rem 0 0; font-weight: 600; }
+.resNext { margin: .2rem 0 0; }
+.labels { list-style: none; margin: .45rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: .35rem; }
+.resFacts { margin: .5rem 0 0; display: flex; flex-wrap: wrap; gap: .2rem 1.25rem; }
+.resFacts > div { display: flex; gap: .4rem; align-items: baseline; min-width: 0; }
+.resFacts dt { color: var(--muted); font-size: .92rem; }
+.resFacts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+
+/* ---------- Reservation details ---------- */
+.backLink { margin: 0 0 .5rem; }
+.detailHead { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; }
+.detailTitle { margin: 0; overflow-wrap: anywhere; }
+.detailLayout { display: grid; gap: 1.25rem; margin-top: 1rem; }
+.detailMain { display: grid; gap: 1rem; min-width: 0; align-content: start; }
+.detailPhoto { aspect-ratio: 4 / 3; background: var(--bg); border-bottom: 1px solid var(--border); }
+.detailPhoto img { width: 100%; height: 100%; object-fit: cover; }
+.cardTitle { margin: 0 0 .75rem; }
+.penalty { color: var(--danger); }
+@media (min-width: 900px) {
+  .detailLayout { grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
+  .detailSide { grid-column: 2; grid-row: 1; }
+  .detailMain { grid-column: 1; grid-row: 1; }
+}
+
+/* progress line: Requested -> Approved -> Picked up -> Returned (each step also says Done / Next / Not yet / Ended) */
+.timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.step { position: relative; display: flex; gap: .75rem; align-items: flex-start; padding-bottom: 1rem; }
+.step:last-child { padding-bottom: 0; }
+.step::before { content: ''; position: absolute; left: 8px; top: 20px; bottom: 0; width: 2px; background: var(--border); }
+.step:last-child::before { display: none; }
+.stepDot { flex: 0 0 auto; width: 18px; height: 18px; margin-top: 2px; border-radius: 50%; border: 2px solid var(--border); background: var(--surface); }
+.stepText { display: flex; flex-direction: column; }
+.step_done .stepDot { background: var(--primary); border-color: var(--primary); }
+.step_done::before { background: var(--primary); }
+.step_current .stepDot { border-color: var(--primary); border-width: 4px; }
+.step_current strong { color: var(--primary-dark); }
+.step_stopped .stepDot { background: var(--danger); border-color: var(--danger); }
+.step_todo strong { color: var(--muted); font-weight: 600; }
+@media (min-width: 640px) {
+  .resCard .thumb { width: 132px; }
+}
+
+/* ---------- Booking requests (lender) ---------- */
+.waitingBanner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; padding: .9rem 1rem; margin-bottom: 1rem; border-left: 4px solid var(--warn); }
+.waitingText { margin: 0; }
+.filterRow { display: grid; gap: 0 .75rem; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.filterRow > div { min-width: 0; }
+@media (min-width: 640px) {
+  .filterRow { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); }
+}
+
+/* ---------- Lending dashboard ---------- */
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.dashHead { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: .75rem; }
+.dashHead .btn { flex: 0 0 auto; }
+.dash { display: grid; gap: 1.5rem; }
+.dashSection { min-width: 0; }
+.statGrid { display: grid; gap: .75rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.stat { padding: .9rem 1rem; display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+.stat:first-child { grid-column: 1 / -1; }
+.statLabel { color: var(--muted); font-size: .92rem; font-weight: 600; }
+.statValue { font-size: 1.3rem; font-weight: 700; line-height: 1.2; overflow-wrap: normal; word-break: normal; font-variant-numeric: tabular-nums; } /* wraps only at the space after EGP */
+.statNote { font-size: .85rem; }
+@media (min-width: 640px) {
+  .statGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stat:first-child { grid-column: auto; }
+  .statValue { font-size: 1.6rem; }
+}
+@media (min-width: 900px) {
+  .statGrid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+.dashTable th, .dashTable td { vertical-align: middle; }
+.dashTable td, .num { font-variant-numeric: tabular-nums; }
+.num { text-align: right; white-space: nowrap; }
+.dashTable thead th.num { text-align: right; }
+.dashItem { font-weight: 600; min-width: 10rem; }
+.dashTable tbody th { background: var(--surface); } /* row names, not column headers */
+.dashItem a { color: var(--text); }
+.dashItem .badge { margin-left: .4rem; }
+.barCell { display: flex; align-items: center; gap: .6rem; min-width: 9rem; }
+.barValue { min-width: 1.5rem; text-align: right; font-weight: 600; }
+.barTrack { flex: 1; height: 8px; border-radius: 4px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; }
+.bar { display: block; height: 100%; border-radius: 4px; background: var(--primary); }
+
+/* ---------- Answering a request (Req 56) ---------- */
+.answer { margin-top: .75rem; }
+.answerNote { margin: 0; flex-basis: 100%; }
+.answerCard { margin-top: 1rem; border-left: 4px solid var(--primary); }
+.declineForm { margin-top: .25rem; }
+.declineForm textarea { min-height: 90px; }
+.counter { margin: -.6rem 0 .6rem; text-align: right; }
+.penaltyNote { margin: 0 0 .6rem; color: var(--danger); font-weight: 600; }
+.answer .row + .answerNote { margin-top: .6rem; } /* a note under the buttons gets some room */
+.extStatus { margin: 0 0 .6rem; }
+.spaced { margin-top: .6rem; }

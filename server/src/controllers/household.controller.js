@@ -1,6 +1,6 @@
 /**
  * HOUSEHOLD CONTROLLER - Owner: Member 8 (Household Linking)
- * Requirements: 24, 25, 26, 27
+ * Requirements: 24, 25, 26, 27, 88 (benefit shown with the links)
  * Mounted at /api/household (see routes/household.routes.js). Conventions: see docs/TEAM_WORKFLOW.md
  */
 const mongoose = require('mongoose');
@@ -9,6 +9,7 @@ const User = require('../models/User');
 const { ROLES, USER_STATUS, HOUSEHOLD_RELATIONS } = require('../config/constants');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
+const { getEntitlements } = require('../services/membership/entitlements');
 
 const USER_PUBLIC_FIELDS = 'name username email phone address role lenderStatus';
 
@@ -66,10 +67,17 @@ exports.listLinks = asyncHandler(async (req, res) => {
     .populate('recipient', USER_PUBLIC_FIELDS)
     .sort({ createdAt: -1 });
 
+  // Req 88: the deposit discount this member gets right now and where it comes from.
+  const entitlements = await getEntitlements(userId);
+
   res.json({
     links,
     items: links,
     total: links.length,
+    benefit: {
+      discountPercent: entitlements.discountPercent,
+      source: entitlements.discountSource,
+    },
   });
 });
 

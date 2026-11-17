@@ -197,6 +197,9 @@ async function createReservations(attempt, deps, session) {
       payment: { method: attempt.method, stripePaymentIntentId: attempt.paymentReference },
     }], { session });
   }
+  if (deps.payment?.auditFreeCheckoutLines && attempt.lines.some((line) => line.amountMinor === 0)) {
+    await deps.payment.auditFreeCheckoutLines({ ...paymentInput(attempt), method: attempt.method }, session);
+  }
   const matchedDraftLines = attempt.lines.filter((line) => line.entryId).map((line) => ({
     _id: line.entryId, item: line.item, startDate: line.startDate, endDate: line.endDate,
   }));
@@ -357,7 +360,11 @@ async function stopAttempt(record, status, failure, session) {
 
 async function refundFailed(record, deps) {
   const refund = requireFeature(deps.payment, 'refundFailedCheckout', 'Checkout refund processing');
-  await refund({ ...paymentInput(record), paymentReference: record.paymentReference });
+  const compensation = await refund({ ...paymentInput(record), paymentReference: record.paymentReference });
+  if (compensation?.state === 'pending') {
+    await CheckoutAttempt.updateOne({ _id: record._id, status: 'refund_due' }, { $set: { updatedAt: new Date() } });
+    return result(await CheckoutAttempt.findById(record._id));
+  }
   await CheckoutAttempt.updateOne({ _id: record._id, status: 'refund_due' }, { $set: { status: 'failed' } });
   return result(await CheckoutAttempt.findById(record._id));
 }

@@ -1,7 +1,7 @@
 // DAMAGE REPORTS - Owner: Member 3 (Sprint 2) - Requirements: 61, 63
 // Routes (declared in src/routes/sprint2/member3.routes.jsx):
 //   /damage-reports                         member  - my damage reports (as lender or borrower)
-//   /damage-reports/new?reservation=:id     lender  - report a returned item as damaged (Req 61)
+//   /damage-reports/new?reservation=:id     lender  - return an active reservation as damaged (Req 61)
 //   /damage-reports/:id                     member  - view a case; the borrower can dispute the decision (Req 63)
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -51,14 +51,15 @@ function NewReport({ reservationId }) {
     <form className="card" onSubmit={submit} noValidate>
       <div className="card-body">
         <p className="muted">
-          Report damage within 48 hours of the return. The deposit stays held until an admin decides how much of it,
-          if any, is kept. Upload return photos on the reservation page first so the admin can compare them with pickup.
+          Use this instead of &quot;Returned in good condition&quot; when the item comes back damaged. It records the return and
+          keeps the deposit held until an admin decides how much of it, if any, is kept. Upload return photos on the
+          reservation page first: once you report, the photos are locked as evidence.
         </p>
         <FormField label="What is damaged?" error={errors.description} hint={`${description.length}/2000`}>
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} maxLength={2000} />
         </FormField>
         <Alert variant="error">{error}</Alert>
-        <button type="submit" className="btn" disabled={saving}>{saving ? 'Reporting...' : 'Report damage'}</button>
+        <button type="submit" className="btn" disabled={saving}>{saving ? 'Reporting...' : 'Return as damaged'}</button>
       </div>
     </form>
   );

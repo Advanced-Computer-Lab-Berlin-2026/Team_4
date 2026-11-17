@@ -54,7 +54,7 @@ Conventions are the same as Sprint 1 ([`docs/API_CONTRACT.md`](../API_CONTRACT.m
 
 | Method | Path | Handler | Access | Req | Description |
 |---|---|---|---|---|---|
-| POST | `/api/damage-reports` | `createReport` | lender (participant) | 61 | Open a report for a returned reservation |
+| POST | `/api/damage-reports` | `createReport` | lender (participant) | 61 | Return an active reservation as damaged and open its report |
 | GET | `/api/damage-reports/mine` | `listMyReports` | member | 61, 63 | Reports where I am the reporting lender or the borrower |
 | GET | `/api/damage-reports` | `listReports` | admin | 62, 64 | Work queue, filter `?status=open\|decided\|disputed\|resolved`, paginated |
 | GET | `/api/damage-reports/:id` | `getReport` | participant or admin | 62, 63, 64, 80 | One report with reservation summary and before/after photo metadata |
@@ -64,17 +64,18 @@ Conventions are the same as Sprint 1 ([`docs/API_CONTRACT.md`](../API_CONTRACT.m
 
 **POST `/api/damage-reports`**
 - **Request:** `{ reservationId, description }`. `description` must be 10–2000 characters.
+- **How it works:** reporting damage *is* the return. The endpoint calls Member 1's `returnDamaged` command, which records the return (`returnedAt`, `completedAt`, `returnCondition: 'damaged'`), applies any late fee, refreshes both parties' trust and emits the completion event, while keeping the deposit held. The open report is inserted in the command's `beforeCommit` callback, in the same transaction, so a return can't be recorded as damaged without its case (docs/SPRINT2_CONTRACT.md, "Member 3 and Member 5 lifecycle").
 - **Rules (all checked on the server):**
   - The caller is the reservation's lender and a verified lender.
-  - The reservation has been returned (`returnedAt` is set).
-  - The report is filed within **48 h** of `returnedAt` **(proposed)**.
-  - The deposit is still `held`, meaning good condition wasn't already marked.
-  - No report exists yet for this reservation.
-- **Response `201`:** `{ report }`.
+  - The reservation is `active` (picked up, not yet returned). A reservation that already had a good return is completed and can't be reported.
+  - The deposit is still `held`.
+- **Response:** `201 { report }` when created. A retry after success returns `200 { report }` with the existing case.
 - **Errors:**
-  - `403` if the caller isn't the lender.
-  - `409` if a report already exists, the deposit was already released, or the window has closed.
+  - `403` if the caller isn't a verified lender; `404` if they aren't a participant.
+  - `409` if the reservation isn't active or was already completed with a good return.
+  - `503` for an overdue return until Member 2's late-fee service exists. Nothing changes in that case.
   - `400` for an invalid body.
+- Upload the return photos (§3) **before** reporting: once the report exists, the evidence is locked.
 
 **PATCH `/api/damage-reports/:id/decision`**
 - **Request:** `{ forfeitAmount, note }`.
@@ -132,7 +133,7 @@ Conventions are the same as Sprint 1 ([`docs/API_CONTRACT.md`](../API_CONTRACT.m
 Photos are evidence, so they are handled like the Sprint 1 lender documents:
 - **Private storage:** stored under `server/uploads/private/condition-photos/` and never served statically.
 - **Access:** streamed only to the reservation's participants and admins.
-- **Metadata:** stored on the reservation (`conditionPhotos.pickup[]` / `conditionPhotos.return[]`). That needs Member 1's schema change in [§8](#8-requests-to-other-members).
+- **Metadata:** stored on the reservation (`conditionPhotos.pickup[]` / `conditionPhotos.return[]`) as `{ _id, path, takenAt, uploadedBy, originalName, mimeType, size }`. Upload uses Member 1's `uploadConditionPhotos` preset; Member 3 owns the per-stage cap, stage checks, locking, streaming and removing orphaned files if a save fails.
 
 **Rules (proposed):**
 - **Files:** JPG/JPEG/PNG only, max **5 MB** each, up to **5** per upload and **10** per stage.
@@ -207,7 +208,7 @@ The trust score is **recalculated from the full history every time** instead of 
 |---|---|
 | `C` | Reservations with status `completed` where U was the borrower or the lender |
 | `R` | Completed reservations where U was the borrower (returns U was responsible for) |
-| `T` | Of `R`, returns where `returnedAt` is on or before `endDate` (Member 1's date rules) |
+| `T` | Of `R`, returns at or before the deadline, `endDate` at 00:00 UTC (Member 1's `returnTiming.isLateReturn`) |
 | `D` | Damage reports against U as borrower whose final amount is > 0 (`resolution.finalForfeitAmount`, else `decision.forfeitAmount`). Open reports don't count until they're decided. |
 | `avg`, `n` | Average rating and number of reviews U has received |
 
@@ -279,7 +280,7 @@ The past reviews for Req 91 come from `GET /api/reviews/user/:userId`. It needs 
 |---|---|---|
 | `recalculateTrust(userId, { eventKey?, session? })` — `services/reviews/trust.js` | Members 1, 5 | Recalculates from history and saves `trustScore` + `stats`. Safe to call repeatedly. Returns `{ trustScore, stats }`. `eventKey` is only logged. |
 | `getTrustSummary(userId)` — `services/reviews/trust.js` | Member 6 (optional), Member 7 | Returns the `profile` object from §5.3 without HTTP |
-| `hasOpenDamageCase(reservationId, { session? })` — `services/damage/damage.js` | Member 5 (Req 60) | `true` while a report is `open`. Member 5 must refuse "returned in good condition" when it's `true`. |
+| `hasOpenDamageCase(reservationId, { session? })` — `services/damage/damage.js` | Member 5 (Req 60) | `true` while a report is `open`. For the UI: Member 1's `return` command already refuses a good return once a case exists. |
 | `getEvidence(reservationId, actor)` — `services/damage/conditionPhotos.js` | Member 5 | Photo metadata after the participant/admin check; throws `403` otherwise |
 
 ### 6.2 React components other members embed
@@ -321,7 +322,7 @@ None of these values are in the requirement sheet. They are the proposals used a
 | # | Decision | Proposal |
 |---|---|---|
 | D1 | Trust formula weights | §5.1: 50% on-time, 35% damage-free, 15% rating; confidence `C/(C+5)` |
-| D2 | Damage report window | 48 h after `returnedAt`, and only while the deposit is still `held` |
+| D2 | When damage is reported | At return time, through Member 1's `returnDamaged` (agreed with Member 1) |
 | D3 | Dispute window | 7 days after the decision; one dispute per report |
 | D4 | Dispute outcome range | Final amount between 0 and the original decision; only the difference is refunded |
 | D5 | Review window | 14 days after completion; no editing or deleting |
@@ -335,15 +336,10 @@ None of these values are in the requirement sheet. They are the proposals used a
 
 | To | Request | Needed for |
 |---|---|---|
-| **Member 1** | `Reservation.conditionPhotos.{pickup,return}[]`: give each photo an `_id` and add `uploadedBy`, `originalName`, `mimeType`, `size` (keep `path`, `takenAt`; drop the public `url`) | Req 79, 80 |
-| **Member 1** | A `completedAt` timestamp on `Reservation` (review window and trust); and the "on time" rule for comparing `returnedAt` with `endDate` (timezone, whether `endDate` is inclusive) | Req 89, 90, 98 |
-| **Member 1** | `uploadConditionPhotos` preset in `middleware/upload.js`: field `photos`, JPG/PNG, at most 5 files, `MAX_UPLOAD_MB`, saved to `private/condition-photos` | Req 79 |
-| **Member 1** | Approval for Member 3's trust service to update only `User.trustScore` and `User.stats.*` | Req 98 |
-| **Member 1** | Test runner choice for `server/test/sprint2/member3.test.js`; seed data with completed reservations (one late, one with damage) | Testing |
-| **Member 1** | Completion/return events (or a direct call to `recalculateTrust`) for both parties | Req 98 |
+| **Member 1** | ✅ Done (PR #19 and follow-up): photo metadata and `uploadConditionPhotos`, `completedAt`, the UTC deadline rule, `returnDamaged` with `beforeCommit`, trust recalculation on every return, `node:test` and seed data | Req 61, 79, 80, 89, 90, 98 |
 | **Member 2** | `settleForfeiture({ reservationId, amountMinor, idempotencyKey })` keeps at most the held deposit and releases the rest; `refundToWallet({ userId, amountMinor, reference, idempotencyKey })` for dispute differences | Req 62, 64 |
 | **Member 4** | Link damage-report rows to `/admin/damage-reports/:id`; read `DamageReport` read-only | Req 96 |
-| **Member 5** | Call `hasOpenDamageCase()` before Req 60's good-condition release; embed `ConditionPhotoPanel` and `ReviewForm` on reservation details | Req 60, 79, 89, 90 |
+| **Member 5** | For a damaged return, link the lender to `/damage-reports/new?reservation=:id` while the reservation is active (Member 1's `return` already refuses good returns once a case exists; `hasOpenDamageCase()` is there for the UI). Embed `ConditionPhotoPanel` and `ReviewForm` on reservation details | Req 60, 61, 79, 89, 90 |
 | **Member 7** | Embed `<TrustSummary userId={item.owner._id} compact />` on `ItemDetailsPage` | Req 91 |
 | **Member 9** | Deliver the five events in §6.4 | Notifications |
 

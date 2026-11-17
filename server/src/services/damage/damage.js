@@ -11,13 +11,13 @@
 const mongoose = require('mongoose');
 const ApiError = require('../../utils/ApiError');
 const DamageReport = require('../../models/DamageReport');
-const Reservation = require('../../models/Reservation');
 const { ROLES } = require('../../config/constants');
+const reservationCommands = require('../reservations/reservationCommands');
 const settlement = require('./settlement');
 const { recalculateTrust } = require('../reviews/trust');
 
-/** Decisions D2-D4 in the contract. */
-const DAMAGE_CONFIG = Object.freeze({ reportWindowHours: 48, disputeWindowDays: 7 });
+/** Decisions D3-D4 in the contract. (D2: damage is reported at return time through Member 1's returnDamaged.) */
+const DAMAGE_CONFIG = Object.freeze({ disputeWindowDays: 7 });
 const HOUR_MS = 60 * 60 * 1000;
 const PERSON = 'username name';
 
@@ -86,34 +86,32 @@ async function explainConflict(id, expected) {
   return ApiError.conflict(`This damage report is ${current.status}, not ${expected}`);
 }
 
-/** Req 61 - the lender opens a report for a returned reservation whose deposit is still held. */
+/**
+ * Req 61 - the lender returns the item as damaged and opens the report in one transaction.
+ * Member 1's `returnDamaged` command records the return (returnedAt, completedAt, late fee, trust, events) and keeps
+ * the deposit held; we insert the open report in its beforeCommit callback, so neither can happen without the other.
+ * A retry after success returns the existing report. Returns { report, created }.
+ */
 async function createReport(actor, { reservationId, description }) {
-  const reservation = await Reservation.findById(reservationId).select('item borrower lender status returnedAt deposit').lean();
-  if (!reservation) throw ApiError.notFound('Reservation not found');
-  if (!sameId(reservation.lender, actor._id)) throw ApiError.forbidden('Only the lender of this reservation can report damage');
-  if (!reservation.returnedAt || !['active', 'completed'].includes(reservation.status)) {
-    throw ApiError.conflict('You can report damage only after the item has been returned');
-  }
-  if (Date.now() > new Date(reservation.returnedAt).getTime() + DAMAGE_CONFIG.reportWindowHours * HOUR_MS) {
-    throw ApiError.conflict(`Damage must be reported within ${DAMAGE_CONFIG.reportWindowHours} hours of the return`);
-  }
-  if (reservation.deposit?.status !== 'held') {
-    throw ApiError.conflict('The deposit for this reservation is no longer held, so damage can no longer be reported');
-  }
-  try {
-    const report = await DamageReport.create({
-      reservation: reservation._id,
-      item: reservation.item,
-      reportedBy: actor._id,
-      borrower: reservation.borrower,
-      description,
-    });
-    // TODO(M9): enqueueEvent('damage.reported', report._id, [borrower, admins], …, `damage:${report._id}:reported`)
-    return loadDto(report._id, { withPhotos: true });
-  } catch (err) {
-    if (err.code === 11000) throw ApiError.conflict('A damage report already exists for this reservation');
-    throw err;
-  }
+  let createdId = null;
+  await reservationCommands.transition({
+    actorId: actor._id,
+    reservationId,
+    action: 'returnDamaged',
+    beforeCommit: async (reservation, session) => {
+      const [report] = await DamageReport.create(
+        [{ reservation: reservation._id, item: reservation.item, reportedBy: actor._id, borrower: reservation.borrower, description }],
+        { session }
+      );
+      createdId = report._id;
+    },
+  });
+  // TODO(M9): enqueueEvent('damage.reported', id, [borrower, admins], …, `damage:${id}:reported`) once the outbox exists.
+  if (createdId) return { report: await loadDto(createdId, { withPhotos: true }), created: true };
+
+  const existing = await DamageReport.findOne({ reservation: reservationId }).select('_id reportedBy').lean();
+  if (!existing || !sameId(existing.reportedBy, actor._id)) throw ApiError.conflict('This reservation is already completed');
+  return { report: await loadDto(existing._id, { withPhotos: true }), created: false };
 }
 
 /** Reports where the user is the reporting lender or the borrower. role: 'lender' | 'borrower' | undefined (both). */

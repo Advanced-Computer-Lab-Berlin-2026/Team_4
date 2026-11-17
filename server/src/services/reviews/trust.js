@@ -14,6 +14,7 @@ const Reservation = require('../../models/Reservation');
 const DamageReport = require('../../models/DamageReport');
 const Review = require('../../models/Review');
 const { TRUST_SCORE_DEFAULT, LENDER_STATUS, ROLES } = require('../../config/constants');
+const { isLateReturn } = require('../reservations/returnTiming');
 
 /** Proposed weights - decision D1 in the contract. Change here only. */
 const TRUST_CONFIG = Object.freeze({
@@ -46,14 +47,12 @@ function computeTrust({ completed = 0, returns = 0, onTimeReturns = 0, upheldDam
 }
 
 /**
- * On time = returned no later than the end of the due date's day (UTC).
- * TODO(M1): switch to Member 1's shared date rule once SPRINT2_CONTRACT fixes timezone/inclusivity.
+ * On time = returned at or before the deadline, endDate at 00:00 UTC (docs/SPRINT2_CONTRACT.md).
+ * Uses Member 1's shared rule so trust and late fees always agree.
  */
 function isOnTime({ returnedAt, endDate }) {
   if (!returnedAt || !endDate) return false;
-  const due = new Date(endDate);
-  due.setUTCHours(23, 59, 59, 999);
-  return new Date(returnedAt) <= due;
+  return !isLateReturn(returnedAt, endDate);
 }
 
 /** Final forfeit amount of a decided/resolved damage report (the resolution replaces the decision). */

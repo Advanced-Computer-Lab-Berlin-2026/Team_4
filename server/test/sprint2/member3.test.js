@@ -65,14 +65,15 @@ describe('trust formula (Req 98)', () => {
   });
 });
 
-describe('on-time rule', () => {
+describe('on-time rule (Member 1: deadline is endDate at 00:00 UTC)', () => {
   const endDate = new Date('2026-12-10T00:00:00Z');
-  test('returning any time on the due date counts as on time', () => {
+  test('returning before or exactly at the deadline is on time', () => {
     assert.equal(isOnTime({ endDate, returnedAt: new Date('2026-12-09T10:00:00Z') }), true);
-    assert.equal(isOnTime({ endDate, returnedAt: new Date('2026-12-10T23:59:00Z') }), true);
+    assert.equal(isOnTime({ endDate, returnedAt: endDate }), true);
   });
-  test('returning after the due date is late', () => {
-    assert.equal(isOnTime({ endDate, returnedAt: new Date('2026-12-11T00:00:01Z') }), false);
+  test('returning after the deadline is late, even later the same day', () => {
+    assert.equal(isOnTime({ endDate, returnedAt: new Date('2026-12-10T00:00:01Z') }), false);
+    assert.equal(isOnTime({ endDate, returnedAt: new Date('2026-12-10T23:59:00Z') }), false);
   });
   test('a reservation without a return date is not on time', () => {
     assert.equal(isOnTime({ endDate }), false);
@@ -441,35 +442,49 @@ describe('damage reports API (Req 61, 62, 63, 64, 80)', { skip: !process.env.TES
   const dispute = (user, id, reason = 'The crack was there at pickup, see my photo.') => call(`/damage-reports/${id}/dispute`, { user, method: 'POST', body: { reason } });
   const resolve = (user, id, finalForfeitAmount, note = 'Partly pre-existing') => call(`/damage-reports/${id}/resolution`, { user, method: 'PATCH', body: { finalForfeitAmount, note } });
 
+  // Reservation dates are UTC midnights (Member 1's engine). Active reservations are due in 3 days, so returns are on time.
+  const utcDay = (offset) => { const d = new Date(); d.setUTCHours(0, 0, 0, 0); return new Date(+d + offset * 24 * 60 * 60 * 1000); };
+  // Each reservation uses its own item: Member 1's engine allows one booking per item per interval.
+  const mkActive = async (fields = {}) => {
+    const own = await Item.create({ owner: lender._id, title: 'Angle grinder', category: item.category, description: 'For tests', depositAmount: 400 });
+    return Reservation.create({
+      item: own._id, borrower: borrower._id, lender: lender._id, startDate: utcDay(-2), endDate: utcDay(3),
+      status: 'active', pickedUpAt: hoursAgo(40), deposit: { amount: 400, status: 'held' }, ...fields,
+    });
+  };
+
   before(async () => {
     await mongoose.connect(process.env.TEST_MONGO_URI, { dbName: `member3_damage_${process.pid}` });
-    await Promise.all(Object.values(require('../../src/models')).map((m) => m.init()));
-    server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
-    base = `http://127.0.0.1:${server.address().port}`;
-    admin = await mkUser('dm_admin', { role: 'admin' });
-    admin2 = await mkUser('dm_admin2', { role: 'admin' });
-    lender = await mkUser('dm_lender', { lenderStatus: 'verified' });
-    otherLender = await mkUser('dm_other_lender', { lenderStatus: 'verified' });
-    borrower = await mkUser('dm_borrower');
-    outsider = await mkUser('dm_outsider');
-    const category = await Category.create({ name: 'Damage tools', slug: 'damage-tools' });
-    item = await Item.create({ owner: lender._id, title: 'Angle grinder', category: category._id, description: 'For tests', depositAmount: 400 });
-    const mk = (fields) => Reservation.create({
-      item: item._id, borrower: borrower._id, lender: lender._id, startDate: hoursAgo(200), endDate: hoursAgo(10),
-      status: 'completed', returnedAt: hoursAgo(5), deposit: { amount: 400, status: 'held' }, ...fields,
-    });
-    res.main = await mk({ conditionPhotos: { pickup: [{ url: '/x', path: 'private/condition-photos/secret.jpg', takenAt: hoursAgo(200) }], return: [] } });
-    res.zero = await mk({});
-    res.noPayments = await mk({});
-    res.race = await mk({});
-    res.oldDecision = await mk({});
-    res.notReturned = await mk({ status: 'active', returnedAt: null });
-    res.tooLate = await mk({ returnedAt: hoursAgo(72) });
-    res.released = await mk({ deposit: { amount: 400, status: 'released' } });
+    try {
+      await Promise.all(Object.values(require('../../src/models')).map((m) => m.init()));
+      server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
+      base = `http://127.0.0.1:${server.address().port}`;
+      admin = await mkUser('dm_admin', { role: 'admin' });
+      admin2 = await mkUser('dm_admin2', { role: 'admin' });
+      lender = await mkUser('dm_lender', { lenderStatus: 'verified' });
+      otherLender = await mkUser('dm_other_lender', { lenderStatus: 'verified' });
+      borrower = await mkUser('dm_borrower');
+      outsider = await mkUser('dm_outsider');
+      const category = await Category.create({ name: 'Damage tools', slug: 'damage-tools' });
+      item = await Item.create({ owner: lender._id, title: 'Angle grinder', category: category._id, description: 'For tests', depositAmount: 400 });
+      const photo = { path: 'private/condition-photos/secret.jpg', takenAt: hoursAgo(40), uploadedBy: lender._id, originalName: 'pickup-front.jpg', mimeType: 'image/jpeg', size: 2048 };
+      res.main = await mkActive({ conditionPhotos: { pickup: [photo], return: [] } });
+      res.zero = await mkActive();
+      res.noPayments = await mkActive();
+      res.race = await mkActive();
+      res.oldDecision = await mkActive();
+      res.overdue = await mkActive({ startDate: utcDay(-6), endDate: utcDay(-1) }); // late return needs Member 2's late fee
+      res.pending = await mkActive({ status: 'pending', pickedUpAt: null, startDate: utcDay(1), endDate: utcDay(4) });
+      res.goodReturn = await mkActive({ status: 'completed', returnedAt: hoursAgo(2), completedAt: hoursAgo(2), returnCondition: 'good', deposit: { amount: 400, status: 'released' } });
+    } catch (err) {
+      await mongoose.disconnect(); // otherwise the open connection keeps the test process alive
+      throw err;
+    }
   });
 
   after(async () => {
     settlement.setSettlementProvider(null);
+    if (mongoose.connection.readyState !== 1) return;
     try {
       if (server) await new Promise((resolve) => server.close(resolve));
       for (const c of await mongoose.connection.db.collections()) {
@@ -494,25 +509,34 @@ describe('damage reports API (Req 61, 62, 63, 64, 80)', { skip: !process.env.TES
     settlement.setSettlementProvider(fakePayments); // the rest of the suite uses the fake
   });
 
-  test('only the verified lender of a returned reservation can report (Req 61)', async () => {
+  test('only the verified lender of the reservation can report (Req 61)', async () => {
     assert.equal((await report(null, res.main)).status, 401);
     assert.equal((await report(borrower, res.main)).status, 403); // not a verified lender
     assert.equal((await report(admin, res.main)).status, 403);
-    const other = await report(otherLender, res.main);
-    assert.equal(other.status, 403);
-    assert.match(other.data.message, /Only the lender/);
+    assert.equal((await report(otherLender, res.main)).status, 404); // not a participant: the reservation stays hidden
+    assert.equal((await Reservation.findById(res.main._id).lean()).status, 'active');
   });
 
-  test('validates the report and enforces return, 48-hour window and held deposit', async () => {
+  test('validates the report and only allows it as the return of an active reservation', async () => {
     assert.equal((await report(lender, res.main, 'short')).status, 400);
     assert.equal((await call('/damage-reports', { user: lender, method: 'POST', body: { reservationId: 'x', description: 'Long enough description' } })).status, 400);
     assert.equal((await report(lender, { _id: new mongoose.Types.ObjectId() })).status, 404);
-    assert.match((await report(lender, res.notReturned)).data.message, /after the item has been returned/);
-    assert.match((await report(lender, res.tooLate)).data.message, /within 48 hours/);
-    assert.match((await report(lender, res.released)).data.message, /no longer held/);
+    assert.match((await report(lender, res.pending)).data.message, /Invalid reservation status/);
+    assert.match((await report(lender, res.goodReturn)).data.message, /already completed/);
+    assert.equal(await DamageReport.countDocuments(), 1); // only noPayments' report from the first test
   });
 
-  test('lender opens a report; one per reservation; Member 5 sees the open case', async () => {
+  test('an overdue damaged return fails visibly until Member 2 provides late fees, and changes nothing', async () => {
+    const r = await report(lender, res.overdue);
+    assert.equal(r.status, 503);
+    assert.match(r.data.message, /Late fee processing is unavailable/);
+    const saved = await Reservation.findById(res.overdue._id).lean();
+    assert.equal(saved.status, 'active');
+    assert.equal(saved.returnedAt, undefined);
+    assert.equal(await DamageReport.countDocuments({ reservation: res.overdue._id }), 0);
+  });
+
+  test('reporting records the damaged return and opens the case together; a retry returns the same case', async () => {
     assert.equal(await damage.hasOpenDamageCase(res.main._id), false);
     const { status, data } = await report(lender, res.main);
     assert.equal(status, 201);
@@ -522,8 +546,19 @@ describe('damage reports API (Req 61, 62, 63, 64, 80)', { skip: !process.env.TES
     assert.equal(data.report.reportedBy.username, 'dm_lender');
     assert.equal(data.report.borrower.username, 'dm_borrower');
     assert.deepEqual(data.report.reservation.deposit, { amount: 400, status: 'held' });
-    assert.equal((await report(lender, res.main)).status, 409);
+    assert.ok(data.report.reservation.returnedAt);
+    const saved = await Reservation.findById(res.main._id).lean();
+    assert.equal(saved.status, 'completed');
+    assert.equal(saved.returnCondition, 'damaged');
+    assert.ok(saved.completedAt);
+    const retry = await report(lender, res.main, 'Retried after a network error.');
+    assert.equal(retry.status, 200);
+    assert.equal(retry.data.report._id, reports.main);
+    assert.equal(await DamageReport.countDocuments({ reservation: res.main._id }), 1);
     assert.equal(await damage.hasOpenDamageCase(res.main._id), true);
+    // Member 1's engine refreshed trust for both parties when the return was recorded:
+    // completed = noPayments + main (both damaged returns) + goodReturn.
+    assert.equal((await User.findById(borrower._id).lean()).stats.completedReservations, 3);
   });
 
   test('participants and admins can view a report with photo metadata, never stored paths (Req 80)', async () => {
@@ -649,7 +684,7 @@ describe('damage reports API (Req 61, 62, 63, 64, 80)', { skip: !process.env.TES
 
     // Upheld so far: main (100), race (>0), old (50). Overturn a fresh one to 0 and check the count drops back.
     const before = (await User.findById(borrower._id).lean()).stats.damageReports;
-    const extra = await Reservation.create({ item: item._id, borrower: borrower._id, lender: lender._id, startDate: hoursAgo(100), endDate: hoursAgo(10), status: 'completed', returnedAt: hoursAgo(1), deposit: { amount: 400, status: 'held' } });
+    const extra = await mkActive();
     const id = (await report(lender, extra)).data.report._id;
     await decide(admin, id, 80);
     assert.equal((await User.findById(borrower._id).lean()).stats.damageReports, before + 1);

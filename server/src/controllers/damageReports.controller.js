@@ -8,12 +8,13 @@ const { parsePagination, paginated } = require('../utils/pagination');
 const damage = require('../services/damage/damage');
 
 /**
- * POST /api/damage-reports - Req 61 - verified lender (of that reservation)
- * Body: { reservationId, description }
+ * POST /api/damage-reports - Req 61 - verified lender (of that active reservation)
+ * Body: { reservationId, description }. Records the damaged return and opens the case together.
+ * 201 when created; 200 with the existing report when a successful request is retried.
  */
 exports.createReport = asyncHandler(async (req, res) => {
-  const report = await damage.createReport(req.user, { reservationId: req.body.reservationId, description: req.body.description });
-  res.status(201).json({ report });
+  const { report, created } = await damage.createReport(req.user, { reservationId: req.body.reservationId, description: req.body.description });
+  res.status(created ? 201 : 200).json({ report });
 });
 
 /**

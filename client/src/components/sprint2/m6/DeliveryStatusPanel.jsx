@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getErrorMessage } from '../../../api/axios';
+import { formatEGP } from './FulfilmentSelector';
 import { getDeliveryStatus, listDeliveries, setDeliveryStatus } from '../../../api/delivery.api';
 import styles from '../../../styles/sprint2/member6.module.css';
 
@@ -58,6 +59,7 @@ function DeliveryStatus({ reservationId, onChange }) {
       {reservation?.method === 'delivery' && (
         <>
           <p role="status">Current status · {labelFor(reservation.deliveryStatus)}</p>
+          <p>Delivery fee {formatEGP(reservation.deliveryFee ?? 0)}</p>
           {reservation.deliveryAddress && <p><strong>Delivery address</strong> {reservation.deliveryAddress}</p>}
           <ol className={styles.statusList}>
             {steps.map(([id, label], index) => <li key={id} aria-current={index === step ? 'step' : undefined}>{label}</li>)}

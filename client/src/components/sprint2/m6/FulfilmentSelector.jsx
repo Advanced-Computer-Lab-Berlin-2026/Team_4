@@ -13,7 +13,7 @@ export function formatDeliveryAddress(address) {
     .filter(Boolean).join(', ');
 }
 
-export default function FulfilmentSelector({ itemIds = [], value, onChange, savedAddress, disabled = false }) {
+export default function FulfilmentSelector({ itemIds = [], value, onChange, savedAddress, label, disabled = false }) {
   const id = useId();
   const address = formatDeliveryAddress(savedAddress);
   const [customAddress, setCustomAddress] = useState(() => !!value?.deliveryAddress && value.deliveryAddress !== address);
@@ -49,7 +49,7 @@ export default function FulfilmentSelector({ itemIds = [], value, onChange, save
 
   return (
     <fieldset className={`${styles.fieldset} ${styles.stack}`} disabled={disabled}>
-      <legend>Pickup or delivery</legend>
+      <legend>{label ? label + ' · Pickup or delivery' : 'Pickup or delivery'}</legend>
       <label className={styles.choice}>
         <input type="radio" name={`${id}-method`} checked={method === 'pickup'} onChange={() => changeMethod('pickup')} />
         Self-pickup

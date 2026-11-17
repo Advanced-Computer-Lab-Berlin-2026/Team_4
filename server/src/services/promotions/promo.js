@@ -35,6 +35,18 @@ async function findCheckoutPromo(code, { borrowerId, session } = {}) {
   return promotion;
 }
 
+async function assertCheckoutPromoCapacity({ promoCodeId, borrowerId, count }, session) {
+  const promotion = await PromoCode.findById(promoCodeId).session(session || null);
+  assertAvailable(promotion, new Date());
+  await assertMemberEligible(promotion, borrowerId, session);
+  if (promotion.onePerMember && count > 1) {
+    throw ApiError.conflict('This code can discount only one reservation per member');
+  }
+  if (promotion.maxRedemptions != null && (promotion.redemptionCount ?? 0) + count > promotion.maxRedemptions) {
+    throw ApiError.conflict('This code has too few redemptions left for this checkout');
+  }
+}
+
 async function redeemCheckoutPromo({ promoCodeId, reservationId, borrowerId }, session) {
   if (!session?.inTransaction()) throw new Error('Promo redemption requires the checkout transaction');
 
@@ -59,4 +71,4 @@ async function redeemCheckoutPromo({ promoCodeId, reservationId, borrowerId }, s
   return redemption;
 }
 
-module.exports = { findCheckoutPromo, normalizeCode, redeemCheckoutPromo };
+module.exports = { assertCheckoutPromoCapacity, findCheckoutPromo, normalizeCode, redeemCheckoutPromo };

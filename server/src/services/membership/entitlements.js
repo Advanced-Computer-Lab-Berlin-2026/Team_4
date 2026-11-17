@@ -63,11 +63,11 @@ async function resolveOwnTier(membership, at, session) {
   return MembershipTier.findOne({ name: BASE_TIER_NAME }).session(session || null).lean();
 }
 
-/**
- * Strongest deposit discount offered by a directly linked, accepted household member.
- * Pending, declined and removed links never match. Links are not followed transitively.
- */
-async function bestHouseholdDiscount(userId, at, session) {
+const priorityOf = (tier) => Number.isInteger(tier?.waitlistPriority) && tier.waitlistPriority > 0
+  ? tier.waitlistPriority : DEFAULT_WAITLIST_PRIORITY;
+
+/** Deposit and waitlist benefits from directly linked, accepted household members. */
+async function bestHouseholdBenefits(userId, at, session) {
   const links = await HouseholdLink.find({
     status: 'accepted', $or: [{ requester: userId }, { recipient: userId }],
   }).select('requester recipient').session(session || null).lean();
@@ -90,15 +90,17 @@ async function bestHouseholdDiscount(userId, at, session) {
     .session(session || null).lean();
   const tierById = new Map(tiers.map((tier) => [String(tier._id), tier]));
 
-  let best = null;
+  let discount = null;
+  let waitlistPriority = Infinity;
   for (const partner of partners) {
     const tier = tierById.get(String(partner.membership.tier));
     const discountPercent = discountOf(tier);
-    if (discountPercent > 0 && (!best || discountPercent > best.discountPercent)) {
-      best = { discountPercent, userId: String(partner._id), name: partner.name, tierName: tier.name };
+    if (tier) waitlistPriority = Math.min(waitlistPriority, priorityOf(tier));
+    if (discountPercent > 0 && (!discount || discountPercent > discount.discountPercent)) {
+      discount = { discountPercent, userId: String(partner._id), name: partner.name, tierName: tier.name };
     }
   }
-  return best;
+  return { discount, waitlistPriority };
 }
 
 /**
@@ -121,7 +123,8 @@ async function getEntitlements(userId, at, session) {
 
   const tier = await resolveOwnTier(membership, when, session);
   const ownDiscount = discountOf(tier);
-  const household = user ? await bestHouseholdDiscount(user._id, when, session) : null;
+  const benefits = user ? await bestHouseholdBenefits(user._id, when, session) : null;
+  const household = benefits?.discount;
 
   // Strongest single discount applies; discounts never stack. A tie stays with the member's own tier.
   let discountPercent = ownDiscount;
@@ -139,8 +142,8 @@ async function getEntitlements(userId, at, session) {
     expiresAt: paid ? membership.renewsAt : null,
     discountPercent,
     discountSource,
-    // Priority and limit always come from the member's own tier; they are never inherited.
-    waitlistPriority: Number.isFinite(tier?.waitlistPriority) ? tier.waitlistPriority : DEFAULT_WAITLIST_PRIORITY,
+    waitlistPriority: Math.min(priorityOf(tier), benefits?.waitlistPriority ?? Infinity),
+    // The reservation limit belongs to the member's own tier.
     maxConcurrentReservations: limitOf(tier),
     countedStatuses: [...COUNTED_RESERVATION_STATUSES],
   };

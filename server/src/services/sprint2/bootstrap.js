@@ -56,8 +56,13 @@ function stripeWebhook(req, res, next) {
   const checkout = require('../reservations/checkout');
   const verify = requireFeature(features().payment, 'verifyCheckoutWebhook', 'Stripe webhook integration');
   Promise.resolve().then(async () => {
-    const attemptId = await verify(req.body, req.get('Stripe-Signature'));
-    if (attemptId) await checkout.reconcileCard(attemptId);
+    const target = await verify(req.body, req.get('Stripe-Signature'));
+    if (typeof target === 'string') await checkout.reconcileCard(target);
+    if (target?.membershipOperationId) {
+      const membership = optionalFeature('membership/membership');
+      const reconcile = requireFeature(membership, 'reconcileCardMembership', 'Membership payment');
+      await reconcile(target);
+    }
     res.sendStatus(204);
   }).catch(next);
 }

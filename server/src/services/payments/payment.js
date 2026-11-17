@@ -153,6 +153,6 @@ module.exports = {
 
 // Req 51 - card payments (card.js). Member 1's checkout offers "Card" only when these functions exist, so they are
 // exported ONLY while Stripe is configured with a TEST key (stripe.js). Without a key: no card option, nothing breaks.
-for (const name of ['startCardPayment', 'getCardPayment', 'recordCardCheckout', 'verifyCheckoutWebhook', 'refundFailedCheckout']) {
+for (const name of ['startCardPayment', 'getCardPayment', 'getMembershipCardAttempt', 'recordCardCheckout', 'verifyCheckoutWebhook', 'refundFailedCheckout']) {
   Object.defineProperty(module.exports, name, { enumerable: true, get: () => (stripe.isConfigured() ? card[name] : undefined) });
 }

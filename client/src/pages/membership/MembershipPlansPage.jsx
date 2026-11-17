@@ -9,25 +9,27 @@ import { formatDate, formatMoney } from '../../utils/format';
 import Spinner from '../../components/common/Spinner';
 import Alert from '../../components/common/Alert';
 import StatusBadge from '../../components/common/StatusBadge';
+import PaymentMethodPicker from '../../components/sprint2/m2/PaymentMethodPicker';
+import { useAuth } from '../../context/AuthContext';
 import styles from '../../styles/sprint2/member8.module.css';
 
 // A payment attempt keeps one operation key until it finishes, so a retry or a return from the
 // card provider can never be charged twice. It survives the redirect in sessionStorage.
 const ATTEMPT_KEY = 'shareshed.membership.attempt';
 
-function readAttempt() {
+function readAttempt(storageKey) {
   try {
-    const attempt = JSON.parse(sessionStorage.getItem(ATTEMPT_KEY) || 'null');
+    const attempt = JSON.parse(sessionStorage.getItem(storageKey) || 'null');
     return attempt?.tierId && attempt?.method && attempt?.operationKey ? attempt : null;
   } catch {
     return null;
   }
 }
 
-function writeAttempt(attempt) {
+function writeAttempt(storageKey, attempt) {
   try {
-    if (attempt) sessionStorage.setItem(ATTEMPT_KEY, JSON.stringify(attempt));
-    else sessionStorage.removeItem(ATTEMPT_KEY);
+    if (attempt) sessionStorage.setItem(storageKey, JSON.stringify(attempt));
+    else sessionStorage.removeItem(storageKey);
   } catch {
     // Storage can be blocked; the page still works for wallet payments.
   }
@@ -60,16 +62,23 @@ function discountText(entitlements) {
 }
 
 export default function MembershipPlansPage() {
+  const { user } = useAuth();
+  const accountId = user?._id || user?.id;
+  return <MembershipPlans key={accountId} storageKey={`${ATTEMPT_KEY}:${accountId}`} />;
+}
+
+function MembershipPlans({ storageKey }) {
   const mounted = useRef(true);
-  const resumed = useRef(false);
   const payRef = useRef(null);
   const [tiers, setTiers] = useState([]);
+  const [methods, setMethods] = useState([]);
   const [mine, setMine] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [choice, setChoice] = useState(null); // { tierId, method, operationKey }
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(false);
+  const [cardUrl, setCardUrl] = useState('');
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -79,6 +88,7 @@ export default function MembershipPlansPage() {
       const [tierData, mineData] = await Promise.all([listTiers(), getMyMembership()]);
       if (!mounted.current) return;
       setTiers(tierData.items || []);
+      setMethods(tierData.paymentMethods || []);
       setMine(mineData);
       setLoadError('');
     } catch (err) {
@@ -88,28 +98,29 @@ export default function MembershipPlansPage() {
     }
   }, []);
 
-  const pay = useCallback(async (selected) => {
+  const pay = useCallback(async (selected, { resume = false } = {}) => {
     const attempt = { tierId: selected.tierId, method: selected.method, operationKey: selected.operationKey };
     setBusy(true);
+    setCardUrl('');
     setError('');
     setSuccess('');
-    writeAttempt(attempt);
+    const saved = { ...attempt, awaitingCard: attempt.method === 'card' };
+    writeAttempt(storageKey, saved);
     try {
       const result = await subscribe(attempt);
       if (!mounted.current) return;
       if (result.payment) {
-        // Card payment in progress: only now is there something to finish after a redirect or reload.
-        writeAttempt({ ...attempt, awaitingCard: true });
-        // Continue on the provider's page, or wait for confirmation.
-        if (isWebUrl(result.payment.redirectUrl)) {
-          window.location.assign(result.payment.redirectUrl);
+        const url = isWebUrl(result.payment.redirectUrl) ? result.payment.redirectUrl : '';
+        if (url && !resume) {
+          window.location.assign(url);
           return;
         }
-        setChoice(attempt);
+        setChoice(saved);
+        setCardUrl(url);
         setPending(true);
         return;
       }
-      writeAttempt(null);
+      writeAttempt(storageKey, null);
       setChoice(null);
       setPending(false);
       setMine(result);
@@ -117,31 +128,31 @@ export default function MembershipPlansPage() {
     } catch (err) {
       if (!mounted.current) return;
       const status = err?.response?.status;
-      // A definite refusal ends the attempt. Outages and lost responses keep the key for a safe retry.
-      if (status && status < 500) {
-        writeAttempt(null);
+      const cardEnded = err?.response?.data?.errors?.some(({ code }) => code === 'card_not_completed');
+      if (cardEnded || (attempt.method === 'wallet' && status && status < 500)) {
+        writeAttempt(storageKey, null);
+        setChoice(null);
         setPending(false);
       } else {
-        setChoice(attempt);
+        setChoice(saved);
+        setPending(attempt.method === 'card');
       }
       setError(getErrorMessage(err));
     } finally {
       if (mounted.current) setBusy(false);
     }
-  }, []);
+  }, [storageKey]);
 
   useEffect(() => {
+    let active = true;
     mounted.current = true;
-    load();
-    // Back from the card provider (or a reload mid-payment): finish the same attempt. Attempts the
-    // server never accepted (for example while payments are unavailable) are not resubmitted.
-    const attempt = readAttempt();
-    if (attempt?.method === 'card' && attempt.awaitingCard && !resumed.current) {
-      resumed.current = true;
-      pay(attempt);
-    }
-    return () => { mounted.current = false; };
-  }, [load, pay]);
+    load().then(() => {
+      if (!active) return;
+      const attempt = readAttempt(storageKey);
+      if (attempt?.awaitingCard) pay(attempt, { resume: true });
+    });
+    return () => { active = false; mounted.current = false; };
+  }, [load, pay, storageKey]);
 
   // The payment form opens above the tier cards: bring it into view and move focus to it,
   // otherwise choosing a tier further down the page looks like nothing happened.
@@ -150,17 +161,22 @@ export default function MembershipPlansPage() {
     const panel = payRef.current;
     if (!openTierId || !panel) return;
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    panel.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    panel.scrollIntoView?.({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
     panel.focus({ preventScroll: true });
   }, [openTierId, loading]);
 
   function choose(tier) {
-    const saved = readAttempt();
+    const saved = readAttempt(storageKey);
     setError('');
     setSuccess('');
     setPending(false);
     setConfirmCancel(false);
-    setChoice(saved?.tierId === tier.id ? saved : { tierId: tier.id, method: 'wallet', operationKey: newOperationKey() });
+    if (saved?.awaitingCard) {
+      setChoice(saved);
+      setPending(true);
+      return;
+    }
+    setChoice(saved?.tierId === tier.id ? saved : { tierId: tier.id, method: methods[0], operationKey: newOperationKey() });
   }
 
   function changeMethod(method) {
@@ -170,7 +186,6 @@ export default function MembershipPlansPage() {
   }
 
   function closePayment() {
-    writeAttempt(null);
     setChoice(null);
     setPending(false);
     setError('');
@@ -208,6 +223,7 @@ export default function MembershipPlansPage() {
   const currentTierId = membership.tier?.id;
   const paid = Boolean(membership.renewsAt);
   const chosenTier = choice ? tiers.find((tier) => tier.id === choice.tierId) : null;
+  const showPayment = choice && (pending || chosenTier);
 
   const actionLabel = (tier) => {
     if (tier.id !== currentTierId) return paid ? `Switch to ${tier.name}` : `Subscribe to ${tier.name}`;
@@ -219,7 +235,7 @@ export default function MembershipPlansPage() {
       <h1>Membership</h1>
 
       <Alert variant="success">{success}</Alert>
-      {!chosenTier && <Alert variant="error">{error}</Alert>}
+      {!showPayment && <Alert variant="error">{error}</Alert>}
 
       <section className={styles.current} aria-labelledby="m8-current">
         <div className={styles.currentHeader}>
@@ -257,7 +273,7 @@ export default function MembershipPlansPage() {
 
         <p className={styles.note}>
           Pending, confirmed and active reservations count toward your limit.{' '}
-          <Link to="/household">Household members</Link> with an accepted link share the strongest deposit discount.
+          <Link to="/household">Household members</Link> with an accepted link share the best available deposit discount and waitlist priority.
         </p>
 
         {paid && !membership.cancelAtPeriodEnd && (
@@ -281,33 +297,25 @@ export default function MembershipPlansPage() {
         )}
       </section>
 
-      {chosenTier && (
+      {showPayment && (
         <section ref={payRef} tabIndex={-1} className={styles.pay} aria-labelledby="m8-pay">
-          <h2 id="m8-pay">{chosenTier.name} — {formatMoney(chosenTier.annualFee)} for one year</h2>
+          <h2 id="m8-pay">{chosenTier ? `${chosenTier.name} — ${formatMoney(chosenTier.annualFee)} for one year` : 'Card payment'}</h2>
           <Alert variant="error">{error}</Alert>
           {pending ? (
             <>
               <p role="status">Your card payment has not been confirmed yet. You will not be charged twice.</p>
               <div className={styles.actions}>
-                <button type="button" className="btn" onClick={() => pay(choice)} disabled={busy}>
+                <button type="button" className="btn" onClick={() => pay(choice, { resume: true })} disabled={busy}>
                   {busy ? 'Checking...' : 'Check payment again'}
                 </button>
+                {cardUrl && <a className="btn btn-secondary" href={cardUrl}>Continue to Stripe</a>}
                 <button type="button" className="btn btn-secondary" onClick={closePayment} disabled={busy}>Close</button>
               </div>
             </>
           ) : (
             <form onSubmit={(event) => { event.preventDefault(); pay(choice); }}>
-              <fieldset className={styles.methods} disabled={busy}>
-                <legend>Pay with</legend>
-                <label className={styles.method}>
-                  <input type="radio" name="m8-method" value="wallet" checked={choice.method === 'wallet'} onChange={() => changeMethod('wallet')} />
-                  Wallet balance
-                </label>
-                <label className={styles.method}>
-                  <input type="radio" name="m8-method" value="card" checked={choice.method === 'card'} onChange={() => changeMethod('card')} />
-                  Card (you will be taken to Stripe)
-                </label>
-              </fieldset>
+              <PaymentMethodPicker amountMinor={Math.round(chosenTier.annualFee * 100)} methods={methods}
+                value={choice.method} onChange={changeMethod} disabled={busy} showReservationPolicy={false} />
               <p className={styles.note}>
                 {chosenTier.id === currentTierId && paid
                   ? `This adds one year after ${formatDate(membership.renewsAt)}.`
@@ -316,7 +324,7 @@ export default function MembershipPlansPage() {
                     : 'Your year starts as soon as the payment succeeds.'}
               </p>
               <div className={styles.actions}>
-                <button type="submit" className="btn" disabled={busy}>
+                <button type="submit" className="btn" disabled={busy || !methods.includes(choice.method)}>
                   {busy ? 'Processing...' : `Pay ${formatMoney(chosenTier.annualFee)}`}
                 </button>
                 <button type="button" className="btn btn-secondary" onClick={closePayment} disabled={busy}>Back</button>
@@ -327,6 +335,7 @@ export default function MembershipPlansPage() {
       )}
 
       <h2>Tier options</h2>
+      {!methods.length && <p role="status">Membership payments are temporarily unavailable.</p>}
       {tiers.length === 0 ? (
         <Alert variant="info">No membership tiers are available right now.</Alert>
       ) : (
@@ -346,12 +355,12 @@ export default function MembershipPlansPage() {
                   {perks(tier).map((perk) => <li key={perk}>{perk}</li>)}
                 </ul>
                 {tier.annualFee > 0 ? (
-                  <button type="button" className="btn" onClick={() => choose(tier)} disabled={busy}>
+                  <button type="button" className="btn" onClick={() => choose(tier)} disabled={busy || !methods.length}>
                     {actionLabel(tier)}
                   </button>
                 ) : (
                   <p className={styles.note}>
-                    {isCurrent ? 'Included with every account.' : 'You return to this tier when a paid tier ends or is cancelled.'}
+                    {isCurrent ? 'Included with every account.' : 'You return to this tier when your paid period ends.'}
                   </p>
                 )}
               </li>

@@ -287,3 +287,32 @@
 /server/src/services/payments/ @Ali-Mohamed-Amin
 /server/test/sprint2/member2.demo.js @Ali-Mohamed-Amin
 /server/test/sprint2/member2.test.js @Ali-Mohamed-Amin
+
+# Sprint 2 notifications, reminders, and referrals (Member 9)
+/client/src/api/notificationPreferences.api.js @yahiafarahat
+/client/src/api/notifications.api.js @yahiafarahat
+/client/src/api/referrals.api.js @yahiafarahat
+/client/src/components/sprint2/m9/ @yahiafarahat
+/client/src/pages/account/NotificationPreferencesPage.jsx @yahiafarahat
+/client/src/pages/admin/AdminReferralReportPage.jsx @yahiafarahat
+/client/src/pages/notifications/NotificationsPage.jsx @yahiafarahat
+/client/src/pages/referrals/MyReferralsPage.jsx @yahiafarahat
+/client/src/routes/sprint2/member9.routes.jsx @yahiafarahat
+/client/src/styles/sprint2/member9.module.css @yahiafarahat
+/client/test/sprint2/member9.test.jsx @yahiafarahat
+/docs/sprint2/member9.md @yahiafarahat
+/server/src/controllers/notificationPreferences.controller.js @yahiafarahat
+/server/src/controllers/notifications.controller.js @yahiafarahat
+/server/src/controllers/referrals.controller.js @yahiafarahat
+/server/src/jobs/notificationWorker.js @yahiafarahat
+/server/src/jobs/reminders.js @yahiafarahat
+/server/src/models/EventOutbox.js @yahiafarahat
+/server/src/models/Notification.js @yahiafarahat
+/server/src/models/Referral.js @yahiafarahat
+/server/src/routes/notificationPreferences.routes.js @yahiafarahat
+/server/src/routes/notifications.routes.js @yahiafarahat
+/server/src/routes/referrals.routes.js @yahiafarahat
+/server/src/services/notifications/ @yahiafarahat
+/server/src/services/referrals/ @yahiafarahat
+/server/src/utils/email.js @yahiafarahat
+/server/test/sprint2/member9.test.js @yahiafarahat

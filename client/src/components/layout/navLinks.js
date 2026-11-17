@@ -30,6 +30,8 @@ export const memberLinks = [
   { to: '/account/wallet', label: 'Wallet' },
   ...ifRegistered('/account/late-fees', 'Late fees'),
   ...ifRegistered('/membership', 'Membership'),
+  ...ifRegistered('/referrals', 'Referrals'),
+  ...ifRegistered('/account/notification-preferences', 'Email preferences'),
 ];
 
 // extra links shown only to verified lenders / members who can still apply
@@ -53,6 +55,7 @@ export const adminLinks = [
   ...ifRegistered('/admin/reports/damage', 'Damage report'),
   ...ifRegistered('/admin/damage-reports', 'Damage cases'),
   ...ifRegistered('/admin/membership-report', 'Membership report'),
+  ...ifRegistered('/admin/referrals', 'Referral report'),
   ...ifRegistered('/admin/promo-codes', 'Promo codes'),
   ...ifRegistered('/admin/promo-usage', 'Promo usage'),
 ];

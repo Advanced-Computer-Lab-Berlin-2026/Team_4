@@ -8,6 +8,7 @@ function optionalFeature(relativePath) {
 }
 
 function features() {
+  const outbox = optionalFeature('notifications/eventOutbox');
   return {
     payment: optionalFeature('payments/payment'),
     policy: optionalFeature('policies/bookingPolicy'),
@@ -15,7 +16,11 @@ function features() {
     membership: optionalFeature('membership/entitlements'),
     promo: optionalFeature('promotions/promo'),
     trust: optionalFeature('reviews/trust'),
-    events: optionalFeature('notifications/eventOutbox'),
+    referral: optionalFeature('referrals/referral'),
+    events: outbox && {
+      ...outbox,
+      enqueueAvailabilityChanged: optionalFeature('../controllers/favorites.controller')?.enqueueAvailabilityChanged,
+    },
   };
 }
 
@@ -35,7 +40,7 @@ const CHECKOUT_EVENTS = {
 };
 
 async function enqueueReservationEvent(events, reservation, status, session) {
-  if (!events?.enqueueEvent) return;
+  if (!events) return;
   const id = String(reservation._id);
   const recipients = [reservation.borrower, reservation.lender].map(String);
   const payload = {
@@ -44,11 +49,13 @@ async function enqueueReservationEvent(events, reservation, status, session) {
     returnedAt: reservation.returnedAt, completedAt: reservation.completedAt,
     returnCondition: reservation.returnCondition,
   };
-  if (CHECKOUT_EVENTS[status]) {
+  if (events.enqueueEvent && CHECKOUT_EVENTS[status]) {
     await events.enqueueEvent(CHECKOUT_EVENTS[status], id, recipients, payload, id + ':' + status, session);
   }
-  if (['cancelled', 'rejected', 'completed'].includes(status)) {
-    await events.enqueueEvent('availability_changed', id, recipients, payload, id + ':availability:' + status, session);
+  if (events.enqueueAvailabilityChanged && ['cancelled', 'rejected', 'completed'].includes(status)) {
+    await events.enqueueAvailabilityChanged(
+      reservation.item, { itemId: payload.itemId }, id + ':availability:' + status, session,
+    );
   }
 }
 

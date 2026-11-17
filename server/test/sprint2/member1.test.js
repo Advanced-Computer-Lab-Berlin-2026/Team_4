@@ -75,6 +75,74 @@ after(async () => {
   await mongoose.disconnect();
 });
 
+const signupInput = (username, fields = {}) => ({
+  username, name: username, email: username + '@test.invalid',
+  phone: '01212345678', password: 'ShareShed9!',
+  address: { street: 'Test St', city: 'Cairo' }, ...fields,
+});
+
+test('signup accepts an optional referral code without making it a condition of signup', async () => {
+  const endpoint = '/api/auth/register';
+  const invalid = await request('POST', endpoint, null, signupInput('bad_ref_type', { ref: { code: 'no' } }));
+  assert.equal(invalid.status, 400);
+  assert.equal(await User.exists({ username: 'bad_ref_type' }), null);
+
+  const plain = await request('POST', endpoint, null, signupInput('plain_new_user'));
+  assert.equal(plain.status, 201, JSON.stringify(plain.body));
+  assert.equal(plain.body.referralCapture, undefined);
+
+  const unknown = await request('POST', endpoint, null, signupInput('unknown_ref_user', {
+    phone: '01212345679', ref: ' unknown-code ',
+  }));
+  assert.equal(unknown.status, 201, JSON.stringify(unknown.body));
+  assert.equal(unknown.body.referralCapture, features().referral ? 'invalid' : 'unavailable');
+  assert.equal((await User.findById(unknown.body.user._id)).referredBy, undefined);
+});
+
+test('signup from a referral link pays once after completion and notifies the item’s favorites', async (t) => {
+  if (!features().referral) return t.skip('Member 9’s referral provider is absent');
+  const { Favorite, Referral, EventOutbox, Notification, WalletTransaction } = require('../../src/models');
+  const { processEvent } = require('../../src/services/notifications/notification');
+  const referrer = await user('signup_referrer');
+  const code = await features().referral.ensureReferralCode(referrer.id);
+  const signup = await request('POST', '/api/auth/register', null, signupInput('referred_new_user', {
+    phone: '01212345680', ref: ' ' + code.toLowerCase() + ' ',
+  }));
+  assert.equal(signup.status, 201, JSON.stringify(signup.body));
+  assert.equal(signup.body.referralCapture, 'captured');
+  const referee = await User.findById(signup.body.user._id);
+  assert.equal(String(referee.referredBy), referrer.id);
+  const referral = await Referral.findOne({ referee: referee._id, referrer: referrer._id });
+  assert.equal(referral.status, 'registered');
+  assert.equal(await WalletTransaction.countDocuments({ user: referrer.id, type: 'referral_credit' }), 0);
+
+  const tool = await item('Favorited referral fixture');
+  await Favorite.create({ user: other.id, item: tool.id });
+  await User.updateMany({ _id: { $in: [referee._id, lender._id, other._id] } }, {
+    $set: { 'notificationPrefs.reservations': false, 'notificationPrefs.promotions': false },
+  });
+  const record = await Reservation.create({
+    item: tool.id, borrower: referee.id, lender: lender.id, status: 'active',
+    startDate: new Date(Date.now() - 86400000), endDate: new Date(Date.now() + 86400000),
+  });
+
+  await commands.transition({ actorId: lender.id, reservationId: record.id, action: 'return' });
+  await commands.transition({ actorId: lender.id, reservationId: record.id, action: 'return' });
+  const completed = await EventOutbox.findOne({ eventKey: record.id + ':completed' });
+  assert.deepEqual(completed.recipients.map(String).sort(), [lender.id, referee.id].sort());
+  const available = await EventOutbox.findOne({ eventKey: record.id + ':availability:completed' });
+  assert.equal(String(available.aggregateId), tool.id);
+  assert.deepEqual(available.recipients.map(String), [other.id]);
+  assert.equal(available.payload.borrowerId, undefined);
+  await processEvent(available);
+  assert(await Notification.exists({ user: other.id, eventKey: available.eventKey }));
+  await processEvent(completed);
+  await processEvent(completed);
+  assert.equal(await WalletTransaction.countDocuments({ user: referrer.id, type: 'referral_credit' }), 1);
+  assert.equal((await User.findById(referrer.id)).walletBalance, 100);
+  assert.equal((await Referral.findById(referral.id)).status, 'converted');
+});
+
 test('validates dates and rejects anonymous, admin and self-checkout', async () => {
   assert.throws(() => normalizeRange({ startDate: '2027-02-29', endDate: '2027-03-04' }), { status: 400 });
   const tool = await item('Drill');
@@ -349,7 +417,16 @@ test('good return releases the held deposit, recalculates both users and emits c
         recalculated.push(userId);
       },
     },
-    events: { async enqueueEvent(type) { emitted.push(type); } },
+    events: {
+      async enqueueEvent(type) { emitted.push(type); },
+      async enqueueAvailabilityChanged(itemId, data, key, session) {
+        assert(session.inTransaction());
+        assert(itemId.equals(record.item));
+        assert.deepEqual(data, { itemId: String(record.item) });
+        assert.equal(key, record.id + ':availability:completed');
+        emitted.push('availability_changed');
+      },
+    },
   };
   const updated = await lenderAction(record, 'return', { expectedStatus: 'active' }, deps);
   await lenderAction(record, 'return', { expectedStatus: 'active' }, deps);

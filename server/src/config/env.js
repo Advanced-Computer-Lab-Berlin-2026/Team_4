@@ -16,6 +16,7 @@ const env = {
   MAX_UPLOAD_MB: parseInt(process.env.MAX_UPLOAD_MB, 10) || 5,
   OTP_EXPIRY_MINUTES: parseInt(process.env.OTP_EXPIRY_MINUTES, 10) || 10,
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY || '',
+  STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET || '',
 };
 
 env.assertRequired = () => {

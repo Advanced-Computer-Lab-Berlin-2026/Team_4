@@ -1,13 +1,29 @@
 // CATEGORIES & DEPOSIT MULTIPLIERS - Owner: Member 6 - Requirements: 40
 // Route: /admin/categories   Access: admin   (already registered in src/routes/routeConfig.jsx - do NOT edit that file)
 // API calls: src/api/*.api.js   Shared UI: src/components/common/*
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { getErrorMessage } from '../../api/axios';
 import { listCategories, setDepositMultiplier } from '../../api/categories.api';
 import Alert from '../../components/common/Alert';
 import Spinner from '../../components/common/Spinner';
+import { hasSprint2Routes, promoCodesPath, promoUsagePath } from '../../components/sprint2/m6/routesAvailability';
+
+const PromoCodesPage = lazy(() => import('./AdminPromoCodesPage'));
+const PromoUsagePage = lazy(() => import('./AdminPromoUsagePage'));
 
 export default function AdminCategoriesPage() {
+  const [params] = useSearchParams();
+  const tab = params.get('tab');
+  if (!hasSprint2Routes && (tab === 'promo-codes' || tab === 'promo-usage')) {
+    return <Suspense fallback={<Spinner />}>
+      {tab === 'promo-codes' ? <PromoCodesPage /> : <PromoUsagePage />}
+    </Suspense>;
+  }
+  return <Categories />;
+}
+
+function Categories() {
   const [categories, setCategories] = useState([]);
   const [drafts, setDrafts] = useState({});
   const [loading, setLoading] = useState(true);
@@ -58,6 +74,7 @@ export default function AdminCategoriesPage() {
     <div className="container">
       <h1>Categories and deposit multipliers</h1>
       <p className="muted">Adjust the multiplier used when deposits are calculated for each item category.</p>
+      <p><Link to={promoCodesPath}>Promo codes</Link> · <Link to={promoUsagePath}>Promo usage and redemptions</Link></p>
       <Alert variant="error">{error}</Alert>
       <Alert variant="success">{success}</Alert>
 

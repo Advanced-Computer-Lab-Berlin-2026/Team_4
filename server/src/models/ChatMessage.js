@@ -10,4 +10,5 @@ const schema = new Schema(
   },
   { timestamps: true }
 );
+schema.index({ reservation: 1, _id: -1 });
 module.exports = mongoose.model('ChatMessage', schema);

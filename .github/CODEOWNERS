@@ -138,3 +138,54 @@
 /docs/SPRINT2_CONTRACT.md @alishebl05
 /docs/SPRINT2_OWNERSHIP.md @alishebl05
 /docs/sprint2/member1.md @alishebl05
+
+# Sprint 2 membership and household entitlements (Member 8)
+/server/src/controllers/memberships.controller.js @karimhamakey
+/server/src/routes/memberships.routes.js @karimhamakey
+/client/src/api/memberships.api.js @karimhamakey
+/server/src/controllers/membershipReports.controller.js @karimhamakey
+/server/src/routes/membershipReports.routes.js @karimhamakey
+/client/src/api/membershipReports.api.js @karimhamakey
+/server/src/models/MembershipTier.js @karimhamakey
+/client/src/pages/membership/MembershipPlansPage.jsx @karimhamakey
+/client/src/pages/membership/MyMembershipPage.jsx @karimhamakey
+/client/src/pages/admin/AdminMembershipReportPage.jsx @karimhamakey
+/client/src/components/sprint2/m8/MembershipSummary.jsx @karimhamakey
+/server/src/services/membership/membership.js @karimhamakey
+/server/src/services/membership/entitlements.js @karimhamakey
+/server/src/services/membership/membershipReport.js @karimhamakey
+/client/src/routes/sprint2/member8.routes.jsx @karimhamakey
+/client/src/styles/sprint2/member8.module.css @karimhamakey
+/server/test/sprint2/member8.test.js @karimhamakey
+/client/test/sprint2/member8.test.jsx @karimhamakey
+/docs/sprint2/member8.md @karimhamakey
+
+# Sprint 2 moderation, analytics and support (Member 4)
+/server/src/controllers/moderation.controller.js @janakhalifa5
+/server/src/routes/moderation.routes.js @janakhalifa5
+/client/src/api/moderation.api.js @janakhalifa5
+/server/src/controllers/analytics.controller.js @janakhalifa5
+/server/src/routes/analytics.routes.js @janakhalifa5
+/client/src/api/analytics.api.js @janakhalifa5
+/server/src/controllers/supportTickets.controller.js @janakhalifa5
+/server/src/routes/supportTickets.routes.js @janakhalifa5
+/client/src/api/supportTickets.api.js @janakhalifa5
+/server/src/models/Report.js @janakhalifa5
+/server/src/models/SupportTicket.js @janakhalifa5
+/client/src/pages/admin/AdminModerationPage.jsx @janakhalifa5
+/client/src/pages/admin/AdminUsageReportPage.jsx @janakhalifa5
+/client/src/pages/admin/AdminDamageReportPage.jsx @janakhalifa5
+/client/src/pages/support/MySupportTicketsPage.jsx @janakhalifa5
+/client/src/pages/support/SupportTicketPage.jsx @janakhalifa5
+/client/src/pages/admin/AdminSupportPage.jsx @janakhalifa5
+/client/src/components/sprint2/m4/ReportFilters.jsx @janakhalifa5
+/client/src/components/sprint2/m4/SupportThread.jsx @janakhalifa5
+/server/src/services/moderation/moderation.js @janakhalifa5
+/server/src/services/analytics/reportQueries.js @janakhalifa5
+/server/src/services/analytics/reportExport.js @janakhalifa5
+/server/src/services/support/support.js @janakhalifa5
+/client/src/routes/sprint2/member4.routes.jsx @janakhalifa5
+/client/src/styles/sprint2/member4.module.css @janakhalifa5
+/server/test/sprint2/member4.test.js @janakhalifa5
+/client/test/sprint2/member4.test.jsx @janakhalifa5
+/docs/sprint2/member4.md @janakhalifa5

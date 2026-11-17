@@ -1,4 +1,3 @@
-/** Admin user management — Member 4 — Requirements 7, 22, 28, 29, 39. */
 const mongoose = require('mongoose');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
@@ -53,10 +52,12 @@ exports.listUsers = asyncHandler(async (req, res) => {
     if (lenderStatus && lenderStatus !== 'verified') query._id = { $in: [] };
   }
   if (status) query.status = status;
+
   const [users, total] = await Promise.all([
     User.find(query).select(FIELDS).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit),
     User.countDocuments(query),
   ]);
+
   res.json({ success: true, data: users, count: users.length, total, totalPages: Math.max(Math.ceil(total / limit), 1), currentPage: page });
 });
 
@@ -79,8 +80,8 @@ exports.setUserStatus = asyncHandler(async (req, res) => {
   if (!user) throw ApiError.notFound('User not found');
   if (user.role === 'admin') throw ApiError.conflict('Administrator accounts cannot be suspended or reinstated here');
   const update = newStatus === 'suspended'
-    ? { $set: { status: newStatus, suspension: { reason: explanation, at: new Date(), by: req.user._id } } }
-    : { $set: { status: newStatus }, $unset: { suspension: 1 } };
+      ? { $set: { status: newStatus, suspension: { reason: explanation, at: new Date(), by: req.user._id } } }
+      : { $set: { status: newStatus }, $unset: { suspension: 1 } };
   const updated = await User.findOneAndUpdate({ _id: user._id, role: 'member' }, update, { new: true, runValidators: true }).select(FIELDS);
   if (!updated) throw ApiError.conflict('Account changed. Refresh and try again');
   res.json({ success: true, data: updated });

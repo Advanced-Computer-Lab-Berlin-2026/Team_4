@@ -159,6 +159,7 @@ async function startCardPayment(input) {
   // Same Stripe idempotency key on every retry: Stripe returns the SAME page instead of creating a second one.
   const session = await api.checkout.sessions.create({
     mode: 'payment',
+    payment_method_types: ['card'],
     line_items: spec.items.map((item) => ({
       quantity: 1,
       price_data: { currency: spec.currency.toLowerCase(), unit_amount: item.amountMinor, product_data: { name: item.name.slice(0, 200) } },
@@ -224,14 +225,9 @@ async function recordCardCheckout(input, session) {
     const card = await verifiedCardPayment({ paymentReference, reference, userId: borrowerId, purpose: 'deposit' }, s);
     if (card.result.amountMinor !== amountMinor) throw ApiError.conflict('The payment did not match the checkout total');
     for (const line of lines.filter((l) => l.amountMinor > 0)) {
-      await audit.record({
-        action: 'deposit_charged', reservationId: line.reservationId, userId: borrowerId, amountMinor: line.amountMinor, operationId: operation._id,
-        inputs: {
-          method: 'card', paymentReference, checkoutAttemptId: attemptId, itemId: line.itemId, startDate: line.startDate, endDate: line.endDate,
-          deposit: line.deposit, fulfilmentMethod: line.fulfilment?.method, lineAmountMinor: line.amountMinor,
-        },
-        result: { chargedMinor: line.amountMinor },
-      }, { session: s });
+      await audit.checkoutLine({
+        attemptId, borrowerId, method: 'card', line, paymentReference, operationId: operation._id,
+      }, s);
     }
     return { recordedMinor: amountMinor, paymentReference };
   }, session);
@@ -266,6 +262,7 @@ async function refundFailedCheckout(input) {
   checkReference(reference);
   const card = await verifiedCardPayment({ paymentReference, reference, userId: borrowerId, purpose: 'deposit' });
   const paidMinor = card.result.amountMinor;
+  assertAmountMinor(paidMinor);
   const key = `${idempotencyKey}:refund`;
   const spec = { kind: 'refund', purpose: 'deposit', userId: borrowerId, reference, amountMinor: paidMinor, currency: assertCurrency(currency) };
 
@@ -278,33 +275,66 @@ async function refundFailedCheckout(input) {
       op = await PaymentOperation.findOne({ idempotencyKey: key });
     }
   }
-  if (op.status === 'succeeded') return { ...op.result, replayed: true };
+  if (op.requestHash !== hashRequest(spec)) throw ApiError.conflict('This idempotency key was already used for a different payment');
+  if (op.status === 'succeeded') return { state: 'succeeded', ...op.result, replayed: true };
 
+  const api = stripe.client();
+  const retry = op.stripe?.refundAttempt || 0;
   let refund;
-  try {
-    refund = await stripe.client().refunds.create(
-      { payment_intent: paymentReference, metadata: { attemptId: String(attemptId), reason: 'checkout_failed' } },
-      { idempotencyKey: key }
-    );
-  } catch (err) {
-    if (err?.code !== 'charge_already_refunded') throw err; // the refund happened earlier - nothing more to do
-    refund = { id: null, amount: paidMinor, status: 'succeeded' };
+  if (op.stripe?.refundId) {
+    refund = await api.refunds.retrieve(op.stripe.refundId);
+  } else {
+    try {
+      refund = await api.refunds.create(
+        { payment_intent: paymentReference, metadata: { attemptId: String(attemptId), reason: 'checkout_failed' } },
+        { idempotencyKey: retry ? `${key}:${retry}` : key }
+      );
+      const attemptFilter = retry ? retry : { $in: [null, 0] };
+      const { matchedCount } = await PaymentOperation.updateOne(
+        { _id: op._id, status: 'pending', 'stripe.refundAttempt': attemptFilter, 'stripe.refundId': { $exists: false } },
+        { $set: { 'stripe.refundId': refund.id } }
+      );
+      if (!matchedCount) return { state: 'pending' }; // a concurrent worker saved or advanced this refund
+    } catch (err) {
+      if (err?.code !== 'charge_already_refunded') throw err;
+    }
   }
-  const result = { refundedMinor: refund.amount, refundId: refund.id, paymentReference };
+
+  if (['failed', 'canceled'].includes(refund?.status)) {
+    await PaymentOperation.updateOne(
+      { _id: op._id, status: 'pending', 'stripe.refundId': refund.id },
+      { $unset: { 'stripe.refundId': 1 }, $inc: { 'stripe.refundAttempt': 1 } }
+    );
+    return { state: 'pending' };
+  }
+  if (refund && refund.status !== 'succeeded') return { state: 'pending' };
+
+  // A provider conflict or partial response only completes compensation if Stripe verifies the full amount.
+  if (refund?.amount !== paidMinor) {
+    let refundedMinor = 0;
+    for await (const row of api.refunds.list({ payment_intent: paymentReference, limit: 100 })) {
+      if (row.status === 'succeeded') refundedMinor += row.amount;
+      if (refundedMinor >= paidMinor) break;
+    }
+    if (refundedMinor < paidMinor) return { state: 'pending' };
+  }
+  const result = { refundedMinor: paidMinor, refundId: refund?.id ?? null, paymentReference };
+  const reservationIds = (input.lines || []).map((line) => line.reservationId);
 
   await mongoose.connection.transaction(async (s) => {
     const { modifiedCount } = await PaymentOperation.updateOne(
       { _id: op._id, status: 'pending' },
-      { $set: { status: 'succeeded', result, 'stripe.refundId': refund.id, completedAt: new Date() } }, { session: s }
+      { $set: { status: 'succeeded', result, 'stripe.refundId': result.refundId, completedAt: new Date() } }, { session: s }
     );
     if (modifiedCount !== 1) return; // another server finished it first
     await audit.record({
-      action: 'card_payment_refunded', userId: borrowerId, amountMinor: refund.amount, operationId: op._id,
-      inputs: { checkoutAttemptId: attemptId, paymentReference, checkoutAmountMinor: input.amountMinor, paidMinor, reason: 'checkout_failed' },
+      action: 'card_payment_refunded', userId: borrowerId, amountMinor: paidMinor, operationId: op._id,
+      reservationId: reservationIds.length === 1 ? reservationIds[0] : undefined,
+      inputs: { checkoutAttemptId: attemptId, reservationIds, paymentReference, checkoutAmountMinor: input.amountMinor, paidMinor, reason: 'checkout_failed' },
       result,
     }, { session: s });
   });
-  return { ...result, replayed: false };
+  return { state: 'succeeded', ...result, replayed: false };
 }
 
 /**

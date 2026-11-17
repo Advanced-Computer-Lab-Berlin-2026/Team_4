@@ -366,7 +366,7 @@ None of these are in the requirement sheet. The project description allows the t
 **Answered by the other members' contracts (16 Nov 2026):**
 - **Member 3** (`docs/sprint2/member3.md`): the damage form is `/damage-reports/new?reservation=<id>`; `hasOpenDamageCase(reservationId)` is in `services/damage/damage.js` (Member 1's `return` already refuses while a case exists).
 - **Member 6** (`docs/sprint2/member6.md`): delivery settings are in his **Pickup & rules** tab and saved through his endpoint. Since Member 1's update of 17 Nov, marking a delivery **delivered** (Member 1's `advanceDelivery`) also makes the booking active, and `pickup` refuses deliveries, so for deliveries the lender uses the delivery page instead of **Mark as picked up**.
-- **Member 2** (`docs/sprint2/member2.md`): `refundToWallet` (full deposit and delivery fee on a declined request), `releaseDeposit` and `applyLateFee` are in `services/payments/payment.js`, the file Member 1's commands load, so they connect once merged. The late fee starts 60 minutes after the due time (10 % of the deposit per started day, capped at 100 %); `calculateLateFee` lets my return screen show the fee before the lender confirms.
+- **Member 2** (`docs/sprint2/member2.md`): `refundToWallet` (full deposit and delivery fee on a declined request), `releaseDeposit` and `applyLateFee` are in `services/payments/payment.js`, the file Member 1's commands load, so they connect once merged. The late fee starts immediately after the due time (10 % of the deposit per started day, capped at 100 %); `calculateLateFee` lets my return screen show the fee before the lender confirms.
 
 **Still open:**
 

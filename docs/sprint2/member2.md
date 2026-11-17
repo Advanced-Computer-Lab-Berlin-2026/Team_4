@@ -35,7 +35,7 @@ All in `server/src/services/payments/config.js`; public at `GET /api/payments/po
 | Admin damage decision (Req 62) | The admin's amount is kept (max = held deposit), the rest goes back to the borrower | M3 calls `settleForfeiture` |
 | Dispute lowers the amount (Req 64) | Only the difference is refunded to the borrower and taken back from the lender (up to the lender's balance; any gap is recorded in the audit) | M3 calls `refundToWallet` with `reference: 'damage:<reportId>'` |
 | A deposit is settled once | A good-condition release and a damage decision can't both happen for one reservation (409) | — |
-| Late-fee grace | **60 minutes** after the due time | M1 only calls `applyLateFee` for late returns (`returnTiming.isLateReturn`) |
+| Late-fee grace | **None** after the due time | M1 only calls `applyLateFee` for late returns (`returnTiming.isLateReturn`) |
 | Late-fee rate | **10 % of the deposit per started day** late | |
 | Late-fee cap | **100 %** of the deposit | |
 | Late fee with a low wallet | Charge what is available; record the rest as **outstanding** (`PaymentOperation.outstandingMinor`). Any later wallet credit (refund, returned deposit, reward) collects it automatically, oldest first, in the same transaction (audit action `late_fee_collected`). No User schema change. | ✅ Built |

@@ -12,7 +12,7 @@ module.exports = Object.freeze({
     partialRefundPercent: 50, // refund when cancelled later than that (but before pickup)
   }),
   lateFee: Object.freeze({
-    graceMinutes: 60, // returns within this long after the deadline are not charged
+    graceMinutes: 0, // a return at the due time is on time (Req 77)
     percentOfDepositPerDay: 10, // per STARTED day late
     capPercentOfDeposit: 100, // never more than the deposit itself
   }),

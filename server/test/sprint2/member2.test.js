@@ -343,13 +343,32 @@ test('Req 50: wallet checkout with too little balance is refused and books nothi
   assert.equal(await PaymentOperation.countDocuments({}), 0);
 });
 
+test('a zero-deposit checkout audits its reservation once without moving money', async () => {
+  const borrower = await makeUser(0);
+  const item = await bookableItem(0);
+  const selection = { source: 'single', itemId: String(item._id), startDate: day(3), endDate: day(5) };
+  const quote = await send('POST', '/checkout/quote', borrower, selection);
+  const request = { ...selection, method: 'wallet', operationKey: 'free-deposit-audited', quoteHash: quote.data.quote.quoteHash };
+  const first = await send('POST', '/checkout', borrower, request);
+  assert.equal(first.status, 200);
+  assert.equal((await send('POST', '/checkout', borrower, request)).data.checkout.id, first.data.checkout.id);
+  const reservation = await Reservation.findById(first.data.checkout.reservationIds[0]);
+  assert.equal(reservation.deposit.status, 'none');
+  const audits = await AuditLog.find({ reservation: reservation._id, action: 'deposit_calculated' });
+  assert.equal(audits.length, 1);
+  assert.equal(audits[0].amountMinor, 0);
+  assert.equal(audits[0].inputs.deposit.amount, 0);
+  assert.ok(audits[0].at instanceof Date);
+  assert.equal(await WalletTransaction.countDocuments({}), 0);
+});
+
 test('GET /api/payments/policy is public and shows the refund and late-fee rules', async () => {
   const { status, data } = await get('/payments/policy');
   assert.equal(status, 200);
   assert.equal(data.policy.currency, 'EGP');
   assert.equal(data.policy.cancellation.freeCancellationHours, 48);
   assert.equal(data.policy.cancellation.partialRefundPercent, 50);
-  assert.deepEqual(data.policy.lateFee, { graceMinutes: 60, percentOfDepositPerDay: 10, capPercentOfDeposit: 100 });
+  assert.deepEqual(data.policy.lateFee, { graceMinutes: 0, percentOfDepositPerDay: 10, capPercentOfDeposit: 100 });
 });
 
 // ---------------------------------------------------------------- Step 4 (plan step C): refunds (Req 52, 81)
@@ -457,11 +476,12 @@ test('refund functions reject inconsistent input before moving money', async () 
 // ---------------------------------------------------------------- Step 5 (plan step D): late fees (Req 77)
 const { calculateLateFee } = require('../../src/services/payments/lateFee');
 
-test('Req 77: late fee = 10 % of the deposit per started day late, after a 1-hour grace, capped at the deposit', () => {
+test('Req 77: late fee = 10 % of the deposit per started day late, as soon as the due time passes, capped at the deposit', () => {
   const endDate = new Date('2026-12-10T00:00:00Z');
   const back = (minutes) => new Date(+endDate + minutes * 60000);
   const fee = (minutes, depositMinor = 15000) => calculateLateFee({ depositMinor, endDate, returnedAt: back(minutes) });
-  assert.deepEqual([fee(0).feeMinor, fee(60).feeMinor], [0, 0]); // on time / inside the grace period
+  assert.equal(fee(0).feeMinor, 0);
+  assert.deepEqual([fee(1 / 60000).daysLate, fee(1 / 60000).feeMinor], [1, 1500]); // one millisecond late
   assert.deepEqual([fee(61).daysLate, fee(61).feeMinor], [1, 1500]); // 1 started day
   assert.deepEqual([fee(24 * 60 + 1).daysLate, fee(24 * 60 + 1).feeMinor], [2, 3000]); // just over 1 day -> 2 days
   const veryLate = fee(15 * 24 * 60); // 15 days = 150 % -> capped at 100 %
@@ -513,12 +533,12 @@ test('Req 77: a low wallet is never skipped - the rest stays owed and is collect
   assert.equal(await AuditLog.countDocuments({ action: 'late_fee_collected' }), 1);
 });
 
-test('Req 77: returning within the grace period costs nothing but is still audited', async () => {
+test('Req 77: returning exactly at the due time costs nothing', async () => {
   const borrower = await makeUser(50);
   const reservation = await paidReservation({ borrower, status: 'completed', startIn: -10, days: 3 });
   const result = await payment.applyLateFee({
-    reservationId: reservation._id, userId: borrower._id, currency: 'EGP', idempotencyKey: 'grace',
-    endDate: reservation.endDate, returnedAt: new Date(+reservation.endDate + 30 * 60000),
+    reservationId: reservation._id, userId: borrower._id, currency: 'EGP', idempotencyKey: 'on-time',
+    endDate: reservation.endDate, returnedAt: reservation.endDate,
   });
   assert.equal(result.feeMinor, 0);
   assert.equal(await balanceOf(borrower), 5000);
@@ -652,6 +672,7 @@ function makeFakeStripe() {
   const sessions = new Map();
   const sessionKeys = new Map();
   const refunds = [];
+  const refundStatuses = [];
   const refundKeys = new Map();
   const calls = { sessionCreate: 0, refundCreate: 0 };
   const copy = (value) => structuredClone(value);
@@ -684,14 +705,18 @@ function makeFakeStripe() {
     refunds: {
       async create(params, { idempotencyKey } = {}) {
         calls.refundCreate += 1;
-        if (refundKeys.has(idempotencyKey)) return refundKeys.get(idempotencyKey);
-        if (refunds.some((r) => r.payment_intent === params.payment_intent)) throw fail('Already refunded', 'charge_already_refunded');
+        if (refundKeys.has(idempotencyKey)) return copy(refundKeys.get(idempotencyKey));
+        if (refunds.some((r) => r.payment_intent === params.payment_intent && !['failed', 'canceled'].includes(r.status))) {
+          throw fail('Already refunded', 'charge_already_refunded');
+        }
         const paid = [...sessions.values()].find((s) => s.payment_intent === params.payment_intent);
-        const refund = { id: `re_test_${refunds.length + 1}`, amount: paid.amount_total, payment_intent: params.payment_intent, status: 'succeeded' };
+        const refund = { id: `re_test_${refunds.length + 1}`, amount: paid.amount_total, payment_intent: params.payment_intent, status: refundStatuses.shift() || 'succeeded' };
         refunds.push(refund);
         refundKeys.set(idempotencyKey, refund);
-        return refund;
+        return copy(refund);
       },
+      async retrieve(id) { return copy(refunds.find((refund) => refund.id === id)); },
+      async *list({ payment_intent: intent }) { yield* refunds.filter((refund) => refund.payment_intent === intent).map(copy); },
     },
     webhooks: {
       constructEvent(raw, signature, secret) {
@@ -701,7 +726,7 @@ function makeFakeStripe() {
     },
   };
   return {
-    client, webhookSecret: 'whsec_test_fake', calls, sessions, refunds,
+    client, webhookSecret: 'whsec_test_fake', calls, sessions, refunds, refundStatuses,
     /** The borrower pays on Stripe's page (optionally Stripe reports a different amount). */
     pay(id, { amountTotal } = {}) {
       const session = sessions.get(id);
@@ -762,6 +787,7 @@ test('Req 51: card checkout over HTTP - Stripe page, signed webhook (twice), one
   assert.equal(fake.sessions.size, 1, 'one Stripe page, never two');
   const sessionId = first.data.checkout.redirectUrl.split('/').pop();
   const created = fake.sessions.get(sessionId).params;
+  assert.deepEqual(created.payment_method_types, ['card']);
   assert.equal(created.line_items[0].price_data.unit_amount, 15000); // amount from the server quote, in piastres
   assert.match(created.success_url, new RegExp(`/checkout/status/${first.data.checkout.id}$`));
 
@@ -781,6 +807,14 @@ test('Req 51: card checkout over HTTP - Stripe page, signed webhook (twice), one
   assert.deepEqual([audits[0].inputs.method, String(audits[0].reservation)], ['card', String(reservations[0]._id)]);
   assert.equal(await balanceOf(borrower), 0);
   assert.equal(await WalletTransaction.countDocuments({}), 0); // the card paid, not the wallet
+
+  const cancellation = await send('POST', `/reservations/${reservations[0]._id}/cancel`, borrower);
+  assert.equal(cancellation.status, 200, JSON.stringify(cancellation.data));
+  assert.equal(await balanceOf(borrower), 15000);
+  assert.equal(fake.refunds.length, 0);
+  const refundAudit = await AuditLog.findOne({ reservation: reservations[0]._id, action: 'cancellation_refunded' });
+  assert.equal(refundAudit.result.refundMinor, 15000);
+  assert.ok(refundAudit.at instanceof Date);
 }));
 
 test('Req 51: Stripe took a different amount -> nothing is booked and the card is refunded exactly once', () => withFakeStripe(async (fake) => {
@@ -802,6 +836,42 @@ test('Req 51: Stripe took a different amount -> nothing is booked and the card i
   const replay = await payment.refundFailedCheckout({ attemptId: first.data.checkout.id, borrowerId: borrower._id, idempotencyKey: `checkout:${first.data.checkout.id}`, currency: 'EGP', paymentReference: `pi_test_${sessionId}` });
   assert.equal(replay.replayed, true);
   assert.equal(fake.refunds.length, 1);
+}));
+
+test('Req 51: compensation waits for Stripe, retries a failed refund and records one completed refund', () => withFakeStripe(async (fake) => {
+  const borrower = await makeUser(0);
+  const { first } = await startCardCheckout(borrower, 'm2-card-pending-refund');
+  const checkoutId = first.data.checkout.id;
+  const sessionId = first.data.checkout.redirectUrl.split('/').pop();
+  const attempt = await CheckoutAttempt.findById(checkoutId);
+  fake.pay(sessionId, { amountTotal: 9999 });
+  fake.refundStatuses.push('pending');
+  const event = fake.eventFor(sessionId);
+  assert.equal(await postWebhook(event, signWebhook(event, fake.webhookSecret)), 204);
+  const lookup = () => get(`/checkout/${checkoutId}`, borrower);
+  assert.equal((await lookup()).data.checkout.status, 'refund_due');
+  assert.equal(fake.calls.refundCreate, 1);
+  assert.equal(await AuditLog.countDocuments({ action: 'card_payment_refunded' }), 0);
+  assert.equal(await ReservationHold.countDocuments({ attempt: checkoutId }), 0);
+
+  fake.refunds[0].status = 'failed';
+  assert.equal((await lookup()).data.checkout.status, 'refund_due');
+  assert.equal((await lookup()).data.checkout.status, 'failed');
+  assert.equal((await lookup()).data.checkout.status, 'failed');
+  assert.equal(fake.calls.refundCreate, 2);
+  const audit = await AuditLog.findOne({ reservation: attempt.lines[0].reservationId, action: 'card_payment_refunded' });
+  assert.equal(audit.result.refundedMinor, 9999);
+  assert.equal(await AuditLog.countDocuments({ action: 'card_payment_refunded' }), 1);
+  assert.equal(await Reservation.countDocuments({ borrower: borrower._id }), 0);
+}));
+
+test('Req 51: raw webhook uses the installed Stripe SDK signature validator', () => withFakeStripe(async (fake) => {
+  const actual = require('stripe')('sk_test_signature_probe');
+  fake.client.webhooks = actual.webhooks;
+  const payload = '{ "type": "payment_intent.created", "data": {"object":{}} }';
+  const signature = actual.webhooks.generateTestHeaderString({ payload, secret: fake.webhookSecret });
+  assert.equal(await postWebhook(payload, signature), 204);
+  assert.equal(await postWebhook(JSON.stringify(JSON.parse(payload)), signature), 400);
 }));
 
 test('Req 51: when the hold expires the Stripe page is closed, so it can no longer be paid', () => withFakeStripe(async (fake) => {

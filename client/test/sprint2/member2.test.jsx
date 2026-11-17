@@ -16,7 +16,7 @@ vi.mock('../../src/api/account.api', () => ({ getWallet: vi.fn() }));
 vi.mock('../../src/api/payments.api', () => ({ getPolicy: vi.fn(), getLateFees: vi.fn() }));
 vi.mock('../../src/api/walletLedger.api', () => ({ getLedger: vi.fn() }));
 
-const POLICY = { policy: { currency: 'EGP', cancellation: { freeCancellationHours: 48, partialRefundPercent: 50 }, lateFee: { graceMinutes: 60, percentOfDepositPerDay: 10, capPercentOfDeposit: 100 } } };
+const POLICY = { policy: { currency: 'EGP', cancellation: { freeCancellationHours: 48, partialRefundPercent: 50 }, lateFee: { graceMinutes: 0, percentOfDepositPerDay: 10, capPercentOfDeposit: 100 } } };
 const page = (items, extra = {}) => ({ items, total: items.length, page: 1, limit: 10, pages: 1, ...extra });
 const inRouter = (ui) => render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>{ui}</MemoryRouter>);
 

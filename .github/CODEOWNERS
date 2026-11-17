@@ -265,3 +265,25 @@
 /server/src/services/damage/ @12tifa12
 /server/src/services/reviews/ @12tifa12
 /server/test/sprint2/member3.test.js @12tifa12
+
+# Sprint 2 payments, wallet, refunds and late fees (Member 2)
+/client/src/api/payments.api.js @Ali-Mohamed-Amin
+/client/src/api/walletLedger.api.js @Ali-Mohamed-Amin
+/client/src/components/sprint2/m2/ @Ali-Mohamed-Amin
+/client/src/pages/account/LateFeesPage.jsx @Ali-Mohamed-Amin
+/client/src/pages/account/WalletPage.jsx @Ali-Mohamed-Amin
+/client/src/routes/sprint2/member2.routes.jsx @Ali-Mohamed-Amin
+/client/src/styles/sprint2/member2.module.css @Ali-Mohamed-Amin
+/client/test/sprint2/member2.test.jsx @Ali-Mohamed-Amin
+/docs/sprint2/member2.md @Ali-Mohamed-Amin
+/server/src/controllers/account.controller.js @Ali-Mohamed-Amin
+/server/src/controllers/payments.controller.js @Ali-Mohamed-Amin
+/server/src/controllers/walletLedger.controller.js @Ali-Mohamed-Amin
+/server/src/models/AuditLog.js @Ali-Mohamed-Amin
+/server/src/models/PaymentOperation.js @Ali-Mohamed-Amin
+/server/src/models/WalletTransaction.js @Ali-Mohamed-Amin
+/server/src/routes/payments.routes.js @Ali-Mohamed-Amin
+/server/src/routes/walletLedger.routes.js @Ali-Mohamed-Amin
+/server/src/services/payments/ @Ali-Mohamed-Amin
+/server/test/sprint2/member2.demo.js @Ali-Mohamed-Amin
+/server/test/sprint2/member2.test.js @Ali-Mohamed-Amin

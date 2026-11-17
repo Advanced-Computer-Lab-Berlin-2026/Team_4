@@ -6,6 +6,11 @@ import { useAuth } from '../../context/AuthContext';
 import CheckoutSummary from '../../components/sprint2/m1/CheckoutSummary';
 import styles from '../../styles/sprint2/member1.module.css';
 
+// Member 2 ships independently. Keep checkout usable until its picker is merged.
+const { '../../components/sprint2/m2/PaymentMethodPicker.jsx': PaymentMethodPicker } = import.meta.glob(
+  '../../components/sprint2/m2/PaymentMethodPicker.jsx', { eager: true, import: 'default' },
+);
+
 function CheckoutResult({ id }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
@@ -113,7 +118,15 @@ function CheckoutForm({ selection }) {
       {quote && !quote.paymentMethods.length && <p role="status">Payment is temporarily unavailable for this checkout.</p>}
       {quote?.paymentMethods.length > 0 && (
         <form className={styles.form} onSubmit={submit}>
-          {quote.amountMinor > 0 && (
+          {quote.amountMinor > 0 && (PaymentMethodPicker ? (
+            <PaymentMethodPicker
+              amountMinor={quote.amountMinor}
+              methods={quote.paymentMethods}
+              value={method}
+              onChange={setMethod}
+              disabled={submitting}
+            />
+          ) : (
             <fieldset>
               <legend>Payment method</legend>
               <div className={styles.actions}>{quote.paymentMethods.map((choice) => (
@@ -124,8 +137,8 @@ function CheckoutForm({ selection }) {
                 </label>
               ))}</div>
             </fieldset>
-          )}
-          <button className={styles.button} disabled={submitting}>
+          ))}
+          <button className={styles.button} disabled={submitting || !method}>
             {submitting ? 'Submitting…' : 'Submit reservation requests'}
           </button>
         </form>

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:sprint2": "vitest run --environment jsdom test/sprint2",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -15,7 +16,11 @@
     "react-router-dom": "^6.23.1"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
     "@vitejs/plugin-react": "^4.3.0",
-    "vite": "^5.2.12"
+    "jsdom": "^26.1.0",
+    "vite": "^5.2.12",
+    "vitest": "^3.2.7"
   }
 }

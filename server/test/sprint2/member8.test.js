@@ -8,7 +8,7 @@ process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'disposable-member8-integration';
 const mongoose = require('mongoose');
 const app = require('../../src/app');
-const { User, MembershipTier, HouseholdLink, Reservation, ReservationHold } = require('../../src/models');
+const { User, MembershipTier, HouseholdLink, Reservation, ReservationHold, WalletTransaction, PaymentOperation } = require('../../src/models');
 const entitlements = require('../../src/services/membership/entitlements');
 const membership = require('../../src/services/membership/membership');
 const { features } = require('../../src/services/sprint2/bootstrap');
@@ -243,12 +243,14 @@ test('an expired tier loses every benefit; a cancelled tier keeps them until the
   assert.equal(later.discountPercent, 0);
 });
 
-test('only accepted household links share a discount; pending, declined and removed links do not', async () => {
+test('only accepted household links share discounts and waitlist priority', async () => {
   const [a, b] = [await member(), await member()];
   await setTier(b, premium);
 
   const pending = await link(a, b, 'pending');
-  assert.equal((await entitlements.getEntitlements(a.id)).discountPercent, 0);
+  const before = await entitlements.getEntitlements(a.id);
+  assert.equal(before.discountPercent, 0);
+  assert.equal(before.waitlistPriority, 3);
 
   pending.status = 'accepted';
   await pending.save();
@@ -257,16 +259,19 @@ test('only accepted household links share a discount; pending, declined and remo
   assert.equal(linked.discountSource.type, 'household');
   assert.equal(linked.discountSource.userId, b.id);
   assert.equal(linked.discountSource.tierName, 'Premium');
-  // Only the discount is shared.
   assert.equal(linked.tier.name, 'Basic');
-  assert.equal(linked.waitlistPriority, 3);
+  assert.equal(linked.waitlistPriority, 1);
   assert.equal(linked.maxConcurrentReservations, 3);
+  const future = await entitlements.getEntitlements(a.id, new Date(Date.now() + 31 * DAY));
+  assert.deepEqual([future.discountPercent, future.waitlistPriority], [0, 3]);
 
   await pending.deleteOne();
-  assert.equal((await entitlements.getEntitlements(a.id)).discountPercent, 0);
+  const removed = await entitlements.getEntitlements(a.id);
+  assert.deepEqual([removed.discountPercent, removed.waitlistPriority], [0, 3]);
 
   await link(a, b, 'declined');
-  assert.equal((await entitlements.getEntitlements(a.id)).discountPercent, 0);
+  const declined = await entitlements.getEntitlements(a.id);
+  assert.deepEqual([declined.discountPercent, declined.waitlistPriority], [0, 3]);
 });
 
 test('household discounts do not stack: the strongest single discount applies', async () => {
@@ -289,8 +294,10 @@ test('links are not transitive and an ineligible partner shares nothing', async 
   await setTier(c, premium);
   await link(a, b);
   await link(b, c);
-  assert.equal((await entitlements.getEntitlements(a.id)).discountPercent, 0);
-  assert.equal((await entitlements.getEntitlements(b.id)).discountPercent, 20);
+  const aBenefits = await entitlements.getEntitlements(a.id);
+  assert.deepEqual([aBenefits.discountPercent, aBenefits.waitlistPriority], [0, 3]);
+  const bBenefits = await entitlements.getEntitlements(b.id);
+  assert.deepEqual([bBenefits.discountPercent, bBenefits.waitlistPriority], [20, 1]);
 
   await setTier(suspended, premium);
   await User.updateOne({ _id: suspended.id }, { status: 'suspended' });
@@ -332,6 +339,7 @@ test('tiers are public, my membership needs a signed-in member', async () => {
   assert.deepEqual(tiers.body.items.map((t) => [t.name, t.annualFee, t.depositDiscountPercent, t.maxConcurrentReservations]),
     [['Basic', 0, 0, 3], ['Plus', 150, 10, 3], ['Premium', 300, 20, 5]]);
   assert.equal(tiers.body.total, 3);
+  assert.deepEqual(tiers.body.paymentMethods, membership.availablePaymentMethods());
 
   assert.equal((await request('GET', '/api/memberships/me')).status, 401);
   assert.equal((await request('GET', '/api/memberships/me', admin)).status, 403);
@@ -668,4 +676,133 @@ test('the admin report counts active members by effective tier', async () => {
   assert.equal(report.body.items[1].percent, 14.3);
   assert.deepEqual(report.body.byStatus, { active: 2, cancelled: 1 });
   assert.equal(report.body.items.reduce((sum, row) => sum + row.members, 0), report.body.total);
+});
+
+
+test('Member 2 wallet service charges and activates once across concurrent HTTP retries', async () => {
+  const user = await member({ walletBalance: 350 });
+  const attempt = input(user, plus);
+  const responses = await Promise.all([1, 2].map(() => request('POST', '/api/memberships/subscribe', user, attempt)));
+  for (const response of responses) assert.equal(response.status, 200, JSON.stringify(response.body));
+  assert.equal(responses[0].body.membership.renewsAt, responses[1].body.membership.renewsAt);
+  assert.equal(responses[0].body.membership.tier.name, 'Plus');
+  assert.equal((await User.findById(user.id)).walletBalance, 200);
+  assert.equal(await WalletTransaction.countDocuments({ user: user.id, type: 'membership' }), 1);
+});
+
+function membershipStripe() {
+  const adapter = require('../../src/services/payments/stripe');
+  const { webhooks } = require('stripe')('sk_test_member8_fixture');
+  const secret = 'whsec_member8_test_fixture';
+  const sessions = new Map();
+  const keys = new Map();
+  let failCreate = false;
+  const client = {
+    webhooks,
+    checkout: { sessions: {
+      async create(params, { idempotencyKey }) {
+        if (failCreate) {
+          failCreate = false;
+          throw new ApiError(503, 'Temporary test outage');
+        }
+        if (keys.has(idempotencyKey)) return structuredClone(sessions.get(keys.get(idempotencyKey)));
+        const id = 'cs_test_membership_' + randomUUID();
+        const row = {
+          id, url: 'https://checkout.stripe.test/' + id,
+          status: 'open', payment_status: 'unpaid', metadata: params.metadata, params,
+          amount_total: params.line_items[0].price_data.unit_amount,
+          currency: params.line_items[0].price_data.currency,
+        };
+        sessions.set(id, row);
+        keys.set(idempotencyKey, id);
+        return structuredClone(row);
+      },
+      async retrieve(id) { return structuredClone(sessions.get(id)); },
+    } },
+  };
+  adapter.setClient({ client, webhookSecret: secret });
+  return {
+    sessions,
+    outage: () => { failCreate = true; },
+    restore: () => adapter.setClient(null),
+    pay: (row) => Object.assign(row, { status: 'complete', payment_status: 'paid', payment_intent: 'pi_' + row.id }),
+    webhook: async (row, valid = true) => {
+      const payload = JSON.stringify({ type: 'checkout.session.completed', data: { object: row } });
+      const signature = webhooks.generateTestHeaderString({ payload, secret });
+      const response = await fetch(base + '/api/stripe-webhook', {
+        method: 'POST', body: payload,
+        headers: { 'Content-Type': 'application/json', 'Stripe-Signature': valid ? signature : 'forged' },
+      });
+      return response.status;
+    },
+  };
+}
+
+test('signed Stripe webhook activates a paid membership even when the browser never returns', async (t) => {
+  const stripe = membershipStripe();
+  t.after(stripe.restore);
+  const user = await member({ walletBalance: 350 });
+  const attempt = input(user, premium, 'card');
+  const tiers = await request('GET', '/api/memberships/tiers');
+  assert.deepEqual(tiers.body.paymentMethods, ['wallet', 'card']);
+  const start = await request('POST', '/api/memberships/subscribe', user, attempt);
+  assert.equal(start.status, 202);
+  const [session] = stripe.sessions.values();
+  assert.deepEqual(session.params.payment_method_types, ['card']);
+  assert.match(session.params.success_url, /\/membership$/);
+  assert.equal(session.amount_total, 30000);
+  assert.equal(await stripe.webhook(session), 204); // unpaid event
+  const settledEvent = structuredClone(session);
+  stripe.pay(settledEvent);
+  assert.equal(await stripe.webhook(settledEvent), 503); // Stripe's authoritative read has not caught up
+  stripe.pay(session);
+  assert.equal(await stripe.webhook(session, false), 400);
+  assert.equal(await stripe.webhook({ ...session, id: 'cs_test_unrelated' }), 204);
+  assert.equal((await stored(user)).tier, undefined);
+  assert.deepEqual(await Promise.all([stripe.webhook(session), stripe.webhook(session)]), [204, 204]);
+  const activated = await stored(user);
+  assert.equal(String(activated.tier), premium.id);
+  assert.equal(await stripe.webhook(session), 204);
+  const afterReturn = await request('POST', '/api/memberships/subscribe', user, attempt);
+  assert.equal(afterReturn.status, 200);
+  assert.equal(afterReturn.body.membership.renewsAt, activated.renewsAt.toISOString());
+  assert.equal(await PaymentOperation.countDocuments({ user: user.id, kind: 'charge', purpose: 'membership' }), 1);
+  assert.equal((await User.findById(user.id)).walletBalance, 350);
+  assert.equal(await WalletTransaction.countDocuments({ user: user.id }), 0);
+  assert.equal(stripe.sessions.size, 1);
+  if (features().events) {
+    const EventOutbox = require('../../src/models/EventOutbox');
+    const events = await EventOutbox.find({ type: 'membership_changed', aggregateId: user.id }).lean();
+    assert.equal(events.length, 1);
+    assert.equal(events[0].payload.tierName, 'Premium');
+    const { enqueueMembershipReminders } = require('../../src/services/notifications/reminders');
+    const clock = new Date(+activated.renewsAt - 5 * DAY);
+    await enqueueMembershipReminders(clock);
+    await enqueueMembershipReminders(clock);
+    const reminders = await EventOutbox.find({ type: 'membership_expiring', aggregateId: user.id }).lean();
+    assert.equal(reminders.length, 1);
+    assert.equal(reminders[0].payload.link, '/account/membership');
+  }
+});
+
+test('a lost Stripe start resumes with the original price even after a tier is changed or delisted', async (t) => {
+  const stripe = membershipStripe();
+  t.after(stripe.restore);
+  const user = await member();
+  const tier = await MembershipTier.create({ name: 'Seasonal', annualFee: 99, depositDiscountPercent: 8, waitlistPriority: 2 });
+  t.after(() => MembershipTier.deleteOne({ _id: tier.id }));
+  const attempt = input(user, tier, 'card');
+  stripe.outage();
+  assert.equal((await request('POST', '/api/memberships/subscribe', user, attempt)).status, 503);
+  await MembershipTier.updateOne({ _id: tier.id }, { $set: { isActive: false, annualFee: 120, name: 'Seasonal 2' } });
+  const retry = await request('POST', '/api/memberships/subscribe', user, attempt);
+  assert.equal(retry.status, 202, JSON.stringify(retry.body));
+  const [session] = stripe.sessions.values();
+  assert.equal(session.amount_total, 9900);
+  assert.equal(session.params.line_items[0].price_data.product_data.name, 'ShareShed Seasonal membership (1 year)');
+  stripe.pay(session);
+  assert.equal(await stripe.webhook(session), 204);
+  assert.equal(String((await stored(user)).tier), tier.id);
+  assert.equal((await request('POST', '/api/memberships/subscribe', user, attempt)).status, 200);
+  assert.equal(stripe.sessions.size, 1);
 });

@@ -79,7 +79,10 @@ async function findOrCreateCardOp(spec) {
       op = await PaymentOperation.create({
         idempotencyKey: spec.idempotencyKey, kind: 'card_payment', purpose: spec.purpose, user: spec.userId,
         reference: spec.reference, amountMinor: spec.amountMinor, currency: spec.currency, requestHash: cardHash(spec),
-        status: 'pending', stripe: { expiresAt, returnPath: spec.returnPath },
+        status: 'pending', stripe: {
+          expiresAt, returnPath: spec.returnPath,
+          membershipTitle: spec.purpose === 'membership' ? spec.items[0].name : undefined,
+        },
       });
     } catch (err) {
       if (err?.code !== 11000) throw err;
@@ -162,7 +165,7 @@ async function startCardPayment(input) {
     payment_method_types: ['card'],
     line_items: spec.items.map((item) => ({
       quantity: 1,
-      price_data: { currency: spec.currency.toLowerCase(), unit_amount: item.amountMinor, product_data: { name: item.name.slice(0, 200) } },
+      price_data: { currency: spec.currency.toLowerCase(), unit_amount: item.amountMinor, product_data: { name: (op.stripe.membershipTitle || item.name).slice(0, 200) } },
     })),
     success_url: returnUrl,
     cancel_url: returnUrl,
@@ -196,6 +199,20 @@ async function getCardPayment(input) {
   if (!op) return closeExpired ? { state: 'failed' } : { state: 'pending' }; // never started
   if (op.kind !== 'card_payment') throw ApiError.conflict('This is not a card payment');
   return readState(op, { closeExpired });
+}
+
+/** Read the server's original purchase terms, even if the catalogue price changed. */
+async function getMembershipCardAttempt({ idempotencyKey, operationId, stripeSessionId }) {
+  const lookup = operationId ? { _id: operationId, 'stripe.sessionId': stripeSessionId } : { idempotencyKey };
+  const op = await PaymentOperation.findOne({ ...lookup, kind: 'card_payment', purpose: 'membership' })
+    .select('idempotencyKey user amountMinor currency reference status stripe').lean();
+  if (!op) return null;
+  return {
+    idempotencyKey: op.idempotencyKey, userId: String(op.user), amountMinor: op.amountMinor, currency: op.currency,
+    reference: { type: op.reference.type, id: String(op.reference.id) },
+    started: Boolean(op.stripe?.sessionId) || op.status !== 'pending',
+    title: op.stripe?.membershipTitle, returnPath: op.stripe?.returnPath,
+  };
 }
 
 /** The verified card payment behind `paymentReference`, which must belong to this checkout/membership. */
@@ -234,19 +251,26 @@ async function recordCardCheckout(input, session) {
 }
 
 /**
- * verifyCheckoutWebhook(rawBody, signature) -> attemptId | null.
- * Checks Stripe's signature first (a fake request gets 400). Only checkout pages return an id; anything else -> null.
+ * verifyCheckoutWebhook(rawBody, signature) -> checkout attempt ID | membership target | null.
+ * Checks Stripe's signature first. Membership completion is routed using the signed operation and session IDs.
  */
 async function verifyCheckoutWebhook(rawBody, signature) {
   const api = stripe.client();
+  const secret = stripe.webhookSecret();
   let event;
   try {
-    event = api.webhooks.constructEvent(rawBody, signature, stripe.webhookSecret());
+    event = api.webhooks.constructEvent(rawBody, signature, secret);
   } catch (err) {
     throw ApiError.badRequest('Invalid Stripe webhook signature');
   }
   if (!String(event?.type).startsWith('checkout.session.')) return null;
-  const metadata = event.data?.object?.metadata || {};
+  const session = event.data?.object;
+  const metadata = session?.metadata || {};
+  if (metadata.kind === 'membership' && session?.payment_status === 'paid' &&
+    ['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(event.type) &&
+    mongoose.isValidObjectId(metadata.operationId) && typeof session?.id === 'string') {
+    return { membershipOperationId: metadata.operationId, stripeSessionId: session.id };
+  }
   return metadata.kind === 'checkout' && mongoose.isValidObjectId(metadata.attemptId) ? metadata.attemptId : null;
 }
 
@@ -359,6 +383,6 @@ async function recordMembershipPayment(input, session) {
 }
 
 module.exports = {
-  assertCheckoutLines, startCardPayment, getCardPayment, recordCardCheckout, verifyCheckoutWebhook,
+  assertCheckoutLines, startCardPayment, getCardPayment, getMembershipCardAttempt, recordCardCheckout, verifyCheckoutWebhook,
   refundFailedCheckout, recordMembershipPayment, RETURN_PATHS,
 };

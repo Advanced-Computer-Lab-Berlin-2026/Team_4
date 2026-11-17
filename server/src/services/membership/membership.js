@@ -153,42 +153,66 @@ async function payByWallet(userId, tier, payment, deps) {
   });
 }
 
-/** @returns {Promise<{state: 'pending', redirectUrl?: string}|null>} null once the tier is active */
-async function payByCard(userId, tier, payment, deps) {
-  const start = requireFeature(deps.payment, 'startCardPayment', PAYMENT_LABEL);
+/** Confirm Pay→Return and signed webhooks through the same idempotent activation. */
+async function finishCardPayment(tierId, payment, deps) {
   const check = requireFeature(deps.payment, 'getCardPayment', PAYMENT_LABEL);
   const record = requireFeature(deps.payment, 'recordMembershipPayment', PAYMENT_LABEL);
-  await loadMember(userId);
-
-  // Provider calls stay outside any database transaction. Starting is idempotent per key.
-  const { userId: payer, amountMinor, currency, reference, idempotencyKey } = payment;
-  const started = await start({
-    purpose: 'membership', userId: payer, reference, amountMinor, currency, idempotencyKey,
-    title: payment.title, returnPath: payment.returnPath,
-  });
-  if (started?.state === 'pending' && started.redirectUrl) {
-    return { state: 'pending', redirectUrl: started.redirectUrl };
-  }
+  const { userId, amountMinor, currency, reference, idempotencyKey } = payment;
   const provider = await check({ idempotencyKey });
   if (provider?.state === 'pending') {
     return { state: 'pending', ...(provider.redirectUrl && { redirectUrl: provider.redirectUrl }) };
   }
-  if (provider?.state !== 'paid') throw ApiError.conflict('The card payment was not completed. You have not been charged.');
-  if (provider.amountMinor !== payment.amountMinor || provider.currency !== payment.currency) {
+  if (provider?.state !== 'paid') {
+    const message = 'The card payment was not completed. You have not been charged.';
+    throw new ApiError(409, message, [{ field: 'payment', code: 'card_not_completed', message }]);
+  }
+  if (provider.amountMinor !== amountMinor || provider.currency !== currency) {
     throw ApiError.conflict('The card payment does not match this membership. Please contact support.');
   }
 
   await mongoose.connection.transaction(async (session) => {
-    const user = await loadMember(userId, session);
-    // Recording is its own payment operation: reusing the card payment's key would collide with it.
+    // Once Stripe has taken payment, record what was sold even if the account was suspended meanwhile.
+    const user = await User.findOne({ _id: userId, role: ROLES.MEMBER }).select('membership').session(session).lean();
+    if (!user) throw ApiError.notFound('Member account for this payment was not found.');
+    // The provider page and the settlement have distinct idempotency keys.
     const outcome = await record({
-      userId: payer, amountMinor, currency, reference,
+      userId, amountMinor, currency, reference,
       paymentReference: provider.reference, idempotencyKey: idempotencyKey + ':record',
     }, session);
-    if (alreadyApplied(outcome)) return;
-    await activate(user, tier, new Date(), session);
+    if (!alreadyApplied(outcome)) await activate(user, { _id: tierId }, new Date(), session);
   });
+  await emitChanged(deps, userId, idempotencyKey);
   return null;
+}
+
+async function payByCard(userId, tier, payment, deps) {
+  const start = requireFeature(deps.payment, 'startCardPayment', PAYMENT_LABEL);
+  requireFeature(deps.payment, 'getCardPayment', PAYMENT_LABEL);
+  requireFeature(deps.payment, 'recordMembershipPayment', PAYMENT_LABEL);
+  await loadMember(userId);
+
+  // Provider calls stay outside any database transaction. Starting is idempotent per key.
+  const started = await start({ ...payment, purpose: 'membership' });
+  if (started?.state === 'pending' && started.redirectUrl) {
+    return { state: 'pending', redirectUrl: started.redirectUrl };
+  }
+  return finishCardPayment(tier._id, payment, deps);
+}
+
+async function reconcileCardMembership({ membershipOperationId, stripeSessionId }, deps = features()) {
+  const readAttempt = requireFeature(deps.payment, 'getMembershipCardAttempt', PAYMENT_LABEL);
+  const payment = await readAttempt({ operationId: membershipOperationId, stripeSessionId });
+  if (!payment) return;
+  const [kind, userId, tierId, operationKey] = payment.idempotencyKey.split(':');
+  if (kind !== 'membership' || userId !== payment.userId || !mongoose.isObjectIdOrHexString(tierId) || !operationKey) return;
+  const pending = await finishCardPayment(tierId, payment, deps);
+  if (pending) throw new ApiError(503, 'Stripe has not confirmed the membership payment yet.');
+}
+
+function availablePaymentMethods(deps = features()) {
+  return PAYMENT_METHODS.filter((method) => (method === 'wallet'
+    ? typeof deps.payment?.chargeMembership === 'function'
+    : ['startCardPayment', 'getCardPayment', 'recordMembershipPayment'].every((op) => typeof deps.payment?.[op] === 'function')));
 }
 
 /**
@@ -202,6 +226,19 @@ async function subscribe({ userId, tierId, method, operationKey }, deps = featur
     throw ApiError.badRequest('A valid operation key is required.');
   }
   if (!mongoose.isObjectIdOrHexString(tierId)) throw ApiError.badRequest('Choose a membership tier.');
+  const id = String(userId);
+  const canonicalTierId = String(new mongoose.Types.ObjectId(tierId));
+  const key = ['membership', id, canonicalTierId, operationKey].join(':');
+  if (method === 'card' && deps.payment?.getMembershipCardAttempt) {
+    await loadMember(id);
+    const attempt = await deps.payment.getMembershipCardAttempt({ idempotencyKey: key });
+    if (attempt) {
+      const pending = attempt.started
+        ? await finishCardPayment(canonicalTierId, attempt, deps)
+        : await payByCard(id, { _id: canonicalTierId }, attempt, deps);
+      return pending ? { payment: pending } : getMyMembership(id);
+    }
+  }
   const tier = await MembershipTier.findOne({ _id: tierId, isActive: { $ne: false } }).lean();
   if (!tier) throw ApiError.notFound('This membership tier is unavailable.');
   const amountMinor = Math.round((tier.annualFee || 0) * 100);
@@ -209,8 +246,6 @@ async function subscribe({ userId, tierId, method, operationKey }, deps = featur
     throw ApiError.badRequest(tier.name + ' is free. Cancel your subscription to return to it.');
   }
 
-  const id = String(userId);
-  const key = ['membership', id, String(tier._id), operationKey].join(':');
   // Member 2 contract (docs/sprint2/member2.md, section 3). The reference names the paying member;
   // the idempotency key identifies this payment attempt for this tier.
   const payment = {
@@ -225,11 +260,11 @@ async function subscribe({ userId, tierId, method, operationKey }, deps = featur
 
   if (method === 'wallet') {
     await payByWallet(id, tier, payment, deps);
+    await emitChanged(deps, id, key);
   } else {
     const pending = await payByCard(id, tier, payment, deps);
     if (pending) return { payment: pending };
   }
-  await emitChanged(deps, id, key);
   return getMyMembership(id);
 }
 
@@ -255,30 +290,30 @@ async function cancel(userId, deps = features()) {
 async function distributionReport() {
   const now = new Date();
   const memberFilter = { role: ROLES.MEMBER, status: USER_STATUS.ACTIVE };
-  const [tiers, total, paidGroups] = await Promise.all([
+  const paidPeriod = { $and: [
+    { $ne: [{ $ifNull: ['$membership.tier', null] }, null] },
+    { $in: ['$membership.status', ['active', 'cancelled']] },
+    { $gt: ['$membership.renewsAt', now] },
+  ] };
+  const [tiers, groups] = await Promise.all([
     MembershipTier.find().sort({ annualFee: 1, waitlistPriority: -1, name: 1 }).lean(),
-    User.countDocuments(memberFilter),
     User.aggregate([
-      { $match: {
-        ...memberFilter,
-        'membership.tier': { $ne: null },
-        'membership.status': { $in: ['active', 'cancelled'] },
-        'membership.renewsAt': { $gt: now },
-      } },
+      { $match: memberFilter },
       { $group: {
-        _id: '$membership.tier',
+        _id: { $cond: [paidPeriod, '$membership.tier', null] },
         members: { $sum: 1 },
         cancelled: { $sum: { $cond: [{ $eq: ['$membership.status', 'cancelled'] }, 1, 0] } },
       } },
     ]),
   ]);
 
+  const total = groups.reduce((sum, group) => sum + group.members, 0);
   const baseTier = tiers.find((tier) => tier.name === BASE_TIER_NAME);
   const known = new Map(tiers.map((tier) => [String(tier._id), tier]));
   const counts = new Map();
   const byStatus = { active: 0, cancelled: 0 };
   let paidMembers = 0;
-  for (const group of paidGroups) {
+  for (const group of groups) {
     const tierId = String(group._id);
     // A paid period on the base tier or on a deleted tier is treated as Basic, as entitlements do.
     if (!known.has(tierId) || (baseTier && tierId === String(baseTier._id))) continue;
@@ -300,4 +335,7 @@ async function distributionReport() {
   return { items, total, byStatus, generatedAt: now };
 }
 
-module.exports = { listTiers, getMyMembership, subscribe, cancel, distributionReport, PAYMENT_METHODS };
+module.exports = {
+  listTiers, getMyMembership, subscribe, cancel, distributionReport,
+  availablePaymentMethods, reconcileCardMembership, PAYMENT_METHODS,
+};

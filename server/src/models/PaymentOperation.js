@@ -30,6 +30,7 @@ const schema = new Schema(
       sessionId: { type: String, index: { unique: true, sparse: true } },
       url: String,           // where the borrower is sent to pay
       expiresAt: Date,       // when Stripe closes the page (fixed at creation, so retries send identical requests)
+      membershipTitle: String, // keep retry parameters stable if the tier is renamed
       returnPath: String,    // app page Stripe sends the borrower back to
       refundId: String,      // retry polls this provider refund until it settles
       refundAttempt: Number, // increments only when Stripe confirms the previous refund failed

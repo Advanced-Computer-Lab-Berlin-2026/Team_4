@@ -13,7 +13,7 @@ import styles from '../../../styles/sprint2/member2.module.css';
 
 const egp = (minor) => formatMoney(minor / 100);
 
-export default function PaymentMethodPicker({ amountMinor, methods = ['wallet', 'card'], value, onChange, disabled = false, name }) {
+export default function PaymentMethodPicker({ amountMinor, methods = ['wallet', 'card'], value, onChange, disabled = false, name, showReservationPolicy = true }) {
   const id = useId();
   const groupName = name || `payment-method-${id}`;
   const [balanceMinor, setBalanceMinor] = useState(null);
@@ -22,9 +22,11 @@ export default function PaymentMethodPicker({ amountMinor, methods = ['wallet', 
   useEffect(() => {
     let ignore = false;
     getWallet().then((w) => { if (!ignore) setBalanceMinor(w.balanceMinor); }).catch(() => { if (!ignore) setBalanceMinor(null); });
-    getPolicy().then((p) => { if (!ignore) setPolicy(p.policy); }).catch(() => {});
+    if (showReservationPolicy) {
+      getPolicy().then((p) => { if (!ignore) setPolicy(p.policy); }).catch(() => {});
+    }
     return () => { ignore = true; };
-  }, []);
+  }, [showReservationPolicy]);
 
   const walletTooLow = balanceMinor !== null && balanceMinor < amountMinor;
   const options = [
@@ -62,7 +64,7 @@ export default function PaymentMethodPicker({ amountMinor, methods = ['wallet', 
           </span>
         </label>
       ))}
-      {policy && (
+      {showReservationPolicy && policy && (
         <p className={styles.meta}>
           Free cancellation up to {policy.cancellation.freeCancellationHours} hours before pickup;
           after that, {policy.cancellation.partialRefundPercent}% of the deposit is refunded to your wallet.

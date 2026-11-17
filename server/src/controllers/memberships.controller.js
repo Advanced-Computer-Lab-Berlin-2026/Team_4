@@ -9,7 +9,7 @@ const membership = require('../services/membership/membership');
 /** GET /api/memberships/tiers - Req 83 - public */
 exports.listTiers = asyncHandler(async (req, res) => {
   const items = await membership.listTiers();
-  res.json({ items, total: items.length });
+  res.json({ items, total: items.length, paymentMethods: membership.availablePaymentMethods() });
 });
 
 /** GET /api/memberships/me - Req 86 - member */

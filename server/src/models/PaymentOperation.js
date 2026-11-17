@@ -31,7 +31,8 @@ const schema = new Schema(
       url: String,           // where the borrower is sent to pay
       expiresAt: Date,       // when Stripe closes the page (fixed at creation, so retries send identical requests)
       returnPath: String,    // app page Stripe sends the borrower back to
-      refundId: String,      // refunds only
+      refundId: String,      // retry polls this provider refund until it settles
+      refundAttempt: Number, // increments only when Stripe confirms the previous refund failed
     },
     completedAt: Date,
   },

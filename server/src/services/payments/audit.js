@@ -2,7 +2,7 @@
 // (result), with a timestamp (`at`, set by the model) and the reservation id. Written in the SAME transaction
 // as the money change, so an audit row exists if and only if the change happened.
 const AuditLog = require('../../models/AuditLog');
-const { fromMinor } = require('./money');
+const { fromMinor, toMinor } = require('./money');
 
 async function record({ action, reservationId, userId, amountMinor, operationId, inputs, result }, { session } = {}) {
   const [row] = await AuditLog.create(
@@ -21,4 +21,18 @@ async function record({ action, reservationId, userId, amountMinor, operationId,
   return row;
 }
 
-module.exports = { record };
+function checkoutLine({ attemptId, borrowerId, method, line, operationId, paymentReference, balanceMinor }, session) {
+  return record({
+    action: line.amountMinor > 0 ? 'deposit_charged' : 'deposit_calculated',
+    reservationId: line.reservationId, userId: borrowerId, amountMinor: line.amountMinor, operationId,
+    inputs: {
+      method, paymentReference, checkoutAttemptId: attemptId, itemId: line.itemId,
+      startDate: line.startDate, endDate: line.endDate, deposit: line.deposit,
+      fulfilmentMethod: line.fulfilment?.method, deliveryFeeMinor: toMinor(line.fulfilment?.deliveryFee),
+      lineAmountMinor: line.amountMinor,
+    },
+    result: { chargedMinor: line.amountMinor, balanceAfterMinor: balanceMinor },
+  }, { session });
+}
+
+module.exports = { record, checkoutLine };

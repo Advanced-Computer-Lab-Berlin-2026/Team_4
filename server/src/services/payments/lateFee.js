@@ -26,7 +26,7 @@ const DAY_MS = 24 * 60 * MINUTE_MS;
  */
 function calculateLateFee({ depositMinor, endDate, returnedAt }) {
   const { graceMinutes, percentOfDepositPerDay, capPercentOfDeposit } = policy.lateFee;
-  const lateMs = new Date(returnedAt) - new Date(endDate);
+  const lateMs = returnedAt == null || endDate == null ? NaN : new Date(returnedAt) - new Date(endDate);
   if (Number.isNaN(lateMs)) throw ApiError.badRequest('endDate and returnedAt must be valid dates');
 
   const minutesLate = Math.max(0, Math.round(lateMs / MINUTE_MS));
@@ -92,7 +92,7 @@ async function applyLateFee(input, session) {
  */
 async function collectOutstanding({ userId, session }) {
   const owed = await PaymentOperation.find({ user: userId, kind: 'late_fee', status: 'succeeded', outstandingMinor: { $gt: 0 } })
-    .sort({ createdAt: 1 }).session(session);
+    .sort({ createdAt: 1, _id: 1 }).session(session);
   let collectedTotal = 0;
   for (const fee of owed) {
     const balanceMinor = await wallet.getBalanceMinor(userId, { session });

@@ -30,6 +30,7 @@ The shared reservation engine uses UTC date-only fields. A reservation blocks th
 
 Export the following from `server/src/services/payments/payment.js`.
 
+- `auditFreeCheckoutLines(input, session)` writes the zero-amount deposit calculations against their reservation IDs inside the booking transaction.
 - `chargeWalletCheckout(input, session)` atomically debits the total and writes ledger/audit rows for the supplied reservation IDs. Throw a validation or conflict error on insufficient funds. Return only once the mutations in the supplied transaction have succeeded.
 - `releaseDeposit({ userId, reservationId, reference, amountMinor, currency, idempotencyKey }, session)` credits the held deposit on a good return. A lender rejection reuses `refundToWallet` with the same fields and the full paid amount. The call includes `depositMinor` and `deliveryMinor` for ledger allocation. These methods update wallet, ledger and audit in the supplied session. The reservation command owns the deposit status.
 - `applyLateFee({ userId, reservationId, reference, returnedAt, endDate, currency, idempotencyKey }, session)` applies the late-fee policy in the supplied session and returns `{ feeMinor }`. It runs only for an overdue return. A paid transition requires the appropriate provider to succeed.
@@ -38,7 +39,7 @@ Export the following from `server/src/services/payments/payment.js`.
 - `getCardPayment(input)` reads authoritative provider state. Return `{state:"pending",redirectUrl?}`, `{state:"failed"}` for definitive nonpayment, or `{state:"paid",reference,amountMinor,currency}`. When `closeExpired` is true, close further attempts definitively before returning failed. Handle late success and provider creation retries using the durable payment operation. A still-unknown result remains pending.
 - `recordCardCheckout(input, session)` persists the ledger/audit records for a verified card payment before reservations commit. The input includes `paymentReference` and the reserved line IDs.
 - `verifyCheckoutWebhook(rawBody, signature)` verifies a Stripe event and returns an affected checkout attempt ID, or `null` for unrelated events. Use the mounted raw-body route at `/api/stripe-webhook` as the single callback.
-- `refundFailedCheckout(input)` compensates the verified provider payment identified by `paymentReference`, including any provider amount mismatch. This operation is retried using the same checkout reference and must be idempotent across instances.
+- `refundFailedCheckout(input)` compensates the verified provider payment identified by `paymentReference`, including any provider amount mismatch. Return `{state:"pending"}` while Stripe is processing compensation. Keep the checkout in `refund_due` until Stripe confirms the full refund. Retries use the same checkout reference and must be idempotent across instances.
 
 Checkout payment input includes `attemptId, borrowerId, idempotencyKey, amountMinor, currency, expiresAt, lines`. Each line includes the planned `reservationId`. Wallet and cancellation mutations use the caller's MongoDB session. Stripe calls occur outside database transactions. Keep a durable Stripe operation and idempotency keys for initialization, compensation and callback processing. The server reconciles expired attempts and pending compensation in the background.
 

@@ -104,22 +104,19 @@ async function chargeWalletCheckout(input, session) {
         note: `Deposit paid: ${line.title || 'reservation'}`,
       }, { session: s }));
 
-      const deliveryFeeMinor = toMinor(line.fulfilment?.deliveryFee);
-      await audit.record({
-        action: 'deposit_charged',
-        reservationId: line.reservationId,
-        userId: borrowerId,
-        amountMinor: line.amountMinor,
-        operationId: operation._id,
-        inputs: {
-          method: 'wallet', checkoutAttemptId: attemptId, itemId: line.itemId, startDate: line.startDate, endDate: line.endDate,
-          deposit: line.deposit, fulfilmentMethod: line.fulfilment?.method, deliveryFeeMinor, lineAmountMinor: line.amountMinor,
-        },
-        result: { chargedMinor: line.amountMinor, balanceAfterMinor: balanceMinor },
-      }, { session: s });
+      await audit.checkoutLine({
+        attemptId, borrowerId, method: 'wallet', line, operationId: operation._id, balanceMinor,
+      }, s);
     }
     return { chargedMinor: amountMinor, balanceMinor };
   }, session);
+}
+
+// Free lines still have a deposit calculation. The booking transaction records it once with the reservation.
+async function auditFreeCheckoutLines({ attemptId, borrowerId, lines, method }, session) {
+  for (const line of lines.filter(({ amountMinor }) => amountMinor === 0)) {
+    await audit.checkoutLine({ attemptId, borrowerId, method, line }, session);
+  }
 }
 
 /**
@@ -136,6 +133,7 @@ module.exports = {
   runOperation,
   charge,
   chargeWalletCheckout,
+  auditFreeCheckoutLines,
   creditReferral,
   chargeMembership,
   recordMembershipPayment: card.recordMembershipPayment,

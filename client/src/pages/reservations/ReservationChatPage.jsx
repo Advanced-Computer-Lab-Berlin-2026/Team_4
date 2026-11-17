@@ -107,7 +107,7 @@ function Details({ reservationId }) {
               </div>
             </div>
           )}
-          {reservation.status === 'cancelled' && reservation.depositAmount > 0 && (
+          {reservation.status === 'cancelled' && (reservation.depositAmount > 0 || reservation.refundAmount > 0) && (
             <p>Wallet refund: {reservation.refundAmount} EGP</p>
           )}
           {open && (reservation.status === 'active' || new Date(reservation.endDate) > new Date()) && (

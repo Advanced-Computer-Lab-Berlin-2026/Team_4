@@ -9,6 +9,7 @@ const app = require('../../src/app');
 const { User, Category, Item, Reservation, ReservationHold, CheckoutAttempt, BorrowList, MembershipTier, DamageReport } = require('../../src/models');
 const checkout = require('../../src/services/reservations/checkout');
 const { cancel } = require('../../src/services/reservations/cancellation');
+const { features } = require('../../src/services/sprint2/bootstrap');
 const commands = require('../../src/services/reservations/reservationCommands');
 const { normalizeRange } = require('../../src/services/reservations/availability');
 const { signToken } = require('../../src/utils/tokens');
@@ -214,10 +215,11 @@ test('borrower lock enforces a membership cap across different listings', async 
 test('paid wallet checkout fails safely without Member 2 service; integration receives transaction and settlement is once', async () => {
   const tool = await item('Paid drill', { depositAmount: 100 });
   const selection = single(tool);
-  const quote = await httpQuote(selection);
+  const withoutPayment = { ...features(), payment: undefined };
+  const quote = await checkout.preview(borrower.id, selection, withoutPayment);
   assert.equal(quote.amountMinor, 15000);
   assert.deepEqual(quote.paymentMethods, []);
-  assert.equal((await request('POST', '/api/checkout', borrower, payload(selection, quote))).status, 503);
+  await assert.rejects(checkout.begin(borrower.id, payload(selection, quote), withoutPayment), { status: 503 });
   assert.equal(await Reservation.countDocuments({ item: tool.id }), 0);
 
   let charges = 0;
@@ -485,4 +487,49 @@ test('condition photos have stable private metadata and spoofed images are rejec
     await new Promise((resolve) => listener.close(resolve));
     await Promise.all(written.map((file) => fs.unlink(file)));
   }
+});
+
+test('cancelling a delivery refunds the full fee and only the allowed part of the deposit', async () => {
+  const record = await lifecycleFixture('confirmed', {
+    deposit: { amount: 100, status: 'held' },
+    fulfilment: { method: 'delivery', deliveryFee: 25, deliveryStatus: 'preparing' },
+  });
+  const input = { actorId: borrower.id, reservationId: record.id };
+  const depositOnly = { payment: { settleCancellation: async () => ({ refundMinor: 5000 }) } };
+  await assert.rejects(cancel(input, depositOnly), { status: 503 });
+  assert.equal((await Reservation.findById(record.id)).status, 'confirmed');
+
+  let settlements = 0;
+  const deps = { payment: { async settleCancellation(quote, session) {
+    assert(session.inTransaction());
+    assert.equal(quote.amountMinor, 10000);
+    assert.equal(quote.deliveryMinor, 2500);
+    settlements++;
+    return { refundMinor: 5000, deliveryRefundMinor: 2500 };
+  } } };
+  const cancelled = await cancel(input, deps);
+  await cancel(input, deps);
+  assert.equal(cancelled.cancellation.refundAmount, 75);
+  assert.equal(cancelled.deposit.forfeited, 50);
+  assert.equal(cancelled.deposit.status, 'partially_forfeited');
+  assert.equal(settlements, 1);
+});
+
+test('delivery-only charges are refunded before handover and completed deliveries cannot be cancelled', async () => {
+  const fields = { fulfilment: { method: 'delivery', deliveryFee: 25, deliveryStatus: 'preparing' } };
+  const record = await lifecycleFixture('confirmed', fields);
+  const delivered = await lifecycleFixture('confirmed', {
+    fulfilment: { ...fields.fulfilment, deliveryStatus: 'delivered' },
+  });
+  let settlements = 0;
+  const deps = { payment: { async settleCancellation(quote) {
+    assert.equal(quote.amountMinor, 0);
+    settlements++;
+    return { refundMinor: 0, deliveryRefundMinor: quote.deliveryMinor };
+  } } };
+  await assert.rejects(cancel({ actorId: borrower.id, reservationId: delivered.id }, deps), { status: 409 });
+  const cancelled = await cancel({ actorId: borrower.id, reservationId: record.id }, deps);
+  assert.equal(cancelled.cancellation.refundAmount, 25);
+  assert.equal(cancelled.deposit.status, 'none');
+  assert.equal(settlements, 1);
 });

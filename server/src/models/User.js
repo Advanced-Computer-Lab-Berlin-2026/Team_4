@@ -35,6 +35,7 @@ const userSchema = new Schema(
     lenderStatus: { type: String, enum: Object.values(LENDER_STATUS), default: LENDER_STATUS.NONE, index: true },
 
     status: { type: String, enum: Object.values(USER_STATUS), default: USER_STATUS.ACTIVE, index: true },
+    isFlagged: { type: Boolean, default: false }, // moderation marker; account access is governed by status
     suspension: { reason: String, at: Date, by: { type: Schema.Types.ObjectId, ref: 'User' } },
 
     createdBy: { type: Schema.Types.ObjectId, ref: 'User' }, // set when an admin creates another admin (Req 6)

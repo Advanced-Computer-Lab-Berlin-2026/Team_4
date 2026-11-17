@@ -78,7 +78,8 @@ function actionsFor(r, user, { hasDamageCase, approveBlocked, extensionBlocked }
   return {
     approve: isLender && r.status === 'pending' && r.endDate > now && canStillBook(r) && !approveBlocked, // Member 1's confirm re-checks these
     reject: isLender && r.status === 'pending' && depositHeld, // Member 1's reject refunds a held deposit
-    pickup: isLender && r.status === 'confirmed' && r.startDate <= now && r.endDate > now,
+    // Deliveries start when Member 6's tracking marks them delivered (Member 1's pickup refuses them).
+    pickup: isLender && r.status === 'confirmed' && r.startDate <= now && r.endDate > now && r.fulfilment?.method !== 'delivery',
     returnGood: isLender && active && !hasDamageCase && r.returnCondition !== 'damaged' && depositHeld,
     reportDamage: isLender && active && !hasDamageCase && depositHeld, // Member 1's returnDamaged needs the deposit held
     requestExtension: isBorrower && active && now < r.endDate && !extensionPending,
@@ -110,7 +111,8 @@ function toDto(r, user, extra, now) {
     lender: person(r.lender),
     role: String(r.borrower?._id || r.borrower) === String(user._id) ? 'borrower' : 'lender',
     deposit: { amount: r.deposit?.amount ?? 0, status: r.deposit?.status || 'none' },
-    fulfilment: { method: r.fulfilment?.method || 'pickup', deliveryStatus: r.fulfilment?.deliveryStatus || 'none' },
+    // Same stage Member 1 shows (reservationCommands.deliveryStage): a delivery that hasn't moved yet is "preparing".
+    fulfilment: { method: r.fulfilment?.method || 'pickup', deliveryStatus: r.fulfilment?.method === 'delivery' ? (r.fulfilment?.deliveryStatus && r.fulfilment.deliveryStatus !== 'none' ? r.fulfilment.deliveryStatus : 'preparing') : 'none' },
     pickedUpAt: r.pickedUpAt || null,
     returnedAt: r.returnedAt || null,
     completedAt: r.completedAt || null,

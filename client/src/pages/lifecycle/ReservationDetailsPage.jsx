@@ -12,7 +12,7 @@ import Spinner from '../../components/common/Spinner';
 import Alert from '../../components/common/Alert';
 import ReservationTimeline from '../../components/sprint2/m5/ReservationTimeline';
 import RequestAnswer from '../../components/sprint2/m5/RequestAnswer';
-import PickupButton from '../../components/sprint2/m5/PickupButton';
+import PickupButton, { DELIVERY_STAGE } from '../../components/sprint2/m5/PickupButton';
 import ReturnActions from '../../components/sprint2/m5/ReturnActions';
 import ExtensionRequest from '../../components/sprint2/m5/ExtensionRequest';
 import ExtensionAnswer from '../../components/sprint2/m5/ExtensionAnswer';
@@ -114,7 +114,9 @@ export default function ReservationDetailsPage() {
       {lender && r.status === 'confirmed' && !r.flags?.pickupMissed && (
         <section className={`card ${s.answerCard}`} aria-labelledby="res-pickup-title">
           <div className="card-body">
-            <h2 id="res-pickup-title" className={s.cardTitle}>{r.fulfilment?.method === 'delivery' ? 'Handover' : 'Pickup'}</h2>
+            <h2 id="res-pickup-title" className={s.cardTitle}>
+              {r.fulfilment?.method === 'delivery' ? `Delivery · ${DELIVERY_STAGE[r.fulfilment.deliveryStatus] || 'Preparing'}` : 'Pickup'}
+            </h2>
             <PickupButton reservation={r} onStale={(message) => { setNotice(''); setProblem(message); refresh(); }}
               onDone={(updated, message) => { setR(updated); setProblem(''); setNotice(message); }} />
           </div>

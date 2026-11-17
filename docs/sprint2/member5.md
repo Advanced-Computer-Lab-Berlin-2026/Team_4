@@ -224,7 +224,7 @@ Read-only. Lists reservations where I am the **borrower**.
 
 **PATCH `/:id/reject`** — `{ reason? }`, up to 500 characters, shown to the borrower. The command refunds the held deposit and any charged delivery fee in full through Member 2.
 
-**PATCH `/:id/pickup`** — only while `confirmed` and within the booked interval (the command decides). The page shows **Mark as picked up** (**Mark as handed over** for a delivery, since Member 6's "delivered" doesn't change the booking) on the details page and on the Booking requests card, and "You can mark it picked up from …" before the start date. Condition photos (Member 3) are optional; the page reminds the lender to add them.
+**PATCH `/:id/pickup`** — only while `confirmed` and within the booked interval (the command decides). The page shows **Mark as picked up** on the details page and on the Booking requests card, and "You can mark it picked up from …" before the start date. **Deliveries have no pickup step:** Member 1's `pickup` refuses them, and the booking becomes active when Member 6's delivery tracking (`/delivery-tracking/:id`) marks it **delivered**. For a delivery the details page shows a **Delivery · <stage>** box ("Bring the item to <borrower>, then mark it as delivered.") with **Update delivery**, a link to that page; `actions.pickup` is `false` for deliveries. Condition photos (Member 3) are optional; the page reminds the lender to add them.
 
 **PATCH `/:id/return`** — good return (Req 60). The command refuses it while a damage case is open, stamps `returnedAt` and `completedAt`, **releases the deposit**, applies any late fee (Member 2), recalculates trust for both people (Member 3) and queues the completion events (Member 9). An early return is allowed.
 
@@ -365,16 +365,15 @@ None of these are in the requirement sheet. The project description allows the t
 
 **Answered by the other members' contracts (16 Nov 2026):**
 - **Member 3** (`docs/sprint2/member3.md`): the damage form is `/damage-reports/new?reservation=<id>`; `hasOpenDamageCase(reservationId)` is in `services/damage/damage.js` (Member 1's `return` already refuses while a case exists).
-- **Member 6** (`docs/sprint2/member6.md`): delivery settings are in his **Pickup & rules** tab and saved through his endpoint. "Delivered" only changes `fulfilment.deliveryStatus`, not the booking status, so the lender still marks **picked up** (Req 59) for a delivery.
+- **Member 6** (`docs/sprint2/member6.md`): delivery settings are in his **Pickup & rules** tab and saved through his endpoint. Since Member 1's update of 17 Nov, marking a delivery **delivered** (Member 1's `advanceDelivery`) also makes the booking active, and `pickup` refuses deliveries, so for deliveries the lender uses the delivery page instead of **Mark as picked up**.
 - **Member 2** (`docs/sprint2/member2.md`): `refundToWallet` (full deposit and delivery fee on a declined request), `releaseDeposit` and `applyLateFee` are in `services/payments/payment.js`, the file Member 1's commands load, so they connect once merged. The late fee starts 60 minutes after the due time (10 % of the deposit per started day, capped at 100 %); `calculateLateFee` lets my return screen show the fee before the lender confirms.
 
 **Still open:**
 
 | To | Request / question | Needed for |
 |---|---|---|
-| **Member 1** | Add a **Borrow list** link (`/borrow-list`) to the member menu in `navLinks.js` (shared, his file). Without it the page is only reachable from the item page's button. | Req 46–48 |
-| **Member 1** | Reservations menu: Req 53/54 (view all, filter by date or status) are Member 5's. Point the **Reservations** menu link to `/reservations` (my filtered list), whose rows open his `/my-reservations/:id` for chat and cancellation, so members don't see two different "my reservations" lists. | Req 53, 54, 55, 68 |
-| **Member 1** | Lender menu: add **Booking requests** (`/lender/reservations`) and **Dashboard** (`/lender/dashboard`) to `lenderLinks` in `navLinks.js`, next to **My items**. Today lenders reach them only through the buttons on My items. | Req 56–60, 106 |
+| **Member 1** | Add a **Borrow list** link (`/borrow-list`) to the member menu in `navLinks.js` (shared, his file). Without it the page is only reachable from the item page's button. (**Reservations** → `/reservations` and **Booking requests** were added on 17 Nov.) | Req 46–48 |
+| **Member 1** | Lender menu: add **Dashboard** (`/lender/dashboard`) to `lenderLinks` in `navLinks.js` (**Booking requests** is there since 17 Nov). Today lenders reach the dashboard only through the buttons on My items and Booking requests. | Req 106 |
 | **Member 7** | Embed `<BorrowListButton itemId={item._id} ownerId={item.owner?._id} maxBorrowDays={item.rules?.maxBorrowDays} />` on `ItemDetailsPage` (import from `components/sprint2/m5/BorrowListButton`); read `item.tags` for alternatives (old items may have none) | Req 46, 92 |
 
 ---

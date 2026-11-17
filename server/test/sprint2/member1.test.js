@@ -226,6 +226,7 @@ test('paid wallet checkout fails safely without Member 2 service; integration re
   let settlements = 0;
   let notifications = 0;
   const deps = {
+    ...withoutPayment,
     payment: {
       chargeWalletCheckout: async (input, session) => {
         assert(session.inTransaction());

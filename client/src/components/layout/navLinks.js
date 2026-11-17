@@ -1,8 +1,12 @@
 // FOUNDATION - nav links per audience (pre-populated). Owner of Navbar: Member 1.
 import routes from '../../routes/routeConfig';
 
-function ifRegistered(to, label) {
-  return routes.some((route) => route.path === to) ? [{ to, label }] : [];
+function isRegistered(path) {
+  return routes.some((route) => route.path === path);
+}
+
+function ifRegistered(to, label, path = to) {
+  return isRegistered(path) ? [{ to, label }] : [];
 }
 
 export const guestLinks = [
@@ -14,7 +18,8 @@ export const guestLinks = [
 export const memberLinks = [
   { to: '/catalog', label: 'Browse items' },
   { to: '/reserve', label: 'Reserve' },
-  { to: '/my-reservations', label: 'Reservations' },
+  { to: isRegistered('/reservations') ? '/reservations' : '/my-reservations', label: 'Reservations' },
+  ...ifRegistered('/delivery-tracking', 'Deliveries', '/delivery-tracking/:reservationId?'),
   { to: '/favorites', label: 'Favorites' },
   { to: '/household', label: 'Household' },
   { to: '/notices', label: 'Notices' },
@@ -25,7 +30,10 @@ export const memberLinks = [
 ];
 
 // extra links shown only to verified lenders / members who can still apply
-export const lenderLinks = [{ to: '/lender/items', label: 'My items' }];
+export const lenderLinks = [
+  { to: '/lender/items', label: 'My items' },
+  ...ifRegistered('/lender/reservations', 'Booking requests'),
+];
 export const applyLink = { to: '/lender/apply', label: 'Become a lender' };
 
 export const adminLinks = [
@@ -40,6 +48,8 @@ export const adminLinks = [
   ...ifRegistered('/admin/reports/usage', 'Usage report'),
   ...ifRegistered('/admin/reports/damage', 'Damage report'),
   ...ifRegistered('/admin/membership-report', 'Membership report'),
+  ...ifRegistered('/admin/promo-codes', 'Promo codes'),
+  ...ifRegistered('/admin/promo-usage', 'Promo usage'),
 ];
 
 // account dropdown (any logged-in user)

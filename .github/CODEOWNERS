@@ -189,3 +189,26 @@
 /server/test/sprint2/member4.test.js @janakhalifa5
 /client/test/sprint2/member4.test.jsx @janakhalifa5
 /docs/sprint2/member4.md @janakhalifa5
+
+# Sprint 2 delivery and deposit promotions (Member 6)
+/server/src/controllers/delivery.controller.js @SeiffNader
+/server/src/routes/delivery.routes.js @SeiffNader
+/server/src/controllers/promoCodes.controller.js @SeiffNader
+/server/src/routes/promoCodes.routes.js @SeiffNader
+/server/src/models/PromoCode.js @SeiffNader
+/server/src/models/PromoRedemption.js @SeiffNader
+/server/src/services/delivery/ @SeiffNader
+/server/src/services/policies/ @SeiffNader
+/server/src/services/pricing/ @SeiffNader
+/server/src/services/promotions/ @SeiffNader
+/client/src/api/delivery.api.js @SeiffNader
+/client/src/api/promoCodes.api.js @SeiffNader
+/client/src/components/sprint2/m6/ @SeiffNader
+/client/src/pages/admin/AdminPromoCodesPage.jsx @SeiffNader
+/client/src/pages/admin/AdminPromoUsagePage.jsx @SeiffNader
+/client/src/routes/sprint2/member6.routes.jsx @SeiffNader
+/client/src/styles/sprint2/member6.module.css @SeiffNader
+/server/test/sprint2/member6.test.js @SeiffNader
+/server/test/sprint2/member6/ @SeiffNader
+/client/test/sprint2/member6.test.jsx @SeiffNader
+/docs/sprint2/member6.md @SeiffNader

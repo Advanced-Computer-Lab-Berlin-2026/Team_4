@@ -253,3 +253,9 @@
     border-radius: 6px;
     margin-bottom: 1rem;
 }
+
+.headerRow,
+.messageBubble,
+.success {
+    overflow-wrap: anywhere;
+}

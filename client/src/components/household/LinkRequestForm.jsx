@@ -89,7 +89,8 @@ export default function LinkRequestForm({ onSent }) {
         <h2>Link a household member</h2>
         <p className="muted">
           Send a request to a spouse, child, or parent living at the same home address.
-          Once accepted, you share deposit discounts and waitlist perks while keeping separate logins.
+          Once accepted, you share the strongest membership deposit discount between you. Nothing else is
+          shared: waitlist priority, reservation limits, wallets and logins stay separate.
         </p>
 
         <form onSubmit={handleSubmit} noValidate>

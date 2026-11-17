@@ -1,7 +1,8 @@
-// MY HOUSEHOLD - Owner: Member 8 - Requirements: 24, 25, 26, 27
+// MY HOUSEHOLD - Owner: Member 8 - Requirements: 24, 25, 26, 27, 88 (shared deposit discount)
 // Route: /household   Access: member   (already registered in src/routes/routeConfig.jsx - do NOT edit that file)
 // API calls: src/api/*.api.js   Shared UI: src/components/common/*
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { listLinks } from '../../api/household.api';
 import { getErrorMessage } from '../../api/axios';
@@ -166,6 +167,7 @@ function HouseholdContent({ user, currentUserId }) {
   const requestVersion = useRef(0);
   const mounted = useRef(false);
   const [links, setLinks] = useState([]);
+  const [benefit, setBenefit] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -176,7 +178,10 @@ function HouseholdContent({ user, currentUserId }) {
     try {
       setError('');
       const data = await listLinks();
-      if (mounted.current && version === requestVersion.current) setLinks(data.links || data.items || []);
+      if (mounted.current && version === requestVersion.current) {
+        setLinks(data.links || data.items || []);
+        setBenefit(data.benefit || null);
+      }
     } catch (err) {
       if (mounted.current && version === requestVersion.current) setError(getErrorMessage(err));
     } finally {
@@ -211,6 +216,26 @@ function HouseholdContent({ user, currentUserId }) {
         <div className="household-address-banner">
           <span className="muted">Your registered home address: </span>
           <strong>{formattedAddress}</strong>
+        </div>
+      )}
+
+      {benefit && (
+        <div className="household-address-banner" role="status">
+          <span className="muted">Deposit discount: </span>
+          {benefit.discountPercent > 0 ? (
+            <strong>
+              {benefit.discountPercent}%{' '}
+              {benefit.source?.type === 'household'
+                ? `from ${benefit.source.name || 'a household member'}'s ${benefit.source.tierName} membership`
+                : `from your ${benefit.source?.tierName || ''} membership`}
+            </strong>
+          ) : (
+            <strong>none yet</strong>
+          )}
+          <div className="muted">
+            Accepted household members share the strongest deposit discount among them. Discounts do not add up,
+            and pending or removed links give no discount. <Link to="/membership">View membership tiers</Link>
+          </div>
         </div>
       )}
 

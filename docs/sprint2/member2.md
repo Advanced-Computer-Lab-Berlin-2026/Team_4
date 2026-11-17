@@ -156,7 +156,7 @@ npm run test:sprint2 --prefix client
 
 **Trying a real card payment (test mode only):**
 1. Stripe dashboard (Test mode) → Developers → API keys → put the `sk_test_…` key in `server/.env` as `STRIPE_SECRET_KEY` (never commit `.env`).
-2. `brew install stripe/stripe-cli/stripe`, `stripe login`, then `stripe listen --forward-to localhost:5000/api/stripe-webhook` → put the printed `whsec_…` in `server/.env` as `STRIPE_WEBHOOK_SECRET`. Restart the server.
+2. `brew install stripe/stripe-cli/stripe`, `stripe login`, then `stripe listen --forward-to localhost:<PORT>/api/stripe-webhook` (`PORT` from `server/.env`, e.g. 5001 — macOS uses 5000 for AirPlay) → put the printed `whsec_…` in `server/.env` as `STRIPE_WEBHOOK_SECRET`. Restart the server.
 3. Check out with **Card**, pay with Stripe's test card `4242 4242 4242 4242` (any future date, any CVC). You return to `/checkout/status/:id`, which shows the confirmed reservation.
 
 **Demo data (dev only):** fills one member's wallet history and a late fee through the real services, so the Wallet and Late fees pages have something to show. Safe to run twice:

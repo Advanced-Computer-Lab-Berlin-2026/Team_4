@@ -24,7 +24,15 @@ const schema = new Schema(
     requestHash: { type: String, required: true }, // detects a key reused with different inputs
     result: Schema.Types.Mixed, // returned again on a replay
     outstandingMinor: { type: Number, default: 0, min: 0 }, // late fees only: part not yet paid (low wallet)
-    stripePaymentIntentId: { type: String, index: { unique: true, sparse: true } },
+    stripePaymentIntentId: { type: String, index: { unique: true, sparse: true } }, // card payments: Stripe's payment id
+    // Card payments (Req 51): the Stripe-hosted payment page for this operation. No card data is ever stored.
+    stripe: {
+      sessionId: { type: String, index: { unique: true, sparse: true } },
+      url: String,           // where the borrower is sent to pay
+      expiresAt: Date,       // when Stripe closes the page (fixed at creation, so retries send identical requests)
+      returnPath: String,    // app page Stripe sends the borrower back to
+      refundId: String,      // refunds only
+    },
     completedAt: Date,
   },
   { timestamps: true }

@@ -83,4 +83,4 @@ async function runOperation(spec, work, sessionArg) {
   }
 }
 
-module.exports = { runOperation, checkReference, sessionOf, REFERENCE_TYPES };
+module.exports = { runOperation, checkReference, sessionOf, hashRequest, REFERENCE_TYPES };

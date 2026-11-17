@@ -637,3 +637,212 @@ test('cancellation: a delivery-only charge (no deposit) is refunded in full; not
   await assert.rejects(settle(other, borrower, { amountMinor: 0, deliveryMinor: 0, hoursBefore: 100 }), (e) => e.status === 400);
   await assert.rejects(settle(other, borrower, { amountMinor: 100, deliveryMinor: -1, hoursBefore: 100 }), (e) => e.status === 400);
 });
+
+// ---------------------------------------------------------------- Req 51: card payments (fake Stripe, no network/keys)
+
+const crypto = require('node:crypto');
+const stripeAdapter = require('../../src/services/payments/stripe');
+const env = require('../../src/config/env');
+
+const signWebhook = (raw, secret) => crypto.createHmac('sha256', secret).update(raw).digest('hex');
+
+/** Behaves like the parts of Stripe we use: hosted pages, idempotency keys, refunds, signed webhooks. */
+function makeFakeStripe() {
+  let n = 0;
+  const sessions = new Map();
+  const sessionKeys = new Map();
+  const refunds = [];
+  const refundKeys = new Map();
+  const calls = { sessionCreate: 0, refundCreate: 0 };
+  const copy = (value) => structuredClone(value);
+  const fail = (message, code) => Object.assign(new Error(message), { code });
+  const client = {
+    checkout: {
+      sessions: {
+        async create(params, { idempotencyKey } = {}) {
+          calls.sessionCreate += 1;
+          if (sessionKeys.has(idempotencyKey)) return copy(sessions.get(sessionKeys.get(idempotencyKey))); // Stripe idempotency
+          n += 1;
+          const id = `cs_test_${n}`;
+          sessions.set(id, {
+            id, url: `https://checkout.stripe.test/${id}`, status: 'open', payment_status: 'unpaid', payment_intent: null,
+            amount_total: params.line_items.reduce((sum, l) => sum + l.price_data.unit_amount * l.quantity, 0),
+            currency: params.line_items[0].price_data.currency, metadata: params.metadata, params,
+          });
+          sessionKeys.set(idempotencyKey, id);
+          return copy(sessions.get(id));
+        },
+        async retrieve(id) { return copy(sessions.get(id)); },
+        async expire(id) {
+          const session = sessions.get(id);
+          if (session.status !== 'open') throw fail('Session is not open', 'checkout_session_not_open');
+          session.status = 'expired';
+          return copy(session);
+        },
+      },
+    },
+    refunds: {
+      async create(params, { idempotencyKey } = {}) {
+        calls.refundCreate += 1;
+        if (refundKeys.has(idempotencyKey)) return refundKeys.get(idempotencyKey);
+        if (refunds.some((r) => r.payment_intent === params.payment_intent)) throw fail('Already refunded', 'charge_already_refunded');
+        const paid = [...sessions.values()].find((s) => s.payment_intent === params.payment_intent);
+        const refund = { id: `re_test_${refunds.length + 1}`, amount: paid.amount_total, payment_intent: params.payment_intent, status: 'succeeded' };
+        refunds.push(refund);
+        refundKeys.set(idempotencyKey, refund);
+        return refund;
+      },
+    },
+    webhooks: {
+      constructEvent(raw, signature, secret) {
+        if (signature !== signWebhook(raw, secret)) throw new Error('No signatures found matching the expected signature');
+        return JSON.parse(Buffer.from(raw).toString());
+      },
+    },
+  };
+  return {
+    client, webhookSecret: 'whsec_test_fake', calls, sessions, refunds,
+    /** The borrower pays on Stripe's page (optionally Stripe reports a different amount). */
+    pay(id, { amountTotal } = {}) {
+      const session = sessions.get(id);
+      Object.assign(session, { status: 'complete', payment_status: 'paid', payment_intent: `pi_test_${id}` });
+      if (amountTotal) session.amount_total = amountTotal;
+    },
+    eventFor(id) { return JSON.stringify({ id: `evt_${id}`, type: 'checkout.session.completed', data: { object: copy(sessions.get(id)) } }); },
+  };
+}
+
+async function withFakeStripe(fn) {
+  const fake = makeFakeStripe();
+  stripeAdapter.setClient(fake);
+  try { return await fn(fake); } finally { stripeAdapter.setClient(null); }
+}
+
+async function postWebhook(raw, signature) {
+  const response = await fetch(`${base}/api/stripe-webhook`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Stripe-Signature': signature }, body: raw });
+  return response.status;
+}
+
+async function startCardCheckout(borrower, operationKey) {
+  const item = await bookableItem(100); // EGP 150 deposit
+  const selection = { source: 'single', itemId: String(item._id), startDate: day(3), endDate: day(5) };
+  const quote = await send('POST', '/checkout/quote', borrower, selection);
+  const body = { ...selection, method: 'card', operationKey, quoteHash: quote.data.quote.quoteHash };
+  const first = await send('POST', '/checkout', borrower, body);
+  return { item, quote: quote.data.quote, body, first };
+}
+
+test('Req 51: card is offered only when Stripe is configured with a TEST key (live keys are refused)', async () => {
+  const saved = env.STRIPE_SECRET_KEY;
+  try {
+    env.STRIPE_SECRET_KEY = 'sk_live_not_allowed';
+    assert.equal(stripeAdapter.isConfigured(), false);
+    assert.equal(payment.startCardPayment, undefined);
+    env.STRIPE_SECRET_KEY = '';
+    const borrower = await makeUser(0);
+    const item = await bookableItem(100);
+    const quote = await send('POST', '/checkout/quote', borrower, { source: 'single', itemId: String(item._id), startDate: day(3), endDate: day(5) });
+    assert.deepEqual(quote.data.quote.paymentMethods, ['wallet']);
+  } finally {
+    env.STRIPE_SECRET_KEY = saved;
+  }
+  await withFakeStripe(async () => assert.equal(typeof payment.startCardPayment, 'function'));
+});
+
+test('Req 51: card checkout over HTTP - Stripe page, signed webhook (twice), one booking, wallet untouched', () => withFakeStripe(async (fake) => {
+  const borrower = await makeUser(0);
+  const { quote, body, first } = await startCardCheckout(borrower, 'm2-card-checkout-0001');
+  assert.ok(quote.paymentMethods.includes('card'));
+  assert.equal(first.status, 202, JSON.stringify(first.data)); // accepted, waiting for the payment
+  assert.equal(first.data.checkout.status, 'awaiting_payment');
+  assert.match(first.data.checkout.redirectUrl, /^https:\/\/checkout\.stripe\.test\//);
+
+  const retry = await send('POST', '/checkout', borrower, body); // double click / lost response
+  assert.equal(retry.data.checkout.redirectUrl, first.data.checkout.redirectUrl);
+  assert.equal(fake.sessions.size, 1, 'one Stripe page, never two');
+  const sessionId = first.data.checkout.redirectUrl.split('/').pop();
+  const created = fake.sessions.get(sessionId).params;
+  assert.equal(created.line_items[0].price_data.unit_amount, 15000); // amount from the server quote, in piastres
+  assert.match(created.success_url, new RegExp(`/checkout/status/${first.data.checkout.id}$`));
+
+  assert.equal(await postWebhook(fake.eventFor(sessionId), 'forged'), 400); // not signed by Stripe
+  fake.pay(sessionId);
+  const event = fake.eventFor(sessionId);
+  assert.equal(await postWebhook(event, signWebhook(event, fake.webhookSecret)), 204);
+  assert.equal(await postWebhook(event, signWebhook(event, fake.webhookSecret)), 204); // Stripe retries webhooks
+
+  const status = await get(`/checkout/${first.data.checkout.id}`, borrower);
+  assert.equal(status.data.checkout.status, 'completed');
+  const reservations = await Reservation.find({ borrower: borrower._id });
+  assert.equal(reservations.length, 1);
+  assert.deepEqual([reservations[0].payment.method, reservations[0].payment.stripePaymentIntentId, reservations[0].deposit.status], ['card', `pi_test_${sessionId}`, 'held']);
+  const audits = await AuditLog.find({ action: 'deposit_charged' });
+  assert.equal(audits.length, 1);
+  assert.deepEqual([audits[0].inputs.method, String(audits[0].reservation)], ['card', String(reservations[0]._id)]);
+  assert.equal(await balanceOf(borrower), 0);
+  assert.equal(await WalletTransaction.countDocuments({}), 0); // the card paid, not the wallet
+}));
+
+test('Req 51: Stripe took a different amount -> nothing is booked and the card is refunded exactly once', () => withFakeStripe(async (fake) => {
+  const borrower = await makeUser(0);
+  const { first } = await startCardCheckout(borrower, 'm2-card-checkout-0002');
+  const sessionId = first.data.checkout.redirectUrl.split('/').pop();
+  fake.pay(sessionId, { amountTotal: 9999 });
+  const event = fake.eventFor(sessionId);
+  await postWebhook(event, signWebhook(event, fake.webhookSecret));
+  await postWebhook(event, signWebhook(event, fake.webhookSecret));
+  await get(`/checkout/${first.data.checkout.id}`, borrower);
+
+  assert.equal((await get(`/checkout/${first.data.checkout.id}`, borrower)).data.checkout.status, 'failed');
+  assert.equal(await Reservation.countDocuments({ borrower: borrower._id }), 0);
+  assert.equal(fake.refunds.length, 1);
+  assert.equal(fake.refunds[0].amount, 9999); // the whole amount Stripe really took
+  assert.equal(await AuditLog.countDocuments({ action: 'card_payment_refunded' }), 1);
+
+  const replay = await payment.refundFailedCheckout({ attemptId: first.data.checkout.id, borrowerId: borrower._id, idempotencyKey: `checkout:${first.data.checkout.id}`, currency: 'EGP', paymentReference: `pi_test_${sessionId}` });
+  assert.equal(replay.replayed, true);
+  assert.equal(fake.refunds.length, 1);
+}));
+
+test('Req 51: when the hold expires the Stripe page is closed, so it can no longer be paid', () => withFakeStripe(async (fake) => {
+  const borrower = await makeUser(0);
+  const { first } = await startCardCheckout(borrower, 'm2-card-checkout-0003');
+  const sessionId = first.data.checkout.redirectUrl.split('/').pop();
+  const input = { idempotencyKey: `checkout:${first.data.checkout.id}` };
+  assert.equal((await payment.getCardPayment(input)).state, 'pending');
+  assert.deepEqual(await payment.getCardPayment({ ...input, closeExpired: true }), { state: 'failed' });
+  assert.equal(fake.sessions.get(sessionId).status, 'expired');
+  assert.deepEqual(await payment.getCardPayment({ idempotencyKey: 'checkout:never-started', closeExpired: true }), { state: 'failed' });
+}));
+
+test('Req 51: a payment reference that is not a verified payment of this checkout is refused', () => withFakeStripe(async () => {
+  const borrower = await makeUser(0);
+  const attemptId = new mongoose.Types.ObjectId();
+  const input = { attemptId, borrowerId: borrower._id, idempotencyKey: `checkout:${attemptId}`, amountMinor: 1000, currency: 'EGP', lines: cartLines([1000]) };
+  await assert.rejects(mongoose.connection.transaction((s) => payment.recordCardCheckout({ ...input, paymentReference: 'pi_made_up' }, s)), (e) => e.status === 409);
+  await assert.rejects(payment.refundFailedCheckout({ ...input, paymentReference: 'pi_made_up' }), (e) => e.status === 409);
+  await assert.rejects(payment.startCardPayment({ ...input, amountMinor: 999 }), (e) => e.status === 400); // lines do not add up
+}));
+
+test('membership (M8): card page returns to /membership, payment recorded once; wallet membership via chargeMembership', () => withFakeStripe(async (fake) => {
+  const user = await makeUser(500);
+  const reference = { type: 'membership', id: new mongoose.Types.ObjectId() };
+  const start = { purpose: 'membership', userId: user._id, reference, amountMinor: 20000, currency: 'EGP', idempotencyKey: `membership:${reference.id}:card`, returnPath: '/membership' };
+  await assert.rejects(payment.startCardPayment({ ...start, idempotencyKey: 'x', returnPath: 'https://evil.example' }), (e) => e.status === 400);
+
+  const page = await payment.startCardPayment(start);
+  const sessionId = page.redirectUrl.split('/').pop();
+  assert.match(fake.sessions.get(sessionId).params.success_url, /\/membership$/);
+  fake.pay(sessionId);
+  const paid = await payment.getCardPayment(start);
+  assert.equal(paid.state, 'paid');
+  const record = () => mongoose.connection.transaction((s) => payment.recordMembershipPayment({ userId: user._id, amountMinor: 20000, currency: 'EGP', reference, paymentReference: paid.reference, idempotencyKey: `membership:${reference.id}:record` }, s));
+  await record();
+  await record();
+  assert.equal(await AuditLog.countDocuments({ action: 'membership_charged' }), 1);
+  assert.equal(await balanceOf(user), 50000); // card membership does not touch the wallet
+
+  await payment.chargeMembership({ userId: user._id, amountMinor: 20000, currency: 'EGP', reference, idempotencyKey: `membership:${reference.id}:wallet` });
+  assert.equal(await balanceOf(user), 30000);
+  assert.equal((await WalletTransaction.findOne({ user: user._id })).type, 'membership');
+}));

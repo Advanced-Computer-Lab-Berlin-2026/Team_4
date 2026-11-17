@@ -59,17 +59,22 @@ Member 1's `services/sprint2/bootstrap.js` loads this file automatically. Missin
 | `settleForfeiture(input, session)` | M3 damage decision (Req 62) | `reservationId, amountMinor` (to keep, 0 allowed)`, idempotencyKey: 'damage:<reportId>:decision'`; session as 2nd arg **or** inside the input | `{ forfeitedMinor, releasedMinor, paidToLenderMinor }` | ✅ Done |
 | `refundToWallet(input, session)` — dispute form | M3 dispute resolution (Req 64) | `userId, amountMinor, reference: 'damage:<reportId>', idempotencyKey: 'damage:<reportId>:resolution'` (no `reservationId`) | `{ refundMinor, takenFromLenderMinor }` | ✅ Done |
 | `applyLateFee(input, session)` | Late return (Req 77) | `reservationId, userId, reference, currency, idempotencyKey, returnedAt, endDate` | `{ feeMinor, chargedMinor, outstandingMinor, daysLate }` | ✅ Done |
-| `startCardPayment(input)` | Card checkout (Req 51) | checkout payment input | `{ state:'pending', redirectUrl }` | Blocked: `stripe` package |
-| `getCardPayment(input)` | Checkout status / reconcile | checkout payment input + `closeExpired` | `{ state:'pending'\|'failed'\|'paid', … }` | Blocked |
-| `recordCardCheckout(input, session)` | Verified card payment | checkout payment input + `paymentReference` | — | Blocked |
-| `verifyCheckoutWebhook(rawBody, signature)` | `POST /api/stripe-webhook` (mounted by M1) | raw Stripe event | attempt id or `null` | Blocked |
-| `refundFailedCheckout(input)` | Paid card checkout that cannot be booked | checkout payment input + `paymentReference` | — | Blocked |
+| `startCardPayment(input)` | Card checkout (Req 51) | checkout payment input | `{ state:'pending', redirectUrl }` (Stripe-hosted page; returns to `/checkout/status/:attemptId`) | ✅ Done |
+| `getCardPayment(input)` | Checkout status / reconcile | checkout payment input + `closeExpired` | `{ state:'pending', redirectUrl? }` \| `{ state:'failed' }` \| `{ state:'paid', reference, amountMinor, currency }` — `closeExpired` closes the Stripe page first | ✅ Done |
+| `recordCardCheckout(input, session)` | Verified card payment | checkout payment input + `paymentReference` | `{ recordedMinor }` — one audit row per reservation; refuses a reference that is not a verified payment of this checkout | ✅ Done |
+| `verifyCheckoutWebhook(rawBody, signature)` | `POST /api/stripe-webhook` (mounted by M1) | raw Stripe event | attempt id or `null`; bad signature → `400` | ✅ Done |
+| `refundFailedCheckout(input)` | Paid card checkout that cannot be booked (or Stripe took a different amount) | checkout payment input + `paymentReference` | `{ refundedMinor, refundId }` — refunds the whole Stripe payment to the card, once | ✅ Done |
+
+**Card functions are exported only while Stripe is configured with a TEST key** (`sk_test_…` in `server/.env`). Without a key, M1's quote simply does not offer "card". A live key (`sk_live_…`) is refused (test mode only, NFR 4). All Stripe calls live in `services/payments/stripe.js` (adapter) and `card.js`.
 
 ### Extra functions for other members
 
 | Function | For | Input | Returns | Status |
 |---|---|---|---|---|
-| `charge(input, session)` | M8 membership paid by wallet | `userId, amountMinor, currency, purpose:'membership', reference:{ type:'membership', id }, idempotencyKey` | `{ chargedMinor, balanceMinor, operationId, replayed }` | ✅ Done |
+| `charge(input, session)` | Wallet payment (deposit or membership) | `userId, amountMinor, currency, purpose, reference, idempotencyKey` | `{ chargedMinor, balanceMinor, operationId, replayed }` | ✅ Done |
+| `chargeMembership(input, session)` | M8 membership paid by **wallet** | `userId, amountMinor, currency, reference:{ type:'membership', id }, idempotencyKey` | same as `charge` | ✅ Done (inputs to confirm with M8) |
+| `startCardPayment(input)` — membership | M8 membership paid by **card** | `purpose:'membership', userId, reference:{ type:'membership', id }, amountMinor, currency, idempotencyKey, title?, returnPath?: '/membership'` (only listed return paths are accepted) | `{ state:'pending', redirectUrl }` | ✅ Done (to confirm with M8) |
+| `recordMembershipPayment(input, session)` | M8, after `getCardPayment` says `paid` | `userId, amountMinor, currency, reference, paymentReference, idempotencyKey` | `{ chargedMinor, paymentReference }` | ✅ Done (to confirm with M8) |
 | `quoteCancellationRefund(input)` | M1 / UI: show the refund before cancelling (no money moves) | `amountMinor, cancelledAt, pickupDate, freeCancellationHours?` | `{ ratePercent, rule, refundMinor, forfeitedMinor, hoursBeforePickup }` | ✅ Done |
 | `calculateLateFee(input)` | UI / M5: show the fee a late return would cost (no money moves) | `depositMinor, endDate, returnedAt` | `{ feeMinor, daysLate, minutesLate, capped }` | ✅ Done |
 | `creditReferral(input, session)` | M9 referral reward (Req 99). Also exported from `wallet.js`, where M9's code loads it | `userId, amountMinor, currency, reference: 'referral:<referralId>'` (or `referralId`), `idempotencyKey` | `{ creditedMinor, balanceMinor, operationId, replayed }` | ✅ Done |
@@ -105,7 +110,7 @@ Client route (in `client/src/routes/sprint2/member2.routes.jsx`, discovered auto
 
 ## 5. Data model changes (Member 2 models only)
 
-- **`PaymentOperation`** (new): `idempotencyKey` (unique), `kind`, `purpose`, `user`, `reference{ type, id }`, `amountMinor`, `currency`, `status`, `requestHash`, `result`, `outstandingMinor`, `stripePaymentIntentId`.
+- **`PaymentOperation`** (new): `idempotencyKey` (unique), `kind`, `purpose`, `user`, `reference{ type, id }`, `amountMinor`, `currency`, `status`, `requestHash`, `result`, `outstandingMinor`, `stripePaymentIntentId`, `stripe{ sessionId, url, expiresAt, returnPath, refundId }`. No card data is ever stored.
 - **`WalletTransaction`** (extended): `amountMinor`, `balanceAfterMinor`, `currency`, `operation`, `reference`; new type `lender_payout`. `amount`/`balanceAfter` (EGP) kept.
 - **`AuditLog`** (extended): `amountMinor`, `currency`, `operation`, `inputs`, `result`. `details`/`amount` kept.
 
@@ -117,14 +122,10 @@ Reference types: `checkout`, `reservation`, `membership`, `referral`, `manual`. 
 
 | From | What | Why | Status |
 |---|---|---|---|
-| **M1** | `stripe` package in `server/package.json` | Card payments (Req 51) | **Missing** |
-| **M1** | Client test runner (e.g. Vitest + Testing Library + jsdom) | `client/test/sprint2/member2.test.jsx` | **Missing** |
-| **M1** | "Late fees" nav link → `/account/late-fees` in `navLinks.js` | Req 78 discoverability | **Missing** |
-| **M1** | Use `PaymentMethodPicker` in `CheckoutPage` instead of the plain radios | Shows wallet balance and the policy before payment | Requested |
-| **M1** | Update `member1.test.js:214` — it expects wallet checkout to be unavailable "without Member 2"; Member 2's module now exists, so that scenario must pass `deps` with `payment: undefined` (or expect `['wallet']`) | Test now fails by design | Requested |
+| **M1** | `stripe` package, client test runner, "Late fees" nav link, `PaymentMethodPicker` in `CheckoutPage`, `member1.test.js` fix | | ✅ Done (PR #23) |
 | **M1** | Delivery fee on borrower cancellation: **decided** — refunded in full before handover; M1 passes `deliveryMinor` | Refund amount | ✅ Agreed with M1 |
 | **M3** | Already matches: `settleForfeiture({ reservationId, amountMinor, idempotencyKey, session })` and `refundToWallet({ userId, amountMinor, reference: 'damage:<id>', ... })`. Please also set the reservation's `deposit.status` / `deposit.forfeited` after the decision (Member 2 does not write `Reservation`) | Damage settlement | Matches M3's code |
-| **M8** | Agree the inputs of `chargeMembership` (wallet) and `recordMembershipPayment` (verified card payment), and a server-chosen card return path such as `/membership` (SPRINT2_CONTRACT.md). Waiting for M8's contract | Req 85 | **In discussion** |
+| **M8** | Confirm the inputs of `chargeMembership`, membership `startCardPayment` and `recordMembershipPayment` (built as proposed in §3; return path `/membership`). Card memberships are confirmed by calling `getCardPayment` on the `/membership` page — the shared webhook only reconciles checkouts | Req 85 | **Built, waiting for M8's contract** |
 | **M9** | Already matches: `creditReferral({ userId, amountMinor: 10000, currency, reference: 'referral:<id>', idempotencyKey })` from `wallet.js`. Reward EGP 100 (M9's md) | Req 99 | Matches M9's code |
 | Done by M1 | Webhook mounted with raw body; `STRIPE_WEBHOOK_SECRET` in `env.js`; route modules auto-wired; `npm run test:sprint2` | | ✅ |
 
@@ -145,7 +146,18 @@ TEST_MONGO_URI="<your Atlas URI>" node --test test/sprint2/member2.test.js
 TEST_MONGO_URI="<your Atlas URI>" npm run test:sprint2
 ```
 
-They include end-to-end wallet checkouts through Member 1's real checkout code.
+They include end-to-end wallet **and card** checkouts through Member 1's real checkout code. Card tests use a **fake Stripe** (same idempotency and signed-webhook behaviour), so no keys or network are needed.
+
+Client tests: `client/test/sprint2/member2.test.jsx` (Vitest + Testing Library) — picker, wallet page, history filter, late fees, route:
+
+```bash
+npm run test:sprint2 --prefix client
+```
+
+**Trying a real card payment (test mode only):**
+1. Stripe dashboard (Test mode) → Developers → API keys → put the `sk_test_…` key in `server/.env` as `STRIPE_SECRET_KEY` (never commit `.env`).
+2. `brew install stripe/stripe-cli/stripe`, `stripe login`, then `stripe listen --forward-to localhost:5000/api/stripe-webhook` → put the printed `whsec_…` in `server/.env` as `STRIPE_WEBHOOK_SECRET`. Restart the server.
+3. Check out with **Card**, pay with Stripe's test card `4242 4242 4242 4242` (any future date, any CVC). You return to `/checkout/status/:id`, which shows the confirmed reservation.
 
 **Demo data (dev only):** fills one member's wallet history and a late fee through the real services, so the Wallet and Late fees pages have something to show. Safe to run twice:
 

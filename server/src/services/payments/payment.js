@@ -2,12 +2,13 @@
 // module" and docs/sprint2/member2.md). Member 1's bootstrap loads this file automatically, so every
 // function other members use is exported from here (refunds live in refund.js and are re-exported below).
 // Each function runs through runOperation() (operation.js): exactly once per idempotencyKey, in one transaction.
-const mongoose = require('mongoose');
 const ApiError = require('../../utils/ApiError');
 const wallet = require('./wallet');
 const audit = require('./audit');
 const refund = require('./refund');
 const lateFee = require('./lateFee'); // also registers the "collect owed late fees after a credit" hook
+const card = require('./card');
+const stripe = require('./stripe');
 const { runOperation, checkReference } = require('./operation');
 const { assertAmountMinor, toMinor, fromMinor } = require('./money');
 
@@ -85,15 +86,8 @@ async function creditReferral({ userId, amountMinor, currency, reference: ref, r
 async function chargeWalletCheckout(input, session) {
   const { attemptId, borrowerId, idempotencyKey, amountMinor, currency, lines } = input || {};
   assertAmountMinor(amountMinor);
-  if (!Array.isArray(lines) || lines.length === 0) throw ApiError.badRequest('The checkout has no lines');
-  for (const line of lines) {
-    if (!mongoose.isValidObjectId(line.reservationId)) throw ApiError.badRequest('Each line needs a reservationId');
-    if (!Number.isSafeInteger(line.amountMinor) || line.amountMinor < 0) throw ApiError.badRequest('Invalid line amount');
-  }
-  // The total must equal the sum of the lines, otherwise something upstream is wrong - refuse to charge.
-  if (lines.reduce((sum, line) => sum + line.amountMinor, 0) !== amountMinor) {
-    throw ApiError.badRequest('The checkout total does not match its lines');
-  }
+  // Valid lines whose amounts add up to the total, otherwise something upstream is wrong - refuse to charge.
+  card.assertCheckoutLines(lines, amountMinor);
   const reference = { type: 'checkout', id: attemptId };
   checkReference(reference);
 
@@ -128,11 +122,23 @@ async function chargeWalletCheckout(input, session) {
   }, session);
 }
 
+/**
+ * chargeMembership(input, session) - M8 membership paid from the WALLET (Req 85).
+ * input: { userId, amountMinor, currency, reference:{ type:'membership', id }, idempotencyKey }
+ * (Card memberships: startCardPayment with purpose 'membership', then recordMembershipPayment - card.js.)
+ */
+function chargeMembership(input, session) {
+  if (input?.reference?.type !== 'membership') throw ApiError.badRequest("reference.type must be 'membership'");
+  return charge({ ...input, purpose: 'membership' }, session);
+}
+
 module.exports = {
   runOperation,
   charge,
   chargeWalletCheckout,
   creditReferral,
+  chargeMembership,
+  recordMembershipPayment: card.recordMembershipPayment,
   // Req 52 / 81 - refunds and deposit settlement (refund.js)
   quoteCancellationRefund: refund.quoteCancellationRefund,
   settleCancellation: refund.settleCancellation,
@@ -146,3 +152,9 @@ module.exports = {
   toMinor,
   fromMinor,
 };
+
+// Req 51 - card payments (card.js). Member 1's checkout offers "Card" only when these functions exist, so they are
+// exported ONLY while Stripe is configured with a TEST key (stripe.js). Without a key: no card option, nothing breaks.
+for (const name of ['startCardPayment', 'getCardPayment', 'recordCardCheckout', 'verifyCheckoutWebhook', 'refundFailedCheckout']) {
+  Object.defineProperty(module.exports, name, { enumerable: true, get: () => (stripe.isConfigured() ? card[name] : undefined) });
+}

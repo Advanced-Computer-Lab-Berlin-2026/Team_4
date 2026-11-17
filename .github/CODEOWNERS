@@ -1,4 +1,4 @@
-# GitHub CODEOWNERS - owners match the Sprint 1 member assignments.
+# GitHub CODEOWNERS - owners match the team file assignments.
 # With branch protection ('Require review from Code Owners') the owner is auto-requested on any PR touching their files.
 
 /server/src/controllers/auth.controller.js @alishebl05
@@ -237,3 +237,31 @@
 /server/src/services/reservations/lendingDashboard.js @Aser005
 /server/src/services/reservations/lifecycle.js @Aser005
 /server/test/sprint2/member5.test.js @Aser005
+
+# Sprint 2 damage, evidence, reviews and trust (Member 3)
+/client/src/api/conditionPhotos.api.js @12tifa12
+/client/src/api/damageReports.api.js @12tifa12
+/client/src/api/reviews.api.js @12tifa12
+/client/src/api/trustProfiles.api.js @12tifa12
+/client/src/components/sprint2/m3/ @12tifa12
+/client/src/pages/admin/AdminDamageDecisionPage.jsx @12tifa12
+/client/src/pages/damage/DamageReportPage.jsx @12tifa12
+/client/src/pages/reviews/MyReviewsPage.jsx @12tifa12
+/client/src/pages/reviews/TrustProfilePage.jsx @12tifa12
+/client/src/routes/sprint2/member3.routes.jsx @12tifa12
+/client/src/styles/sprint2/member3.module.css @12tifa12
+/client/test/sprint2/member3.test.jsx @12tifa12
+/docs/sprint2/member3.md @12tifa12
+/server/src/controllers/conditionPhotos.controller.js @12tifa12
+/server/src/controllers/damageReports.controller.js @12tifa12
+/server/src/controllers/reviews.controller.js @12tifa12
+/server/src/controllers/trustProfiles.controller.js @12tifa12
+/server/src/models/DamageReport.js @12tifa12
+/server/src/models/Review.js @12tifa12
+/server/src/routes/conditionPhotos.routes.js @12tifa12
+/server/src/routes/damageReports.routes.js @12tifa12
+/server/src/routes/reviews.routes.js @12tifa12
+/server/src/routes/trustProfiles.routes.js @12tifa12
+/server/src/services/damage/ @12tifa12
+/server/src/services/reviews/ @12tifa12
+/server/test/sprint2/member3.test.js @12tifa12

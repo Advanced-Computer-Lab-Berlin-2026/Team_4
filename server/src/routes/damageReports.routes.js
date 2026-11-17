@@ -5,6 +5,7 @@ const c = require('../controllers/damageReports.controller');
 const { protect } = require('../middleware/auth');
 const { requireRole, requireVerifiedLender } = require('../middleware/roles');
 const validate = require('../middleware/validate');
+const { toMinor } = require('../services/damage/settlement');
 
 const STATUSES = ['open', 'decided', 'disputed', 'resolved'];
 const idParam = param('id').isMongoId().withMessage('Invalid damage report id');
@@ -15,7 +16,13 @@ const text = (field, min, max, label) =>
     .trim()
     .isLength({ min, max }).withMessage(`${label} must be ${min}-${max} characters`);
 const amount = (field) =>
-  body(field).isFloat({ min: 0 }).withMessage('Amount must be a number of 0 or more').toFloat();
+  body(field)
+    .custom((value) =>
+      (typeof value === 'number' || typeof value === 'string') &&
+      /^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(String(value)) &&
+      Number.isSafeInteger(toMinor(value)))
+    .withMessage('Amount must be 0 or more with up to two decimal places')
+    .toFloat();
 
 const createRules = [body('reservationId').isMongoId().withMessage('Invalid reservation id'), text('description', 10, 2000, 'Description')];
 const decisionRules = [idParam, amount('forfeitAmount'), text('note', 3, 1000, 'Note')];

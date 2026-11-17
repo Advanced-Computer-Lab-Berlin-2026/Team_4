@@ -11,10 +11,12 @@
 const mongoose = require('mongoose');
 const ApiError = require('../../utils/ApiError');
 const DamageReport = require('../../models/DamageReport');
+const Reservation = require('../../models/Reservation');
 const { ROLES } = require('../../config/constants');
 const reservationCommands = require('../reservations/reservationCommands');
 const settlement = require('./settlement');
 const { recalculateTrust } = require('../reviews/trust');
+const { features } = require('../sprint2/bootstrap');
 
 /** Decisions D3-D4 in the contract. (D2: damage is reported at return time through Member 1's returnDamaged.) */
 const DAMAGE_CONFIG = Object.freeze({ disputeWindowDays: 7 });
@@ -106,12 +108,9 @@ async function createReport(actor, { reservationId, description }) {
       createdId = report._id;
     },
   });
-  // TODO(M9): enqueueEvent('damage.reported', id, [borrower, admins], …, `damage:${id}:reported`) once the outbox exists.
-  if (createdId) return { report: await loadDto(createdId, { withPhotos: true }), created: true };
-
   const existing = await DamageReport.findOne({ reservation: reservationId }).select('_id reportedBy').lean();
   if (!existing || !sameId(existing.reportedBy, actor._id)) throw ApiError.conflict('This reservation is already completed');
-  return { report: await loadDto(existing._id, { withPhotos: true }), created: false };
+  return { report: await loadDto(existing._id, { withPhotos: true }), created: sameId(existing._id, createdId) };
 }
 
 /** Reports where the user is the reporting lender or the borrower. role: 'lender' | 'borrower' | undefined (both). */
@@ -140,6 +139,25 @@ async function getReport(user, id) {
   return loadDto(id, { withPhotos: true });
 }
 
+async function recordDepositOutcome(reservation, amount, session) {
+  const held = round2(reservation.deposit?.amount ?? 0);
+  if (held === 0) return;
+  let status = 'released';
+  if (amount > 0) status = amount === held ? 'forfeited' : 'partially_forfeited';
+  await Reservation.updateOne({ _id: reservation._id }, {
+    $set: { 'deposit.status': status, 'deposit.forfeited': amount },
+  }, { session });
+}
+
+async function enqueueDamageOutcome(type, report, reservation, session) {
+  const events = features().events;
+  if (!events?.enqueueEvent) return;
+  const id = String(report._id);
+  const recipients = [report.borrower, report.reportedBy].map(String);
+  const payload = { damageReportId: id, reservationId: String(reservation._id) };
+  await events.enqueueEvent(type, id, recipients, payload, `damage:${id}:${type}`, session);
+}
+
 /** Req 62 - admin decides how much of the held deposit to keep (0 = release everything). */
 async function decideReport(admin, id, { forfeitAmount, note }) {
   const amount = round2(forfeitAmount);
@@ -147,8 +165,9 @@ async function decideReport(admin, id, { forfeitAmount, note }) {
     const report = await DamageReport.findOne({ _id: id }).populate({ path: 'reservation', select: 'deposit' }).session(session);
     if (!report) throw ApiError.notFound('Damage report not found');
     if (report.status !== 'open') throw ApiError.conflict(`This damage report is ${report.status}, not open`);
-    const held = round2(report.reservation?.deposit?.amount ?? 0);
-    if (report.reservation?.deposit?.status !== 'held') throw ApiError.conflict('The deposit for this reservation is no longer held');
+    if (!report.reservation) throw ApiError.notFound('Reservation not found');
+    const held = round2(report.reservation.deposit?.amount ?? 0);
+    if (held > 0 && report.reservation.deposit.status !== 'held') throw ApiError.conflict('The deposit for this reservation is no longer held');
     if (amount > held) throw ApiError.badRequest(`Forfeit amount cannot exceed the held deposit (EGP ${held.toFixed(2)})`);
 
     const updated = await DamageReport.findOneAndUpdate(
@@ -157,10 +176,13 @@ async function decideReport(admin, id, { forfeitAmount, note }) {
       { session, new: true }
     );
     if (!updated) throw await explainConflict(id, 'open');
-    await settlement.settleForfeiture({ reservationId: report.reservation._id, amount, idempotencyKey: `damage:${id}:decision`, session });
+    if (held > 0) {
+      await settlement.settleForfeiture({ reservationId: report.reservation._id, amount, idempotencyKey: `damage:${id}:decision`, session });
+      await recordDepositOutcome(report.reservation, amount, session);
+    }
+    await enqueueDamageOutcome('damage_decision', report, report.reservation, session);
     await recalculateTrust(report.borrower, { session, eventKey: `damage:${id}:decided` });
   });
-  // TODO(M9): enqueueEvent('damage.decided', …, `damage:${id}:decided`)
   return loadDto(id, { withPhotos: true });
 }
 
@@ -171,16 +193,17 @@ async function disputeReport(actor, id, { reason }) {
   const current = await DamageReport.findById(id).select('status decision').lean();
   if (current.status !== 'decided') throw ApiError.conflict(`This damage report is ${current.status}, not decided`);
   if (!(current.decision?.forfeitAmount > 0)) throw ApiError.conflict('Nothing was kept from your deposit, so there is nothing to dispute');
-  if (Date.now() > disputeDeadline(current).getTime()) {
+  const now = new Date();
+  const deadline = disputeDeadline(current);
+  if (!deadline || !(now <= deadline)) {
     throw ApiError.conflict(`Decisions can be disputed only within ${DAMAGE_CONFIG.disputeWindowDays} days`);
   }
   const updated = await DamageReport.findOneAndUpdate(
-    { _id: id, status: 'decided', 'dispute.at': { $exists: false } },
-    { $set: { status: 'disputed', dispute: { reason, at: new Date() } } },
+    { _id: id, status: 'decided', 'decision.decidedAt': current.decision.decidedAt, 'dispute.at': { $exists: false } },
+    { $set: { status: 'disputed', dispute: { reason, at: now } } },
     { new: true }
   );
   if (!updated) throw await explainConflict(id, 'decided');
-  // TODO(M9): enqueueEvent('damage.disputed', …, `damage:${id}:disputed`)
   return loadDto(id, { withPhotos: true });
 }
 
@@ -191,6 +214,8 @@ async function resolveReport(admin, id, { finalForfeitAmount, note }) {
     const report = await DamageReport.findById(id).session(session);
     if (!report) throw ApiError.notFound('Damage report not found');
     if (report.status !== 'disputed') throw ApiError.conflict(`This damage report is ${report.status}, not disputed`);
+    const reservation = await Reservation.findById(report.reservation).select('deposit').session(session).lean();
+    if (!reservation) throw ApiError.notFound('Reservation not found');
     const decided = round2(report.decision.forfeitAmount);
     if (finalAmount > decided) {
       throw ApiError.badRequest(`The final amount cannot exceed the original decision (EGP ${decided.toFixed(2)})`);
@@ -211,9 +236,10 @@ async function resolveReport(admin, id, { finalForfeitAmount, note }) {
         session,
       });
     }
+    await recordDepositOutcome(reservation, finalAmount, session);
+    await enqueueDamageOutcome('damage_resolved', report, reservation, session);
     await recalculateTrust(report.borrower, { session, eventKey: `damage:${id}:resolved` });
   });
-  // TODO(M9): enqueueEvent('damage.resolved', …, `damage:${id}:resolved`)
   return loadDto(id, { withPhotos: true });
 }
 

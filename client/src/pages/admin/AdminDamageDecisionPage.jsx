@@ -20,7 +20,7 @@ const STATUS_FILTERS = [['open', 'Open - needs a decision'], ['disputed', 'Dispu
 
 /** Amount form used for both the decision and the resolution. */
 function AmountForm({ title, intro, amountLabel, max, submitLabel, confirmText, onSubmit }) {
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState(max === 0 ? '0' : '');
   const [note, setNote] = useState('');
   const [errors, setErrors] = useState({});
   const [error, setError] = useState('');
@@ -32,6 +32,7 @@ function AmountForm({ title, intro, amountLabel, max, submitLabel, confirmText, 
     const value = Number(amount);
     const next = {};
     if (amount === '' || Number.isNaN(value) || value < 0) next.amount = 'Enter an amount of 0 or more';
+    else if (!/^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(amount)) next.amount = 'Use at most two decimal places';
     else if (value > max) next.amount = `At most ${formatMoney(max)}`;
     if (note.trim().length < 3) next.note = 'Add a note of at least 3 characters';
     setErrors(next);
@@ -39,7 +40,7 @@ function AmountForm({ title, intro, amountLabel, max, submitLabel, confirmText, 
 
     setSaving(true);
     try {
-      await onSubmit(Math.round(value * 100) / 100, note.trim());
+      await onSubmit(value, note.trim());
     } catch (err) {
       const fields = Object.fromEntries(getFieldErrors(err).map((f) => [f.field === 'note' ? 'note' : 'amount', f.message]));
       if (Object.keys(fields).length) setErrors(fields);
@@ -90,11 +91,13 @@ function CaseView({ id }) {
       {report.status === 'open' && (
         <AmountForm
           title="Decide"
-          intro={`Compare the pickup and return photos, then decide how much of the ${formatMoney(held)} deposit to keep. The rest goes back to the borrower's wallet. Enter 0 to release everything.`}
+          intro={held === 0
+            ? 'No deposit was collected. Compare the photos and record your decision with an amount of zero.'
+            : `Compare the pickup and return photos, then decide how much of the ${formatMoney(held)} deposit to keep. The rest goes back to the borrower's wallet. Enter 0 to release everything.`}
           amountLabel="Amount to keep (EGP)"
           max={held}
           submitLabel="Save decision"
-          confirmText={(v) => `Keep ${formatMoney(v)} and release ${formatMoney(held - v)} to ${personName(report.borrower)}?`}
+          confirmText={(v) => held === 0 ? 'Save this decision with zero forfeiture?' : `Keep ${formatMoney(v)} and release ${formatMoney(held - v)} to ${personName(report.borrower)}?`}
           onSubmit={async (forfeitAmount, note) => {
             const d = await decideReport(id, { forfeitAmount, note });
             setReport(d.report);
@@ -184,7 +187,7 @@ export default function AdminDamageDecisionPage() {
     <div className="container">
       {id && <p><Link to="/admin/damage-reports">← Damage reports</Link></p>}
       <h1>{id ? 'Damage case' : 'Damage reports'}</h1>
-      {id ? <CaseView id={id} /> : <Queue />}
+      {id ? <CaseView key={id} id={id} /> : <Queue />}
     </div>
   );
 }

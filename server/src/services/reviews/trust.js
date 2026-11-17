@@ -64,13 +64,13 @@ const finalForfeit = (report) => {
 /** Read everything the formula needs for one user. */
 async function gatherHistory(userId, session = null) {
   const id = new mongoose.Types.ObjectId(String(userId));
-  const [completed, borrowed, damage, ratings] = await Promise.all([
-    Reservation.countDocuments({ status: 'completed', $or: [{ borrower: id }, { lender: id }] }).session(session),
-    Reservation.find({ status: 'completed', borrower: id }).select('endDate returnedAt').lean().session(session),
-    DamageReport.find({ borrower: id, status: { $in: ['decided', 'disputed', 'resolved'] } })
-      .select('status decision.forfeitAmount resolution.finalForfeitAmount').lean().session(session),
-    Review.aggregate([{ $match: { reviewee: id } }, { $group: { _id: null, sum: { $sum: '$rating' }, count: { $sum: 1 } } }]).session(session),
-  ]);
+  const completed = await Reservation.countDocuments({ status: 'completed', $or: [{ borrower: id }, { lender: id }] }).session(session);
+  const borrowed = await Reservation.find({ status: 'completed', borrower: id }).select('endDate returnedAt').lean().session(session);
+  const damage = await DamageReport.find({ borrower: id, status: { $in: ['decided', 'disputed', 'resolved'] } })
+    .select('status decision.forfeitAmount resolution.finalForfeitAmount').lean().session(session);
+  const ratings = await Review.aggregate([
+    { $match: { reviewee: id } }, { $group: { _id: null, sum: { $sum: '$rating' }, count: { $sum: 1 } } },
+  ]).session(session);
   const onTimeReturns = borrowed.filter(isOnTime).length;
   return {
     completed,

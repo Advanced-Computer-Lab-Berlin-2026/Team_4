@@ -303,15 +303,14 @@ The past reviews for Req 91 come from `GET /api/reviews/user/:userId`. It needs 
 
 ### 6.4 Events for notifications (Member 9)
 
-Emitted through Member 9's `enqueueEvent(type, aggregateId, recipients, payload, eventKey, session)`. Each event is written in the same transaction as the state change.
+When the outbox is available, the decision and resolution enqueue Member 9's supported events in the same transaction as the outcome.
 
 | Event type | Event key | Recipients |
 |---|---|---|
-| `damage.reported` | `damage:<id>:reported` | Borrower, admins |
-| `damage.decided` | `damage:<id>:decided` | Borrower, lender |
-| `damage.disputed` | `damage:<id>:disputed` | Lender, admins |
-| `damage.resolved` | `damage:<id>:resolved` | Borrower, lender |
-| `review.created` | `review:<id>:created` | Reviewee |
+| `damage_decision` | `damage:<id>:damage_decision` | Borrower, lender |
+| `damage_resolved` | `damage:<id>:damage_resolved` | Borrower, lender |
+
+The reservation completion event also records a damaged return. Dedicated case-opening, dispute-submission and review notifications need matching event types in Member 9's worker.
 
 ---
 
@@ -341,7 +340,7 @@ None of these values are in the requirement sheet. They are the proposals used a
 | **Member 4** | Link damage-report rows to `/admin/damage-reports/:id`; read `DamageReport` read-only | Req 96 |
 | **Member 5** | For a damaged return, link the lender to `/damage-reports/new?reservation=:id` while the reservation is active (Member 1's `return` already refuses good returns once a case exists; `hasOpenDamageCase()` is there for the UI). Embed `ConditionPhotoPanel` and `ReviewForm` on reservation details | Req 60, 61, 79, 89, 90 |
 | **Member 7** | Embed `<TrustSummary userId={item.owner._id} compact />` on `ItemDetailsPage` | Req 91 |
-| **Member 9** | Deliver the five events in §6.4 | Notifications |
+| **Member 9** | Deliver the damage outcome events in §6.4 | Notifications |
 
 ---
 

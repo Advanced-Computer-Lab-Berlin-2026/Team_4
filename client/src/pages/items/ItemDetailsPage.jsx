@@ -1,7 +1,7 @@
 // ITEM DETAILS - Owner: Member 7 - Requirements: 19, 20 (and 33/35 via the wired-in pieces)
 // Route: /catalog/:id   Access: public (guests see a "Register to reserve" prompt - Req 35)
 //
-// Layout slots are ALREADY WIRED so other members' components appear here without anyone editing this file:
+// The item details slots render independently owned Sprint components:
 //   <FavoriteButton/>  -> Member 9 (Req 37)      <PickupInfo/> + <ManualViewer/> -> Member 6 (Req 30, 33)
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -15,6 +15,7 @@ import FavoriteButton from '../../components/favorites/FavoriteButton';
 import PickupInfo from '../../components/items/PickupInfo';
 import ManualViewer from '../../components/items/ManualViewer';
 import ItemGallery from '../../components/catalog/ItemGallery';
+import TrustSummary from '../../components/sprint2/m3/TrustSummary';
 import '../../components/catalog/catalog.css';
 
 export default function ItemDetailsPage() {
@@ -72,13 +73,15 @@ export default function ItemDetailsPage() {
               <div><dt>Lender</dt><dd>{item.owner?.name || 'Unknown'}</dd></div>
             </dl>
 
+            {item.owner?._id && <TrustSummary userId={item.owner._id} compact hideLink={!user} />}
+
             {/* Req 35: guests may browse but must register to reserve */}
             {!authLoading && !user && (
               <Alert variant="info">
                 Want to borrow this? <Link to="/register">Register</Link> or <Link to="/login">log in</Link> to reserve it.
               </Alert>
             )}
-            {/* Sprint 2 slots: reservation calendar (43), reserve button (45), owner trust score (91), alternatives (92) */}
+            {/* Sprint 2 slots: reservation calendar (43), reserve button (45), alternatives (92) */}
           </div>
         </aside>
       </div>

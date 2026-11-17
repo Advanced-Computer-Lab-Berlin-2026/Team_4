@@ -24,9 +24,11 @@ import s from '../../styles/sprint2/member5.module.css';
 const {
   '../../components/sprint2/m3/ConditionPhotoPanel.jsx': ConditionPhotoPanel,
   '../../components/sprint2/m3/ReviewForm.jsx': ReviewForm,
+  '../../components/sprint2/m3/TrustSummary.jsx': TrustSummary,
 } = import.meta.glob([
   '../../components/sprint2/m3/ConditionPhotoPanel.jsx',
   '../../components/sprint2/m3/ReviewForm.jsx',
+  '../../components/sprint2/m3/TrustSummary.jsx',
 ], { eager: true, import: 'default' });
 
 const EXTENSION = { pending: 'Waiting for the lender', approved: 'Approved', rejected: 'Declined', cancelled: 'Withdrawn', expired: 'Not answered in time' };
@@ -169,11 +171,11 @@ export default function ReservationDetailsPage() {
           </section>
 
           {delivery && <DeliveryStatusPanel reservationId={r._id} onChange={refresh} />}
-          {ConditionPhotoPanel && lender && open && (
-            <ConditionPhotoPanel key={r._id} reservationId={r._id} onChange={refresh} />
+          {ConditionPhotoPanel && ['confirmed', 'active', 'completed'].includes(r.status) && (
+            <ConditionPhotoPanel key={`photos-${r._id}`} reservationId={r._id} readOnly={!lender} onChange={refresh} />
           )}
           {ReviewForm && r.status === 'completed' && (
-            <ReviewForm key={r._id} reservationId={r._id} otherPartyName={other.person?.name} />
+            <ReviewForm key={`review-${r._id}`} reservationId={r._id} otherPartyName={other.person?.name} />
           )}
 
           {/* while the booking is active, the extension cards above already show the request */}
@@ -208,6 +210,7 @@ export default function ReservationDetailsPage() {
               <div><dt>Deposit status</dt><dd>{depositText(r.deposit)}</dd></div>
               {r.lateFee > 0 && <div><dt>Late fee</dt><dd className={s.penalty}>{formatMoney(r.lateFee)}</dd></div>}
             </dl>
+            {TrustSummary && other.person?._id && <TrustSummary userId={other.person._id} compact />}
             <div className={s.summaryActions}>
               {/* the lender edits their own item (works even when archived); a borrower sees the public page only when it exists */}
               {r.item && lender && <Link to={`/lender/items/${r.item._id}/edit`} className="btn btn-secondary">Edit item</Link>}

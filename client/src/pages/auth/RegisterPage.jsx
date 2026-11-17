@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { register } from '../../api/auth.api';
 import { getErrorMessage, getFieldErrors } from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
@@ -17,6 +17,8 @@ export default function RegisterPage() {
   const [busy, setBusy] = useState(false);
   const { setUser } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const referralCode = searchParams.get('ref')?.trim();
   const change = (e) => setValues({ ...values, [e.target.name]: e.target.value });
   async function submit(event) {
     event.preventDefault(); setError(''); setErrors({});
@@ -24,7 +26,10 @@ export default function RegisterPage() {
     setBusy(true);
     try {
       const { username, password, name, email, phone, street, city, state, postalCode, country } = values;
-      const { user } = await register({ username, password, name, email, phone, address: { street, city, state, postalCode, country } });
+      const { user } = await register({
+        username, password, name, email, phone, address: { street, city, state, postalCode, country },
+        ...(referralCode && referralCode.length <= 64 ? { ref: referralCode } : {}),
+      });
       setUser(user);
       navigate(lend ? '/lender/apply' : '/', { replace: true });
     } catch (err) {

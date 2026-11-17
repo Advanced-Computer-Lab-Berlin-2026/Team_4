@@ -22,6 +22,10 @@ function assertId(value, field) {
   if (!mongoose.isValidObjectId(value)) throw ApiError.badRequest(`${field} must be a valid id`);
 }
 
+function assertNonNegative(value, field) {
+  if (!Number.isSafeInteger(value) || value < 0) throw ApiError.badRequest(`${field} must be a whole number of piastres (0 or more)`);
+}
+
 function asDate(value, field) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) throw ApiError.badRequest(`${field} must be a valid date`);
@@ -35,7 +39,7 @@ function asDate(value, field) {
  *   at/after pickup                        -> 0 %
  */
 function quoteCancellationRefund({ amountMinor, cancelledAt, pickupDate, freeCancellationHours = policy.cancellation.freeCancellationHours }) {
-  assertAmountMinor(amountMinor);
+  assertNonNegative(amountMinor, 'amountMinor'); // 0 = no deposit (only a delivery fee was paid)
   const hoursBeforePickup = (asDate(pickupDate, 'pickupDate') - asDate(cancelledAt, 'cancelledAt')) / HOUR_MS;
   let ratePercent;
   let rule;
@@ -63,23 +67,35 @@ async function payLender({ reservationId, amountMinor, operationId, note }, sess
 }
 
 /**
- * settleCancellation(input, session) -> { refundMinor, ... }  (called by M1 cancellation.js)
- * input: { reservationId, borrowerId, amountMinor (deposit held), currency, cancelledAt, pickupDate,
- *          freeCancellationHours, idempotencyKey }
+ * settleCancellation(input, session) -> { refundMinor, deliveryRefundMinor, ... }  (called by M1 cancellation.js)
+ * input: { reservationId, borrowerId, amountMinor (deposit held, may be 0), deliveryMinor (delivery fee paid, default 0),
+ *          currency, cancelledAt, pickupDate, freeCancellationHours, idempotencyKey }
+ * The cancellation rule applies to the DEPOSIT only. The delivery fee is always refunded in full: M1 only allows a
+ * cancellation before handover and before the pickup date, so the delivery never happened (team decision with M1).
  */
 async function settleCancellation(input, session) {
-  const { reservationId, borrowerId, amountMinor, currency, cancelledAt, pickupDate, freeCancellationHours, idempotencyKey } = input || {};
+  const { reservationId, borrowerId, amountMinor, deliveryMinor = 0, currency, cancelledAt, pickupDate, freeCancellationHours, idempotencyKey } = input || {};
   assertId(reservationId, 'reservationId');
   assertId(borrowerId, 'borrowerId');
+  assertNonNegative(deliveryMinor, 'deliveryMinor');
   const quote = quoteCancellationRefund({ amountMinor, cancelledAt, pickupDate, freeCancellationHours });
+  const totalMinor = amountMinor + deliveryMinor;
+  if (totalMinor <= 0) throw ApiError.badRequest('There is nothing to refund');
   const reference = { type: 'reservation', id: reservationId };
 
-  return runOperation({ idempotencyKey, kind: 'refund', purpose: 'cancellation', userId: borrowerId, reference, amountMinor, currency }, async ({ session: s, operation }) => {
+  return runOperation({ idempotencyKey, kind: 'refund', purpose: 'cancellation', userId: borrowerId, reference, amountMinor: totalMinor, currency }, async ({ session: s, operation }) => {
     let balanceMinor;
     if (quote.refundMinor > 0) {
       ({ balanceMinor } = await wallet.applyChange({
         userId: borrowerId, deltaMinor: quote.refundMinor, type: 'refund', reference, operationId: operation._id,
         note: quote.ratePercent === 100 ? 'Cancellation refund (full)' : `Cancellation refund (${quote.ratePercent}%)`,
+      }, { session: s }));
+    }
+    const deliveryRefundMinor = deliveryMinor;
+    if (deliveryRefundMinor > 0) {
+      ({ balanceMinor } = await wallet.applyChange({
+        userId: borrowerId, deltaMinor: deliveryRefundMinor, type: 'refund', reference, operationId: operation._id,
+        note: 'Delivery fee refunded (cancelled before delivery)',
       }, { session: s }));
     }
     const paidToLenderMinor = await payLender({
@@ -90,17 +106,17 @@ async function settleCancellation(input, session) {
       action: 'cancellation_refunded',
       reservationId,
       userId: borrowerId,
-      amountMinor: quote.refundMinor,
+      amountMinor: quote.refundMinor + deliveryRefundMinor,
       operationId: operation._id,
       inputs: {
-        heldMinor: amountMinor, cancelledAt, pickupDate, hoursBeforePickup: quote.hoursBeforePickup,
+        heldMinor: amountMinor, deliveryMinor, cancelledAt, pickupDate, hoursBeforePickup: quote.hoursBeforePickup,
         freeCancellationHours: freeCancellationHours ?? policy.cancellation.freeCancellationHours,
         partialRefundPercent: policy.cancellation.partialRefundPercent, forfeitedFundsTo: policy.forfeitedFundsTo,
       },
-      result: { rule: quote.rule, ratePercent: quote.ratePercent, refundMinor: quote.refundMinor, forfeitedMinor: quote.forfeitedMinor, paidToLenderMinor },
+      result: { rule: quote.rule, ratePercent: quote.ratePercent, refundMinor: quote.refundMinor, deliveryRefundMinor, forfeitedMinor: quote.forfeitedMinor, paidToLenderMinor },
     }, { session: s });
 
-    return { refundMinor: quote.refundMinor, ratePercent: quote.ratePercent, rule: quote.rule, forfeitedMinor: quote.forfeitedMinor, paidToLenderMinor, balanceMinor };
+    return { refundMinor: quote.refundMinor, deliveryRefundMinor, ratePercent: quote.ratePercent, rule: quote.rule, forfeitedMinor: quote.forfeitedMinor, paidToLenderMinor, balanceMinor };
   }, session);
 }
 

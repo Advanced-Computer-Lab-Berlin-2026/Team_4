@@ -605,3 +605,35 @@ test('Req 64: a dispute refund can never exceed what was kept, and needs a decis
   await assert.rejects(resolveDispute(stranger, 100), (e) => e.status === 400);
   assert.equal(await balanceOf(borrower), 25000);
 });
+
+// ---------------------------------------------------------------- M1 update: delivery fee on borrower cancellation
+
+const settle = (reservation, borrower, { amountMinor, deliveryMinor, hoursBefore }) => payment.settleCancellation({
+  reservationId: reservation._id, borrowerId: borrower._id, amountMinor, deliveryMinor, currency: 'EGP',
+  cancelledAt: new Date(+reservation.startDate - hoursBefore * 3600000), pickupDate: reservation.startDate,
+  idempotencyKey: `cancel:${reservation._id}`,
+});
+
+test('cancellation: the 50 % rule applies to the deposit only, the delivery fee is refunded in full, once', async () => {
+  const borrower = await makeUser(0);
+  const reservation = await paidReservation({ borrower, deposit: 200, deliveryFee: 30 });
+  const result = await settle(reservation, borrower, { amountMinor: 20000, deliveryMinor: 3000, hoursBefore: 10 });
+  await settle(reservation, borrower, { amountMinor: 20000, deliveryMinor: 3000, hoursBefore: 10 }); // retry
+
+  assert.deepEqual([result.refundMinor, result.deliveryRefundMinor], [10000, 3000]);
+  assert.equal(await balanceOf(borrower), 13000);
+  assert.equal(await wallet.getBalanceMinor(reservation.lender), 10000); // the kept half of the deposit only
+  assert.equal(await WalletTransaction.countDocuments({ user: borrower._id, type: 'refund' }), 2); // deposit row + delivery row
+});
+
+test('cancellation: a delivery-only charge (no deposit) is refunded in full; nothing at all is refused', async () => {
+  const borrower = await makeUser(0);
+  const reservation = await paidReservation({ borrower, deposit: 0, deliveryFee: 25 });
+  const result = await settle(reservation, borrower, { amountMinor: 0, deliveryMinor: 2500, hoursBefore: 1 });
+  assert.deepEqual([result.refundMinor, result.deliveryRefundMinor], [0, 2500]);
+  assert.equal(await balanceOf(borrower), 2500);
+
+  const other = await paidReservation({ borrower, deposit: 0 });
+  await assert.rejects(settle(other, borrower, { amountMinor: 0, deliveryMinor: 0, hoursBefore: 100 }), (e) => e.status === 400);
+  await assert.rejects(settle(other, borrower, { amountMinor: 100, deliveryMinor: -1, hoursBefore: 100 }), (e) => e.status === 400);
+});

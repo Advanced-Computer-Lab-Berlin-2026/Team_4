@@ -30,6 +30,7 @@ All in `server/src/services/payments/config.js`; public at `GET /api/payments/po
 | Refund reference point | the reservation's pickup date (`pickupDate` = `startDate`, UTC midnight) | Hours between cancellation time and pickup |
 | Refund ≥ 48 h before pickup | 100 % of the deposit | |
 | Refund < 48 h before pickup | **50 %** of the deposit | M1 forbids cancelling on/after the pickup date |
+| Borrower cancels a delivery reservation | Cancellation rule on the deposit only; delivery fee refunded **in full** (agreed with M1) | M1 calls `settleCancellation` with `deliveryMinor` |
 | Lender rejects a request | 100 % of deposit **and** delivery fee | M1 calls `refundToWallet` |
 | Admin damage decision (Req 62) | The admin's amount is kept (max = held deposit), the rest goes back to the borrower | M3 calls `settleForfeiture` |
 | Dispute lowers the amount (Req 64) | Only the difference is refunded to the borrower and taken back from the lender (up to the lender's balance; any gap is recorded in the audit) | M3 calls `refundToWallet` with `reference: 'damage:<reportId>'` |
@@ -52,7 +53,7 @@ Member 1's `services/sprint2/bootstrap.js` loads this file automatically. Missin
 | Function | Called when | Input (main fields) | Returns | Status |
 |---|---|---|---|---|
 | `chargeWalletCheckout(input, session)` | Checkout paid by wallet (Req 50) | `attemptId, borrowerId, idempotencyKey, amountMinor, currency, expiresAt, lines[{ reservationId, itemId, title, amountMinor, deposit, fulfilment, startDate, endDate }]` | `{ chargedMinor, balanceMinor, operationId, replayed }` | ✅ Done |
-| `settleCancellation(input, session)` | Borrower cancels (Req 52, 81) | `reservationId, borrowerId, amountMinor, currency, cancelledAt, pickupDate, freeCancellationHours, idempotencyKey` | `{ refundMinor, ratePercent, rule, forfeitedMinor, paidToLenderMinor }` | ✅ Done |
+| `settleCancellation(input, session)` | Borrower cancels (Req 52, 81) | `reservationId, borrowerId, amountMinor` (deposit, may be 0)`, deliveryMinor` (default 0)`, currency, cancelledAt, pickupDate, freeCancellationHours, idempotencyKey` | `{ refundMinor, deliveryRefundMinor, ratePercent, rule, forfeitedMinor, paidToLenderMinor }` — the rule applies to the deposit only; the delivery fee is always refunded in full | ✅ Done |
 | `refundToWallet(input, session)` | Lender rejects (full refund) | `reservationId, userId, reference, currency, idempotencyKey, amountMinor, depositMinor, deliveryMinor` | `{ refundMinor }` | ✅ Done |
 | `releaseDeposit(input, session)` | Good return | same fields as `refundToWallet` | `{ releasedMinor }` | ✅ Done |
 | `settleForfeiture(input, session)` | M3 damage decision (Req 62) | `reservationId, amountMinor` (to keep, 0 allowed)`, idempotencyKey: 'damage:<reportId>:decision'`; session as 2nd arg **or** inside the input | `{ forfeitedMinor, releasedMinor, paidToLenderMinor }` | ✅ Done |
@@ -121,9 +122,9 @@ Reference types: `checkout`, `reservation`, `membership`, `referral`, `manual`. 
 | **M1** | "Late fees" nav link → `/account/late-fees` in `navLinks.js` | Req 78 discoverability | **Missing** |
 | **M1** | Use `PaymentMethodPicker` in `CheckoutPage` instead of the plain radios | Shows wallet balance and the policy before payment | Requested |
 | **M1** | Update `member1.test.js:214` — it expects wallet checkout to be unavailable "without Member 2"; Member 2's module now exists, so that scenario must pass `deps` with `payment: undefined` (or expect `['wallet']`) | Test now fails by design | Requested |
-| **M1** | Decide whether the delivery fee is refunded on **borrower cancellation** (today only the deposit is passed to `settleCancellation`) | Refund amount | **Open decision** |
+| **M1** | Delivery fee on borrower cancellation: **decided** — refunded in full before handover; M1 passes `deliveryMinor` | Refund amount | ✅ Agreed with M1 |
 | **M3** | Already matches: `settleForfeiture({ reservationId, amountMinor, idempotencyKey, session })` and `refundToWallet({ userId, amountMinor, reference: 'damage:<id>', ... })`. Please also set the reservation's `deposit.status` / `deposit.forfeited` after the decision (Member 2 does not write `Reservation`) | Damage settlement | Matches M3's code |
-| **M8** | Use `charge` (`purpose:'membership'`) / card functions for subscriptions | Req 85 | Requested |
+| **M8** | Agree the inputs of `chargeMembership` (wallet) and `recordMembershipPayment` (verified card payment), and a server-chosen card return path such as `/membership` (SPRINT2_CONTRACT.md). Waiting for M8's contract | Req 85 | **In discussion** |
 | **M9** | Already matches: `creditReferral({ userId, amountMinor: 10000, currency, reference: 'referral:<id>', idempotencyKey })` from `wallet.js`. Reward EGP 100 (M9's md) | Req 99 | Matches M9's code |
 | Done by M1 | Webhook mounted with raw body; `STRIPE_WEBHOOK_SECRET` in `env.js`; route modules auto-wired; `npm run test:sprint2` | | ✅ |
 

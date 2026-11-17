@@ -12,7 +12,7 @@
 .list { list-style: none; margin: 0; padding: 0; }
 .row { display: flex; justify-content: space-between; gap: .75rem; padding: .75rem 0; border-bottom: 1px solid var(--border); }
 .row:last-child { border-bottom: 0; }
-.main { min-width: 0; }
+.main { flex: 1; min-width: 0; } /* takes the free space and wraps long item names */
 .title { font-weight: 600; overflow-wrap: anywhere; }
 .meta { color: var(--muted); font-size: .88rem; }
 .amounts { text-align: right; white-space: nowrap; }
@@ -32,5 +32,5 @@
 .option:hover { background: #eef4ff; }
 .option input { margin-top: .3rem; width: 1.1rem; height: 1.1rem; flex: none; }
 .option:has(input:checked) { background: #eef4ff; outline: 2px solid var(--primary); }
-.optionDisabled { cursor: not-allowed; opacity: .6; }
+.optionDisabled { cursor: not-allowed; color: var(--muted); } /* muted colour, not opacity: text keeps readable contrast */
 .optionDisabled:hover { background: none; }

@@ -66,6 +66,7 @@ export default function PaymentMethodPicker({ amountMinor, methods = ['wallet', 
         <p className={styles.meta}>
           Free cancellation up to {policy.cancellation.freeCancellationHours} hours before pickup;
           after that, {policy.cancellation.partialRefundPercent}% of the deposit is refunded to your wallet.
+          A delivery fee is always refunded in full if you cancel before the delivery.
           Late returns cost {policy.lateFee.percentOfDepositPerDay}% of the deposit per day
           (up to {policy.lateFee.capPercentOfDeposit}% of it).
         </p>

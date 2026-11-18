@@ -18,6 +18,8 @@ function reservationView(reservation) {
     startDate: reservation.startDate, endDate: reservation.endDate, status: reservation.status,
     depositAmount: reservation.deposit?.amount ?? 0, refundAmount: reservation.cancellation?.refundAmount,
     fulfilmentMethod: reservation.fulfilment?.method || 'pickup',
+    deliveryStatus: deliveryStage(reservation),
+    deliveryFee: reservation.fulfilment?.deliveryFee ?? 0,
     returnedAt: reservation.returnedAt, completedAt: reservation.completedAt || reservation.returnedAt,
     returnCondition: reservation.returnCondition, rejectionReason: reservation.rejectionReason,
     ...lifecycleFlags(reservation),
@@ -48,6 +50,49 @@ async function withReservation(params, work) {
     const record = await getParticipantReservation(actorId, reservationId, transaction);
     return work(record, actor, transaction);
   }, session);
+}
+
+const nextDeliveryStage = new Map([['preparing', 'out_for_delivery'], ['out_for_delivery', 'delivered']]);
+
+function deliveryStage(reservation) {
+  if (reservation.fulfilment?.method !== 'delivery') return 'none';
+  const status = reservation.fulfilment.deliveryStatus;
+  return !status || status === 'none' ? 'preparing' : status;
+}
+
+async function advanceDelivery({ actorId, reservationId, deliveryStatus }, deps = features()) {
+  if (!['out_for_delivery', 'delivered'].includes(deliveryStatus)) {
+    throw ApiError.badRequest('Invalid delivery status');
+  }
+  return withReservation({ actorId, reservationId }, async (record, actor, session) => {
+    if (record.fulfilment?.method !== 'delivery') throw ApiError.notFound('Delivery reservation not found');
+    if (!record.lender.equals(actor._id) || !actor.isVerifiedLender()) throw ApiError.forbidden();
+    const stage = deliveryStage(record);
+    if (stage === deliveryStatus) return record;
+    if (!['confirmed', 'active'].includes(record.status) || nextDeliveryStage.get(stage) !== deliveryStatus) {
+      throw ApiError.conflict('Delivery must progress in order on a confirmed or active reservation');
+    }
+
+    const activates = deliveryStatus === 'delivered' && record.status === 'confirmed';
+    const now = new Date();
+    if (activates && (now < record.startDate || now >= record.endDate)) {
+      throw ApiError.conflict('Delivery handover must be within the booked date range');
+    }
+    record.fulfilment.deliveryStatus = deliveryStatus;
+    if (activates) {
+      record.status = 'active';
+      record.pickedUpAt = now;
+    }
+    await record.save({ session });
+
+    if (deps.events?.enqueueEvent) {
+      const id = record.id;
+      await deps.events.enqueueEvent('delivery_status', id, [record.borrower, record.lender].map(String), {
+        reservationId: id, itemId: String(record.item), deliveryStatus, link: '/delivery-tracking/' + id,
+      }, id + ':delivery:' + deliveryStatus, session);
+    }
+    return record;
+  });
 }
 
 const lenderCommands = new Map([
@@ -111,6 +156,9 @@ async function transition(params, deps = features()) {
   const damaged = params.action === 'returnDamaged';
   return withReservation(params, async (record, actor, session) => {
     if (!record.lender.equals(actor._id) || !actor.isVerifiedLender()) throw ApiError.forbidden();
+    if (params.action === 'pickup' && record.fulfilment?.method === 'delivery') {
+      throw ApiError.conflict('Mark the delivery as delivered to activate this reservation');
+    }
     const damageCase = returning ? await DamageReport.findOne({ reservation: record._id })
       .select('_id status borrower reportedBy').session(session) : null;
     if (returning && !damaged && (damageCase || record.returnCondition === 'damaged')) {
@@ -257,6 +305,7 @@ async function releaseWaitlistHold({ holdId, itemId, borrowerId, session }) {
 }
 
 module.exports = {
+  advanceDelivery, deliveryStage,
   reservationView, listReservations, getParticipantReservation, withReservation,
   transition, extend, holdForWaitlist, releaseWaitlistHold,
 };

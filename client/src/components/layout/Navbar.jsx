@@ -6,6 +6,10 @@ import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { accountLinks, adminLinks, applyLink, guestLinks, lenderLinks, memberLinks } from './navLinks';
 
+const { '../sprint2/m9/NotificationBell.jsx': NotificationBell } = import.meta.glob(
+  '../sprint2/m9/NotificationBell.jsx', { eager: true, import: 'default' },
+);
+
 export default function Navbar() {
   const { user, isAdmin, isVerifiedLender, logout } = useAuth();
   const [open, setOpen] = useState(false);
@@ -33,7 +37,10 @@ export default function Navbar() {
     <header className="navbar">
       <div className="navbar-inner">
         <Link to="/" className="brand" onClick={() => setOpen(false)}>🛠️ ShareShed</Link>
-        <button className="nav-toggle" aria-label="Toggle navigation" aria-expanded={open} onClick={() => setOpen((o) => !o)}>☰</button>
+        <div className="navbar-actions">
+          {NotificationBell && user?.role === 'member' && <NotificationBell key={user._id} />}
+          <button className="nav-toggle" aria-label="Toggle navigation" aria-expanded={open} onClick={() => setOpen((o) => !o)}>☰</button>
+        </div>
         <nav className={`nav-links ${open ? 'open' : ''}`}>
           {links.map((l) => (
             <NavLink key={l.to} to={l.to} end={l.to === '/admin'} onClick={() => setOpen(false)}>{l.label}</NavLink>

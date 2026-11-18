@@ -66,12 +66,12 @@ In dev, the **DEV** button (bottom-right) logs you in as any of them in one clic
 | `JWT_EXPIRES_IN` | no | Token lifetime (default `7d`) |
 | `PORT` | no | API port (default `5000`) |
 | `CLIENT_URL` | no | Origin of the React app for CORS (default `http://localhost:5173`) |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `EMAIL_FROM` | no | SMTP server for emails. **If `SMTP_HOST` is empty, emails (e.g. OTP codes) are printed to the server console.** |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `EMAIL_FROM` | no | SMTP server for email delivery. Notifications require SMTP. In development, password-reset codes can use the local console when SMTP is unset. |
 | `MAX_UPLOAD_MB` | no | Max upload size (default 5) |
 | `OTP_EXPIRY_MINUTES` | no | Password-reset OTP lifetime (default 10) |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Sprint 2 | Stripe **test-mode** keys |
 
-`client/.env`: `VITE_API_URL` (only if the API is on another origin), `VITE_STRIPE_PUBLISHABLE_KEY` (Sprint 2).
+`client/.env`: set `VITE_API_URL` only if the API is on another origin. Card payments redirect to Stripe-hosted Checkout and use server-side Stripe configuration.
 
 ## Scripts
 | Command | What it does |

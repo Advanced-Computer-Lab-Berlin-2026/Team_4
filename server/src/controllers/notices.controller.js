@@ -5,6 +5,8 @@
  */
 const asyncHandler = require('../utils/asyncHandler');
 const Notice = require('../models/Notice');
+const User = require('../models/User');
+const { enqueueEvent } = require('../services/notifications/eventOutbox');
 
 /**
  * GET /api/notices - Req 42 - any logged-in user
@@ -31,5 +33,13 @@ exports.createNotice = asyncHandler(async (req, res) => {
   });
   await notice.populate('postedBy', 'name username');
 
+  const recipients = await User.distinct('_id', { role: 'member', status: 'active' });
+  await enqueueEvent(
+    'notice_posted',
+    notice._id,
+    recipients,
+    { title: notice.title, message: notice.body, link: '/notices' },
+    `notice:${notice._id}:posted`
+  );
   res.status(201).json({ notice });
 });

@@ -8,6 +8,21 @@ const ApiError = require('../utils/ApiError');
 const mongoose = require('mongoose');
 const Favorite = require('../models/Favorite');
 const Item = require('../models/Item');
+const { enqueueEvent } = require('../services/notifications/eventOutbox');
+
+exports.enqueueAvailabilityChanged = async (itemId, payload = {}, eventKey, session = null) => {
+  const query = Favorite.distinct('user', { item: itemId });
+  if (session) query.session(session);
+  const recipients = await query;
+  return enqueueEvent(
+    'availability_changed',
+    itemId,
+    recipients,
+    payload,
+    eventKey,
+    session
+  );
+};
 
 /**
  * GET /api/favorites - Req 38 - member

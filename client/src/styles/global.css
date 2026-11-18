@@ -26,12 +26,14 @@ h1 { font-size: 1.6rem; margin: .2rem 0 1rem; } h2 { font-size: 1.25rem; } h3 { 
 .navbar { background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 20; }
 .navbar-inner { max-width: 1100px; margin: 0 auto; padding: .6rem 1rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; }
 .brand { font-weight: 700; font-size: 1.2rem; color: var(--text); }
+.navbar-actions { display: flex; align-items: center; gap: .25rem; }
 .nav-toggle { display: inline-block; background: none; border: 1px solid var(--border); border-radius: 8px; font-size: 1.3rem; padding: .1rem .6rem; cursor: pointer; }
 .nav-links { display: none; width: 100%; flex-direction: column; gap: .25rem; padding-top: .6rem; }
 .nav-links.open { display: flex; }
 .nav-links a { padding: .45rem .6rem; border-radius: 8px; color: var(--text); }
 .nav-links a.active { background: #e6f0ff; color: var(--primary-dark); font-weight: 600; }
 @media (min-width: 900px) {
+  .navbar-actions { order: 1; margin-left: auto; }
   .nav-toggle { display: none; }
   .nav-links { display: flex; flex-direction: row; width: auto; padding: 0; align-items: center; flex-wrap: wrap; }
 }

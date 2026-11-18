@@ -1,4 +1,4 @@
-# GitHub CODEOWNERS - owners match the Sprint 1 member assignments.
+# GitHub CODEOWNERS - owners match the team file assignments.
 # With branch protection ('Require review from Code Owners') the owner is auto-requested on any PR touching their files.
 
 /server/src/controllers/auth.controller.js @alishebl05
@@ -138,3 +138,181 @@
 /docs/SPRINT2_CONTRACT.md @alishebl05
 /docs/SPRINT2_OWNERSHIP.md @alishebl05
 /docs/sprint2/member1.md @alishebl05
+
+# Sprint 2 membership and household entitlements (Member 8)
+/server/src/controllers/memberships.controller.js @karimhamakey
+/server/src/routes/memberships.routes.js @karimhamakey
+/client/src/api/memberships.api.js @karimhamakey
+/server/src/controllers/membershipReports.controller.js @karimhamakey
+/server/src/routes/membershipReports.routes.js @karimhamakey
+/client/src/api/membershipReports.api.js @karimhamakey
+/server/src/models/MembershipTier.js @karimhamakey
+/client/src/pages/membership/MembershipPlansPage.jsx @karimhamakey
+/client/src/pages/membership/MyMembershipPage.jsx @karimhamakey
+/client/src/pages/admin/AdminMembershipReportPage.jsx @karimhamakey
+/client/src/components/sprint2/m8/MembershipSummary.jsx @karimhamakey
+/server/src/services/membership/membership.js @karimhamakey
+/server/src/services/membership/entitlements.js @karimhamakey
+/server/src/services/membership/membershipReport.js @karimhamakey
+/client/src/routes/sprint2/member8.routes.jsx @karimhamakey
+/client/src/styles/sprint2/member8.module.css @karimhamakey
+/server/test/sprint2/member8.test.js @karimhamakey
+/client/test/sprint2/member8.test.jsx @karimhamakey
+/docs/sprint2/member8.md @karimhamakey
+
+# Sprint 2 moderation, analytics and support (Member 4)
+/server/src/controllers/moderation.controller.js @janakhalifa5
+/server/src/routes/moderation.routes.js @janakhalifa5
+/client/src/api/moderation.api.js @janakhalifa5
+/server/src/controllers/analytics.controller.js @janakhalifa5
+/server/src/routes/analytics.routes.js @janakhalifa5
+/client/src/api/analytics.api.js @janakhalifa5
+/server/src/controllers/supportTickets.controller.js @janakhalifa5
+/server/src/routes/supportTickets.routes.js @janakhalifa5
+/client/src/api/supportTickets.api.js @janakhalifa5
+/server/src/models/Report.js @janakhalifa5
+/server/src/models/SupportTicket.js @janakhalifa5
+/client/src/pages/admin/AdminModerationPage.jsx @janakhalifa5
+/client/src/pages/admin/AdminUsageReportPage.jsx @janakhalifa5
+/client/src/pages/admin/AdminDamageReportPage.jsx @janakhalifa5
+/client/src/pages/support/MySupportTicketsPage.jsx @janakhalifa5
+/client/src/pages/support/SupportTicketPage.jsx @janakhalifa5
+/client/src/pages/admin/AdminSupportPage.jsx @janakhalifa5
+/client/src/components/sprint2/m4/ReportFilters.jsx @janakhalifa5
+/client/src/components/sprint2/m4/SupportThread.jsx @janakhalifa5
+/server/src/services/moderation/moderation.js @janakhalifa5
+/server/src/services/analytics/reportQueries.js @janakhalifa5
+/server/src/services/analytics/reportExport.js @janakhalifa5
+/server/src/services/support/support.js @janakhalifa5
+/client/src/routes/sprint2/member4.routes.jsx @janakhalifa5
+/client/src/styles/sprint2/member4.module.css @janakhalifa5
+/server/test/sprint2/member4.test.js @janakhalifa5
+/client/test/sprint2/member4.test.jsx @janakhalifa5
+/docs/sprint2/member4.md @janakhalifa5
+
+# Sprint 2 delivery and deposit promotions (Member 6)
+/server/src/controllers/delivery.controller.js @SeiffNader
+/server/src/routes/delivery.routes.js @SeiffNader
+/server/src/controllers/promoCodes.controller.js @SeiffNader
+/server/src/routes/promoCodes.routes.js @SeiffNader
+/server/src/models/PromoCode.js @SeiffNader
+/server/src/models/PromoRedemption.js @SeiffNader
+/server/src/services/delivery/ @SeiffNader
+/server/src/services/policies/ @SeiffNader
+/server/src/services/pricing/ @SeiffNader
+/server/src/services/promotions/ @SeiffNader
+/client/src/api/delivery.api.js @SeiffNader
+/client/src/api/promoCodes.api.js @SeiffNader
+/client/src/components/sprint2/m6/ @SeiffNader
+/client/src/pages/admin/AdminPromoCodesPage.jsx @SeiffNader
+/client/src/pages/admin/AdminPromoUsagePage.jsx @SeiffNader
+/client/src/routes/sprint2/member6.routes.jsx @SeiffNader
+/client/src/styles/sprint2/member6.module.css @SeiffNader
+/server/test/sprint2/member6.test.js @SeiffNader
+/server/test/sprint2/member6/ @SeiffNader
+/client/test/sprint2/member6.test.jsx @SeiffNader
+/docs/sprint2/member6.md @SeiffNader
+
+# Sprint 2 borrow list and reservation lifecycle (Member 5)
+/client/src/api/borrowLists.api.js @Aser005
+/client/src/api/lendingDashboard.api.js @Aser005
+/client/src/api/reservationLifecycle.api.js @Aser005
+/client/src/components/lender/item-editor/item-editor.css @Aser005
+/client/src/components/sprint2/m5/ @Aser005
+/client/src/pages/borrow/BorrowListPage.jsx @Aser005
+/client/src/pages/lender/my-items.css @Aser005
+/client/src/pages/lifecycle/ @Aser005
+/client/src/routes/sprint2/member5.routes.jsx @Aser005
+/client/src/styles/sprint2/member5.module.css @Aser005
+/client/test/sprint2/member5.test.jsx @Aser005
+/docs/sprint2/member5.md @Aser005
+/server/src/controllers/borrowLists.controller.js @Aser005
+/server/src/controllers/lendingDashboard.controller.js @Aser005
+/server/src/controllers/reservationLifecycle.controller.js @Aser005
+/server/src/models/BorrowList.js @Aser005
+/server/src/routes/borrowLists.routes.js @Aser005
+/server/src/routes/lendingDashboard.routes.js @Aser005
+/server/src/routes/reservationLifecycle.routes.js @Aser005
+/server/src/services/borrow/borrowList.js @Aser005
+/server/src/services/reservations/lendingDashboard.js @Aser005
+/server/src/services/reservations/lifecycle.js @Aser005
+/server/test/sprint2/member5.test.js @Aser005
+
+# Sprint 2 damage, evidence, reviews and trust (Member 3)
+/client/src/api/conditionPhotos.api.js @12tifa12
+/client/src/api/damageReports.api.js @12tifa12
+/client/src/api/reviews.api.js @12tifa12
+/client/src/api/trustProfiles.api.js @12tifa12
+/client/src/components/sprint2/m3/ @12tifa12
+/client/src/pages/admin/AdminDamageDecisionPage.jsx @12tifa12
+/client/src/pages/damage/DamageReportPage.jsx @12tifa12
+/client/src/pages/reviews/MyReviewsPage.jsx @12tifa12
+/client/src/pages/reviews/TrustProfilePage.jsx @12tifa12
+/client/src/routes/sprint2/member3.routes.jsx @12tifa12
+/client/src/styles/sprint2/member3.module.css @12tifa12
+/client/test/sprint2/member3.test.jsx @12tifa12
+/docs/sprint2/member3.md @12tifa12
+/server/src/controllers/conditionPhotos.controller.js @12tifa12
+/server/src/controllers/damageReports.controller.js @12tifa12
+/server/src/controllers/reviews.controller.js @12tifa12
+/server/src/controllers/trustProfiles.controller.js @12tifa12
+/server/src/models/DamageReport.js @12tifa12
+/server/src/models/Review.js @12tifa12
+/server/src/routes/conditionPhotos.routes.js @12tifa12
+/server/src/routes/damageReports.routes.js @12tifa12
+/server/src/routes/reviews.routes.js @12tifa12
+/server/src/routes/trustProfiles.routes.js @12tifa12
+/server/src/services/damage/ @12tifa12
+/server/src/services/reviews/ @12tifa12
+/server/test/sprint2/member3.test.js @12tifa12
+
+# Sprint 2 payments, wallet, refunds and late fees (Member 2)
+/client/src/api/payments.api.js @Ali-Mohamed-Amin
+/client/src/api/walletLedger.api.js @Ali-Mohamed-Amin
+/client/src/components/sprint2/m2/ @Ali-Mohamed-Amin
+/client/src/pages/account/LateFeesPage.jsx @Ali-Mohamed-Amin
+/client/src/pages/account/WalletPage.jsx @Ali-Mohamed-Amin
+/client/src/routes/sprint2/member2.routes.jsx @Ali-Mohamed-Amin
+/client/src/styles/sprint2/member2.module.css @Ali-Mohamed-Amin
+/client/test/sprint2/member2.test.jsx @Ali-Mohamed-Amin
+/docs/sprint2/member2.md @Ali-Mohamed-Amin
+/server/src/controllers/account.controller.js @Ali-Mohamed-Amin
+/server/src/controllers/payments.controller.js @Ali-Mohamed-Amin
+/server/src/controllers/walletLedger.controller.js @Ali-Mohamed-Amin
+/server/src/models/AuditLog.js @Ali-Mohamed-Amin
+/server/src/models/PaymentOperation.js @Ali-Mohamed-Amin
+/server/src/models/WalletTransaction.js @Ali-Mohamed-Amin
+/server/src/routes/payments.routes.js @Ali-Mohamed-Amin
+/server/src/routes/walletLedger.routes.js @Ali-Mohamed-Amin
+/server/src/services/payments/ @Ali-Mohamed-Amin
+/server/test/sprint2/member2.demo.js @Ali-Mohamed-Amin
+/server/test/sprint2/member2.test.js @Ali-Mohamed-Amin
+
+# Sprint 2 notifications, reminders, and referrals (Member 9)
+/client/src/api/notificationPreferences.api.js @yahiafarahat
+/client/src/api/notifications.api.js @yahiafarahat
+/client/src/api/referrals.api.js @yahiafarahat
+/client/src/components/sprint2/m9/ @yahiafarahat
+/client/src/pages/account/NotificationPreferencesPage.jsx @yahiafarahat
+/client/src/pages/admin/AdminReferralReportPage.jsx @yahiafarahat
+/client/src/pages/notifications/NotificationsPage.jsx @yahiafarahat
+/client/src/pages/referrals/MyReferralsPage.jsx @yahiafarahat
+/client/src/routes/sprint2/member9.routes.jsx @yahiafarahat
+/client/src/styles/sprint2/member9.module.css @yahiafarahat
+/client/test/sprint2/member9.test.jsx @yahiafarahat
+/docs/sprint2/member9.md @yahiafarahat
+/server/src/controllers/notificationPreferences.controller.js @yahiafarahat
+/server/src/controllers/notifications.controller.js @yahiafarahat
+/server/src/controllers/referrals.controller.js @yahiafarahat
+/server/src/jobs/notificationWorker.js @yahiafarahat
+/server/src/jobs/reminders.js @yahiafarahat
+/server/src/models/EventOutbox.js @yahiafarahat
+/server/src/models/Notification.js @yahiafarahat
+/server/src/models/Referral.js @yahiafarahat
+/server/src/routes/notificationPreferences.routes.js @yahiafarahat
+/server/src/routes/notifications.routes.js @yahiafarahat
+/server/src/routes/referrals.routes.js @yahiafarahat
+/server/src/services/notifications/ @yahiafarahat
+/server/src/services/referrals/ @yahiafarahat
+/server/src/utils/email.js @yahiafarahat
+/server/test/sprint2/member9.test.js @yahiafarahat

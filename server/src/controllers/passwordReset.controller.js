@@ -73,6 +73,7 @@ exports.requestOtp = asyncHandler(async (req, res) => {
       to: user.email,
       subject: 'Your ShareShed password reset code',
       text: `Hi ${user.name},\n\nYour password reset code is: ${otp}\n\nIt expires in ${env.OTP_EXPIRY_MINUTES} minutes. If you did not request this, you can ignore this email.`,
+      consoleFallback: true,
     });
   } catch (err) {
     // If delivery fails, remove only the record created/replaced by this request so the user

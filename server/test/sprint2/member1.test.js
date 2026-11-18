@@ -9,6 +9,7 @@ const app = require('../../src/app');
 const { User, Category, Item, Reservation, ReservationHold, CheckoutAttempt, BorrowList, MembershipTier, DamageReport } = require('../../src/models');
 const checkout = require('../../src/services/reservations/checkout');
 const { cancel } = require('../../src/services/reservations/cancellation');
+const { features } = require('../../src/services/sprint2/bootstrap');
 const commands = require('../../src/services/reservations/reservationCommands');
 const { normalizeRange } = require('../../src/services/reservations/availability');
 const { signToken } = require('../../src/utils/tokens');
@@ -72,6 +73,74 @@ after(async () => {
   if (server) await new Promise((resolve) => server.close(resolve));
   if (mongoose.connection.readyState === 1) await mongoose.connection.dropDatabase();
   await mongoose.disconnect();
+});
+
+const signupInput = (username, fields = {}) => ({
+  username, name: username, email: username + '@test.invalid',
+  phone: '01212345678', password: 'ShareShed9!',
+  address: { street: 'Test St', city: 'Cairo' }, ...fields,
+});
+
+test('signup accepts an optional referral code without making it a condition of signup', async () => {
+  const endpoint = '/api/auth/register';
+  const invalid = await request('POST', endpoint, null, signupInput('bad_ref_type', { ref: { code: 'no' } }));
+  assert.equal(invalid.status, 400);
+  assert.equal(await User.exists({ username: 'bad_ref_type' }), null);
+
+  const plain = await request('POST', endpoint, null, signupInput('plain_new_user'));
+  assert.equal(plain.status, 201, JSON.stringify(plain.body));
+  assert.equal(plain.body.referralCapture, undefined);
+
+  const unknown = await request('POST', endpoint, null, signupInput('unknown_ref_user', {
+    phone: '01212345679', ref: ' unknown-code ',
+  }));
+  assert.equal(unknown.status, 201, JSON.stringify(unknown.body));
+  assert.equal(unknown.body.referralCapture, features().referral ? 'invalid' : 'unavailable');
+  assert.equal((await User.findById(unknown.body.user._id)).referredBy, undefined);
+});
+
+test('signup from a referral link pays once after completion and notifies the item’s favorites', async (t) => {
+  if (!features().referral) return t.skip('Member 9’s referral provider is absent');
+  const { Favorite, Referral, EventOutbox, Notification, WalletTransaction } = require('../../src/models');
+  const { processEvent } = require('../../src/services/notifications/notification');
+  const referrer = await user('signup_referrer');
+  const code = await features().referral.ensureReferralCode(referrer.id);
+  const signup = await request('POST', '/api/auth/register', null, signupInput('referred_new_user', {
+    phone: '01212345680', ref: ' ' + code.toLowerCase() + ' ',
+  }));
+  assert.equal(signup.status, 201, JSON.stringify(signup.body));
+  assert.equal(signup.body.referralCapture, 'captured');
+  const referee = await User.findById(signup.body.user._id);
+  assert.equal(String(referee.referredBy), referrer.id);
+  const referral = await Referral.findOne({ referee: referee._id, referrer: referrer._id });
+  assert.equal(referral.status, 'registered');
+  assert.equal(await WalletTransaction.countDocuments({ user: referrer.id, type: 'referral_credit' }), 0);
+
+  const tool = await item('Favorited referral fixture');
+  await Favorite.create({ user: other.id, item: tool.id });
+  await User.updateMany({ _id: { $in: [referee._id, lender._id, other._id] } }, {
+    $set: { 'notificationPrefs.reservations': false, 'notificationPrefs.promotions': false },
+  });
+  const record = await Reservation.create({
+    item: tool.id, borrower: referee.id, lender: lender.id, status: 'active',
+    startDate: new Date(Date.now() - 86400000), endDate: new Date(Date.now() + 86400000),
+  });
+
+  await commands.transition({ actorId: lender.id, reservationId: record.id, action: 'return' });
+  await commands.transition({ actorId: lender.id, reservationId: record.id, action: 'return' });
+  const completed = await EventOutbox.findOne({ eventKey: record.id + ':completed' });
+  assert.deepEqual(completed.recipients.map(String).sort(), [lender.id, referee.id].sort());
+  const available = await EventOutbox.findOne({ eventKey: record.id + ':availability:completed' });
+  assert.equal(String(available.aggregateId), tool.id);
+  assert.deepEqual(available.recipients.map(String), [other.id]);
+  assert.equal(available.payload.borrowerId, undefined);
+  await processEvent(available);
+  assert(await Notification.exists({ user: other.id, eventKey: available.eventKey }));
+  await processEvent(completed);
+  await processEvent(completed);
+  assert.equal(await WalletTransaction.countDocuments({ user: referrer.id, type: 'referral_credit' }), 1);
+  assert.equal((await User.findById(referrer.id)).walletBalance, 100);
+  assert.equal((await Referral.findById(referral.id)).status, 'converted');
 });
 
 test('validates dates and rejects anonymous, admin and self-checkout', async () => {
@@ -214,16 +283,18 @@ test('borrower lock enforces a membership cap across different listings', async 
 test('paid wallet checkout fails safely without Member 2 service; integration receives transaction and settlement is once', async () => {
   const tool = await item('Paid drill', { depositAmount: 100 });
   const selection = single(tool);
-  const quote = await httpQuote(selection);
+  const withoutPayment = { ...features(), payment: undefined };
+  const quote = await checkout.preview(borrower.id, selection, withoutPayment);
   assert.equal(quote.amountMinor, 15000);
   assert.deepEqual(quote.paymentMethods, []);
-  assert.equal((await request('POST', '/api/checkout', borrower, payload(selection, quote))).status, 503);
+  await assert.rejects(checkout.begin(borrower.id, payload(selection, quote), withoutPayment), { status: 503 });
   assert.equal(await Reservation.countDocuments({ item: tool.id }), 0);
 
   let charges = 0;
   let settlements = 0;
   let notifications = 0;
   const deps = {
+    ...withoutPayment,
     payment: {
       chargeWalletCheckout: async (input, session) => {
         assert(session.inTransaction());
@@ -243,7 +314,7 @@ test('paid wallet checkout fails safely without Member 2 service; integration re
         assert(session.inTransaction());
         assert.equal(recipients.length, 2);
         assert.equal(data.reservationId, id);
-        if (type === 'reservation_cancelled') notifications += 1;
+        if (type === 'cancelled') notifications += 1;
       },
     },
   };
@@ -346,7 +417,16 @@ test('good return releases the held deposit, recalculates both users and emits c
         recalculated.push(userId);
       },
     },
-    events: { async enqueueEvent(type) { emitted.push(type); } },
+    events: {
+      async enqueueEvent(type) { emitted.push(type); },
+      async enqueueAvailabilityChanged(itemId, data, key, session) {
+        assert(session.inTransaction());
+        assert(itemId.equals(record.item));
+        assert.deepEqual(data, { itemId: String(record.item) });
+        assert.equal(key, record.id + ':availability:completed');
+        emitted.push('availability_changed');
+      },
+    },
   };
   const updated = await lenderAction(record, 'return', { expectedStatus: 'active' }, deps);
   await lenderAction(record, 'return', { expectedStatus: 'active' }, deps);
@@ -355,7 +435,7 @@ test('good return releases the held deposit, recalculates both users and emits c
   assert.equal(+updated.completedAt, +updated.returnedAt);
   assert.equal(settlements, 1);
   assert.deepEqual(recalculated, [borrower.id, lender.id]);
-  assert.deepEqual(emitted, ['reservation_completed', 'availability_changed']);
+  assert.deepEqual(emitted, ['completed', 'availability_changed']);
 });
 
 test('paid rejection rolls back when settlement is unavailable and refunds in full on retry', async () => {
@@ -485,4 +565,49 @@ test('condition photos have stable private metadata and spoofed images are rejec
     await new Promise((resolve) => listener.close(resolve));
     await Promise.all(written.map((file) => fs.unlink(file)));
   }
+});
+
+test('cancelling a delivery refunds the full fee and only the allowed part of the deposit', async () => {
+  const record = await lifecycleFixture('confirmed', {
+    deposit: { amount: 100, status: 'held' },
+    fulfilment: { method: 'delivery', deliveryFee: 25, deliveryStatus: 'preparing' },
+  });
+  const input = { actorId: borrower.id, reservationId: record.id };
+  const depositOnly = { payment: { settleCancellation: async () => ({ refundMinor: 5000 }) } };
+  await assert.rejects(cancel(input, depositOnly), { status: 503 });
+  assert.equal((await Reservation.findById(record.id)).status, 'confirmed');
+
+  let settlements = 0;
+  const deps = { payment: { async settleCancellation(quote, session) {
+    assert(session.inTransaction());
+    assert.equal(quote.amountMinor, 10000);
+    assert.equal(quote.deliveryMinor, 2500);
+    settlements++;
+    return { refundMinor: 5000, deliveryRefundMinor: 2500 };
+  } } };
+  const cancelled = await cancel(input, deps);
+  await cancel(input, deps);
+  assert.equal(cancelled.cancellation.refundAmount, 75);
+  assert.equal(cancelled.deposit.forfeited, 50);
+  assert.equal(cancelled.deposit.status, 'partially_forfeited');
+  assert.equal(settlements, 1);
+});
+
+test('delivery-only charges are refunded before handover and completed deliveries cannot be cancelled', async () => {
+  const fields = { fulfilment: { method: 'delivery', deliveryFee: 25, deliveryStatus: 'preparing' } };
+  const record = await lifecycleFixture('confirmed', fields);
+  const delivered = await lifecycleFixture('confirmed', {
+    fulfilment: { ...fields.fulfilment, deliveryStatus: 'delivered' },
+  });
+  let settlements = 0;
+  const deps = { payment: { async settleCancellation(quote) {
+    assert.equal(quote.amountMinor, 0);
+    settlements++;
+    return { refundMinor: 0, deliveryRefundMinor: quote.deliveryMinor };
+  } } };
+  await assert.rejects(cancel({ actorId: borrower.id, reservationId: delivered.id }, deps), { status: 409 });
+  const cancelled = await cancel({ actorId: borrower.id, reservationId: record.id }, deps);
+  assert.equal(cancelled.cancellation.refundAmount, 25);
+  assert.equal(cancelled.deposit.status, 'none');
+  assert.equal(settlements, 1);
 });

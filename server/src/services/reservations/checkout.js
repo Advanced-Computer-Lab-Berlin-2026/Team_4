@@ -22,20 +22,33 @@ function selection(input) {
   };
 }
 
+function normalizeFulfilment(value) {
+  if (!value || !['pickup', 'delivery'].includes(value.method) ||
+      (value.method === 'delivery' &&
+        (typeof value.deliveryAddress !== 'string' || !value.deliveryAddress.trim() || value.deliveryAddress.length > 500))) {
+    throw ApiError.badRequest('Choose pickup or supply a valid delivery address');
+  }
+  return value.method === 'delivery'
+    ? { method: 'delivery', deliveryAddress: value.deliveryAddress.trim() } : { method: 'pickup' };
+}
+
 function options(input) {
   if (input.promoCode != null && (typeof input.promoCode !== 'string' || input.promoCode.length > 80)) {
     throw ApiError.badRequest('Invalid promo code');
   }
-  const fulfilment = input.fulfilment;
-  if (fulfilment && (!['pickup', 'delivery'].includes(fulfilment.method) ||
-    (fulfilment.method === 'delivery' &&
-    (typeof fulfilment.deliveryAddress !== 'string' || !fulfilment.deliveryAddress.trim() || fulfilment.deliveryAddress.length > 500)))) {
-    throw ApiError.badRequest('Choose pickup or supply a valid delivery address');
+  const perEntry = input.fulfilmentByEntry;
+  if (perEntry != null && (input.source !== 'borrowList' || input.fulfilment != null ||
+      typeof perEntry !== 'object' || Array.isArray(perEntry) || Object.keys(perEntry).length > MAX_LINES)) {
+    throw ApiError.badRequest('Choose fulfilment for entries in your borrow list');
   }
+  const entries = perEntry == null ? [] : Object.entries(perEntry).map(([id, value]) => [
+    String(objectId(id)), normalizeFulfilment(value),
+  ]);
+  entries.sort(([left], [right]) => left.localeCompare(right));
   return {
     promo: input.promoCode?.trim(),
-    fulfilment: fulfilment?.method === 'delivery'
-      ? { method: 'delivery', deliveryAddress: fulfilment.deliveryAddress.trim() } : { method: 'pickup' },
+    fulfilment: normalizeFulfilment(input.fulfilment ?? { method: 'pickup' }),
+    ...(entries.length > 0 && { fulfilmentByEntry: Object.fromEntries(entries) }),
   };
 }
 
@@ -94,12 +107,18 @@ async function quoteLine(item, line, actor, entitlements, selectedOptions, deps,
 function publicLine(line) {
   return {
     itemId: String(line.item), title: line.title, startDate: line.startDate, endDate: line.endDate,
+    ...(line.entryId && { entryId: String(line.entryId) }),
     amountMinor: line.amountMinor, deposit: line.deposit, fulfilment: line.fulfilment,
   };
 }
 
 async function price(borrower, sourceLines, selectedOptions, deps, session, holdId) {
   assertNoInternalOverlap(sourceLines);
+  const entryOptions = selectedOptions.fulfilmentByEntry || {};
+  const entryIds = new Set(sourceLines.map((line) => String(line.entryId)));
+  if (Object.keys(entryOptions).some((id) => !entryIds.has(id))) {
+    throw ApiError.conflict('The borrow list changed. Review checkout again.');
+  }
   const actor = await loadActor(borrower, session);
   const entitlements = await getEntitlements(actor, new Date(), session, deps);
   if (holdId) {
@@ -114,7 +133,10 @@ async function price(borrower, sourceLines, selectedOptions, deps, session, hold
   const lines = [];
   for (const line of sourceLines) {
     const item = await loadBookableItem(line.item, actor, line, entitlements, deps, { session, excludeHoldId: holdId });
-    const quote = await quoteLine(item, line, actor, entitlements, selectedOptions, deps, session);
+    const quote = await quoteLine(item, line, actor, entitlements, {
+      promo: selectedOptions.promo,
+      fulfilment: entryOptions[String(line.entryId)] ?? selectedOptions.fulfilment,
+    }, deps, session);
     if (!Number.isSafeInteger(quote.amountMinor) || quote.amountMinor < 0 ||
       !Number.isFinite(quote.deposit?.amount) || quote.deposit.amount < 0 ||
       !Number.isFinite(quote.fulfilment?.deliveryFee) || quote.fulfilment.deliveryFee < 0 ||
@@ -125,6 +147,13 @@ async function price(borrower, sourceLines, selectedOptions, deps, session, hold
       ...line, lender: item.owner, title: item.title, reservationId: new Types.ObjectId(),
       amountMinor: quote.amountMinor, deposit: quote.deposit, fulfilment: quote.fulfilment, promoCode: quote.promoCode,
     });
+  }
+  const discounted = lines.filter((line) => line.promoCode);
+  if (discounted.length > 1) {
+    const assertCapacity = requireFeature(deps.promo, 'assertCheckoutPromoCapacity', 'Promo redemption');
+    await assertCapacity({
+      promoCodeId: discounted[0].promoCode, borrowerId: actor._id, count: discounted.length,
+    }, session);
   }
   const amountMinor = lines.reduce((sum, line) => sum + line.amountMinor, 0);
   if (!Number.isSafeInteger(amountMinor)) throw new Error('Invalid checkout total');
@@ -163,9 +192,13 @@ async function createReservations(attempt, deps, session) {
       _id: line.reservationId, item: line.item, borrower: attempt.borrower, lender: line.lender,
       startDate: line.startDate, endDate: line.endDate, checkoutAttempt: attempt._id,
       deposit: { ...line.toObject().deposit, status: line.deposit.amount > 0 ? 'held' : 'none' },
-      fulfilment: line.fulfilment, promoCode: line.promoCode,
+      fulfilment: { ...line.toObject().fulfilment, deliveryStatus: line.fulfilment.method === 'delivery' ? 'preparing' : 'none' },
+      promoCode: line.promoCode,
       payment: { method: attempt.method, stripePaymentIntentId: attempt.paymentReference },
     }], { session });
+  }
+  if (deps.payment?.auditFreeCheckoutLines && attempt.lines.some((line) => line.amountMinor === 0)) {
+    await deps.payment.auditFreeCheckoutLines({ ...paymentInput(attempt), method: attempt.method }, session);
   }
   const matchedDraftLines = attempt.lines.filter((line) => line.entryId).map((line) => ({
     _id: line.entryId, item: line.item, startDate: line.startDate, endDate: line.endDate,
@@ -327,7 +360,11 @@ async function stopAttempt(record, status, failure, session) {
 
 async function refundFailed(record, deps) {
   const refund = requireFeature(deps.payment, 'refundFailedCheckout', 'Checkout refund processing');
-  await refund({ ...paymentInput(record), paymentReference: record.paymentReference });
+  const compensation = await refund({ ...paymentInput(record), paymentReference: record.paymentReference });
+  if (compensation?.state === 'pending') {
+    await CheckoutAttempt.updateOne({ _id: record._id, status: 'refund_due' }, { $set: { updatedAt: new Date() } });
+    return result(await CheckoutAttempt.findById(record._id));
+  }
   await CheckoutAttempt.updateOne({ _id: record._id, status: 'refund_due' }, { $set: { status: 'failed' } });
   return result(await CheckoutAttempt.findById(record._id));
 }

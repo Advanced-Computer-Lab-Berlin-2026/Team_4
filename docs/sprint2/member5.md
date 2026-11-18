@@ -319,7 +319,7 @@ All pages follow `docs/UI_README.md`: shared components, a loading/error/empty s
 
 | Component (`client/src/components/sprint2/m5/`) | Embedded by | Props |
 |---|---|---|
-| `BorrowListButton` | Member 7 — `ItemDetailsPage` (next to Member 1's `/reserve/:itemId` link) | `{ itemId, ownerId?, maxBorrowDays?, onAdded? }` asks for dates and adds the item. Guests see "Log in to borrow"; admins and the item's owner (matched by `ownerId`) see nothing. If the item is already in the list it shows its dates and a link to `/borrow-list` |
+| `BorrowListButton` | Member 7 — `ItemDetailsPage` (next to Member 1's `/reserve/:itemId` link) | `{ itemId, ownerId?, maxBorrowDays?, startDate?, endDate?, onAdded? }` asks for dates and adds the item. `startDate` / `endDate` (`YYYY-MM-DD`) fill the form, e.g. with the range picked in the availability calendar; the member can still change them. Guests see "Log in to borrow"; admins and the item's owner (matched by `ownerId`) see nothing. If the item is already in the list it shows its dates and a link to `/borrow-list` |
 
 ### 8.3 Components I embed
 
@@ -368,13 +368,9 @@ None of these are in the requirement sheet. The project description allows the t
 - **Member 6** (`docs/sprint2/member6.md`): delivery settings are in his **Pickup & rules** tab and saved through his endpoint. Since Member 1's update of 17 Nov, marking a delivery **delivered** (Member 1's `advanceDelivery`) also makes the booking active, and `pickup` refuses deliveries, so for deliveries the lender uses the delivery page instead of **Mark as picked up**.
 - **Member 2** (`docs/sprint2/member2.md`): `refundToWallet` (full deposit and delivery fee on a declined request), `releaseDeposit` and `applyLateFee` are in `services/payments/payment.js`, the file Member 1's commands load, so they connect once merged. The late fee starts immediately after the due time (10 % of the deposit per started day, capped at 100 %); `calculateLateFee` lets my return screen show the fee before the lender confirms.
 
-**Still open:**
-
-| To | Request / question | Needed for |
-|---|---|---|
-| **Member 1** | Add a **Borrow list** link (`/borrow-list`) to the member menu in `navLinks.js` (shared, his file). Without it the page is only reachable from the item page's button. (**Reservations** → `/reservations` and **Booking requests** were added on 17 Nov.) | Req 46–48 |
-| **Member 1** | Lender menu: add **Dashboard** (`/lender/dashboard`) to `lenderLinks` in `navLinks.js` (**Booking requests** is there since 17 Nov). Today lenders reach the dashboard only through the buttons on My items and Booking requests. | Req 106 |
-| **Member 7** | Embed `<BorrowListButton itemId={item._id} ownerId={item.owner?._id} maxBorrowDays={item.rules?.maxBorrowDays} />` on `ItemDetailsPage` (import from `components/sprint2/m5/BorrowListButton`); read `item.tags` for alternatives (old items may have none) | Req 46, 92 |
+**Done (18 Nov 2026):** nothing is open.
+- **Member 1:** the menu has **Borrow list**, **Reservations** (→ `/reservations`), **Booking requests** and **Lending dashboard** (`navLinks.js`).
+- **Member 7:** `ItemDetailsPage` shows `<BorrowListButton … startDate={range.start} endDate={range.end} />` once free dates are picked in the availability calendar, so the form opens with those dates; Member 7's alternatives read `item.tags` (old items may have none). Guests get Member 7's own "Register or log in" prompt instead of "Log in to borrow".
 
 ---
 

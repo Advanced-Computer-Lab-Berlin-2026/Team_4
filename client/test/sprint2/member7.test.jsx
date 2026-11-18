@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import AvailabilityCalendar from '../../src/components/sprint2/m7/AvailabilityCalendar';
 import AvailabilityFilter from '../../src/components/sprint2/m7/AvailabilityFilter';
+import LeaveWaitlistButton from '../../src/components/sprint2/m7/LeaveWaitlistButton';
 import { addDays, isDay, offerUrl, reserveUrl } from '../../src/components/sprint2/m7/dateUtils';
 import routes from '../../src/routes/routeConfig';
+import { memberLinks } from '../../src/components/layout/navLinks';
 import { getAvailability } from '../../src/api/catalog.api';
 
 vi.mock('../../src/api/catalog.api', () => ({ getAvailability: vi.fn() }));
@@ -18,6 +20,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
 describe('Member 7 date helpers and links', () => {
   it('validates real UTC days and shifts them', () => {
     expect(isDay('2030-02-30')).toBe(false);
+    expect(isDay('2030-99-40')).toBe(false);
     expect(addDays('2030-06-30', 1)).toBe('2030-07-01');
   });
 
@@ -31,6 +34,7 @@ describe('Member 7 date helpers and links', () => {
 
   it('registers the waitlist route through the sprint2 route module', () => {
     expect(routes.some((r) => r.path === '/waitlists' && r.access === 'member')).toBe(true);
+    expect(memberLinks).toContainEqual({ to: '/waitlists', label: 'My waitlists' });
   });
 });
 
@@ -78,6 +82,15 @@ describe('AvailabilityCalendar', () => {
     fireEvent.keyDown(day, { key: 'ArrowRight' });
     await waitFor(() => expect(document.activeElement.getAttribute('data-day')).toBe('2030-06-14'));
   });
+
+  it('keeps an unavailable calendar response from being announced as free dates', async () => {
+    getAvailability.mockRejectedValue(new Error('Could not load availability'));
+    const { container } = render(<AvailabilityCalendar itemId="item-1" onChange={vi.fn()} />);
+    expect(await screen.findByText('Could not load availability')).toBeTruthy();
+    const day = container.querySelector('[data-day="2030-06-10"]');
+    expect(day.getAttribute('aria-label')).toMatch(/availability unknown/);
+    expect(day.tabIndex).toBe(0);
+  });
 });
 
 describe('AvailabilityFilter', () => {
@@ -94,4 +107,19 @@ describe('AvailabilityFilter', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Check availability' }));
     expect(onChange).toHaveBeenCalledWith({ from: '2030-06-20', to: '2030-06-22' });
   });
+});
+
+it('asks before leaving the waitlist, with keyboard cancellation and confirmation', () => {
+  const leave = vi.fn();
+  render(<LeaveWaitlistButton onLeave={leave} />);
+  const trigger = screen.getByRole('button', { name: 'Leave waitlist' });
+  fireEvent.click(trigger);
+  const confirm = screen.getByRole('button', { name: 'Confirm leaving' });
+  expect(document.activeElement).toBe(confirm);
+  fireEvent.keyDown(confirm, { key: 'Escape' });
+  expect(document.activeElement).toBe(trigger);
+  expect(leave).not.toHaveBeenCalled();
+  fireEvent.click(trigger);
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm leaving' }));
+  expect(leave).toHaveBeenCalledTimes(1);
 });

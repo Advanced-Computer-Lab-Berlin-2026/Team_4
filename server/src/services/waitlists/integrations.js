@@ -33,10 +33,10 @@ async function claimHold(input) {
   return hold._id;
 }
 
-/** Best-effort release (a hold that already expired or was consumed by checkout legitimately may not exist any more). */
-async function releaseHold(input) {
+/** Releasing a hold that was already consumed or removed is a safe no-op. */
+function releaseHold(input) {
   const { releaseWaitlistHold } = require('../reservations/reservationCommands');
-  try { await releaseWaitlistHold(input); return true; } catch (e) { return false; }
+  return releaseWaitlistHold(input);
 }
 
 /**

@@ -9,7 +9,7 @@ const ApiError = require('../utils/ApiError');
 const { parsePagination, paginated } = require('../utils/pagination');
 const Item = require('../models/Item');
 const Category = require('../models/Category');
-const { parseRange, unavailableItemIds, blockedIntervals, toDay, todayStart } = require('../services/catalog/availabilityBridge');
+const { parseRange, findPublicItem, unavailableItemIds, blockedIntervals, toDay, todayStart } = require('../services/catalog/availabilityBridge');
 const { findAlternatives } = require('../services/catalog/alternatives');
 
 const SORTS = {
@@ -54,10 +54,10 @@ exports.listItems = asyncHandler(async (req, res) => {
   // Req 44 - only items free for the whole date range (same overlap rule as the calendar and waitlists)
   const availableFrom = asString(req.query.availableFrom);
   const availableTo = asString(req.query.availableTo);
-  if (availableFrom || availableTo) {
+  if ('availableFrom' in req.query || 'availableTo' in req.query) {
     const parsed = parseRange(availableFrom, availableTo, { maxDays: 365 });
     if (parsed.error) throw ApiError.badRequest(parsed.error);
-    const blocked = await unavailableItemIds(parsed.range, { exceptUserId: req.user?._id });
+    const blocked = await unavailableItemIds(parsed.range);
     if (blocked.length) filter._id = { $nin: blocked };
   }
 
@@ -109,19 +109,19 @@ exports.getItem = asyncHandler(async (req, res) => {
  */
 exports.getAvailability = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  if (!mongoose.isValidObjectId(id) || !(await Item.exists(Item.publicFilter({ _id: id })))) {
+  if (!mongoose.isValidObjectId(id) || !(await findPublicItem(id, 'category'))) {
     throw ApiError.notFound('Item not found');
   }
   let from = asString(req.query.from);
   let to = asString(req.query.to);
-  if (!from && !to) {
+  if (!('from' in req.query) && !('to' in req.query)) {
     from = toDay(todayStart());
     to = toDay(new Date(todayStart().getTime() + 60 * 86400000));
   }
   const parsed = parseRange(from, to, { allowPast: true });
   if (parsed.error) throw ApiError.badRequest(parsed.error);
 
-  const booked = await blockedIntervals(id, parsed.range, { exceptUserId: req.user?._id });
+  const booked = await blockedIntervals(id, parsed.range);
   res.json({ itemId: id, from, to, booked });
 });
 
@@ -137,7 +137,7 @@ exports.getAlternatives = asyncHandler(async (req, res) => {
   if (parsed.error) throw ApiError.badRequest(parsed.error);
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 6, 1), 12);
 
-  const items = await findAlternatives(id, parsed.range, { limit, userId: req.user?._id });
+  const items = await findAlternatives(id, parsed.range, { limit });
   if (!items) throw ApiError.notFound('Item not found');
   res.json({ items, total: items.length });
 });

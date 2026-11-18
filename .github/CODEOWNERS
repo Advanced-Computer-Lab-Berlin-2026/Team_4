@@ -316,3 +316,18 @@
 /server/src/services/referrals/ @yahiafarahat
 /server/src/utils/email.js @yahiafarahat
 /server/test/sprint2/member9.test.js @yahiafarahat
+
+# Sprint 2 availability and waitlists (Member 7)
+/client/src/api/waitlists.api.js @OElkhadem
+/client/src/components/sprint2/m7/ @OElkhadem
+/client/src/pages/waitlists/ @OElkhadem
+/client/src/routes/sprint2/member7.routes.jsx @OElkhadem
+/client/src/styles/sprint2/member7.module.css @OElkhadem
+/client/test/sprint2/member7.test.jsx @OElkhadem
+/docs/sprint2/member7.md @OElkhadem
+/server/src/controllers/waitlists.controller.js @OElkhadem
+/server/src/models/WaitlistEntry.js @OElkhadem
+/server/src/routes/waitlists.routes.js @OElkhadem
+/server/src/services/catalog/ @OElkhadem
+/server/src/services/waitlists/ @OElkhadem
+/server/test/sprint2/member7.test.js @OElkhadem

@@ -8,6 +8,7 @@ import { formatDateTime } from '../../utils/format';
 import Alert from '../../components/common/Alert';
 import Spinner from '../../components/common/Spinner';
 import StatusBadge from '../../components/common/StatusBadge';
+import LeaveWaitlistButton from '../../components/sprint2/m7/LeaveWaitlistButton';
 import { formatDay, isoDay, offerUrl } from '../../components/sprint2/m7/dateUtils';
 import styles from '../../styles/sprint2/member7.module.css';
 
@@ -34,7 +35,6 @@ export default function MyWaitlistsPage() {
   useEffect(() => { load(); }, [load]);
 
   const leave = async (entry) => {
-    if (!window.confirm(entry.status === 'promoted' ? 'Give up this offer?' : 'Leave this waitlist?')) return;
     setBusyId(entry._id);
     try { await leaveWaitlist(entry._id); await load(); } catch (e) { setError(getErrorMessage(e)); } finally { setBusyId(''); }
   };
@@ -52,21 +52,21 @@ export default function MyWaitlistsPage() {
           {entries.map((e) => {
             const view = VIEW[e.status] || VIEW.left;
             const live = e.status === 'waiting' || e.status === 'promoted';
+            const claim = e.status === 'promoted' && e.item && offerUrl(e.item._id, e);
             const [s, en] = [isoDay(e.startDate), isoDay(e.endDate)];
             return (
               <li key={e._id} className="card">
                 <div className="card-body">
                   <h3>{e.item ? <Link to={`/catalog/${e.item._id}?start=${s}&end=${en}`}>{e.item.title}</Link> : 'Item no longer available'}</h3>
                   <p>{formatDay(s)} to {formatDay(en)} <StatusBadge status={view.tone}>{view.label}</StatusBadge></p>
-                  {e.status === 'promoted' && (
+                  {claim && !e.checkoutAttemptId && (
                     <Alert variant="success">A spot opened up. Reserve it before {formatDateTime(e.offerExpiresAt)}.</Alert>
                   )}
                   <div className="row">
-                    {e.status === 'promoted' && e.item && <Link className="btn" to={offerUrl(e.item._id, e)}>Reserve now</Link>}
-                    {live && (
-                      <button type="button" className="btn btn-secondary" disabled={busyId === e._id} onClick={() => leave(e)}>
-                        {busyId === e._id ? 'Working…' : e.status === 'promoted' ? 'Give up offer' : 'Leave waitlist'}
-                      </button>
+                    {e.checkoutAttemptId && <Link className="btn" to={`/checkout/status/${e.checkoutAttemptId}`}>View checkout</Link>}
+                    {claim && !e.checkoutAttemptId && <Link className="btn" to={claim}>Reserve now</Link>}
+                    {live && !e.checkoutAttemptId && (
+                      <LeaveWaitlistButton promoted={e.status === 'promoted'} busy={busyId === e._id} onLeave={() => leave(e)} />
                     )}
                   </div>
                 </div>

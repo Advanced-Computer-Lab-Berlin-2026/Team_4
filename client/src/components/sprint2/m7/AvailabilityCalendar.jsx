@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { getAvailability } from '../../../api/catalog.api';
 import { getErrorMessage } from '../../../api/axios';
 import Alert from '../../common/Alert';
+import Spinner from '../../common/Spinner';
 import styles from '../../../styles/sprint2/member7.module.css';
 import {
   addDays, daysBetween, daysInMonth, dayToMonth, formatDay, formatDayLong, formatMonth,
@@ -15,7 +16,7 @@ import {
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MAX_MONTHS_AHEAD = 12;
 
-export default function AvailabilityCalendar({ itemId, value, onChange, onAvailabilityChange }) {
+export default function AvailabilityCalendar({ itemId, value, onChange, onAvailabilityChange, refreshKey = 0 }) {
   const start = value?.start || '';
   const end = value?.end || '';
   const today = todayDay();
@@ -31,6 +32,10 @@ export default function AvailabilityCalendar({ itemId, value, onChange, onAvaila
 
   const first = monthFirst(month);
   const nextFirst = monthFirst(shiftMonth(month, 1));
+  const defaultLimit = monthFirst(shiftMonth(currentMonth, MAX_MONTHS_AHEAD));
+  const limit = dayToMonth((end || start) > defaultLimit ? end || start : defaultLimit);
+  const lastDay = addDays(monthFirst(shiftMonth(limit, 1)), -1);
+  const currentData = data?.itemId === itemId && data?.refreshKey === refreshKey ? data : null;
 
   useEffect(() => {
     let from = first;
@@ -40,41 +45,44 @@ export default function AvailabilityCalendar({ itemId, value, onChange, onAvaila
     if (daysBetween(from, to) > 399) { from = first; to = nextFirst; }
 
     const have = dataRef.current;
-    if (have && have.itemId === itemId && have.from <= from && have.to >= to) return undefined; // already covered
+    if (have?.itemId === itemId && have.refreshKey === refreshKey && have.from <= from && have.to >= to) {
+      setError('');
+      return undefined;
+    }
 
     let ignore = false;
     setError('');
     getAvailability(itemId, { from, to })
       .then((d) => {
         if (ignore) return;
-        const next = { itemId, from, to, booked: d.booked || [] };
+        const next = { itemId, from, to, booked: d.booked || [], refreshKey };
         dataRef.current = next;
         setData(next);
       })
       .catch((e) => { if (!ignore) setError(getErrorMessage(e)); });
     return () => { ignore = true; };
-  }, [itemId, first, nextFirst, start, end]);
+  }, [itemId, first, nextFirst, start, end, refreshKey]);
 
   // day -> 'booked' | 'held' for the loaded window
   const dayState = useMemo(() => {
     const map = new Map();
-    if (!data || data.itemId !== itemId) return map;
-    data.booked.forEach((b) => {
-      for (let d = b.start < data.from ? data.from : b.start; d < b.end && d < data.to; d = addDays(d, 1)) {
+    if (!currentData) return map;
+    currentData.booked.forEach((b) => {
+      for (let d = b.start < currentData.from ? currentData.from : b.start; d < b.end && d < currentData.to; d = addDays(d, 1)) {
         if (map.get(d) !== 'booked') map.set(d, b.type);
       }
     });
     return map;
-  }, [data, itemId]);
+  }, [currentData]);
 
   // is the selected range free? null = unknown (nothing selected / still loading)
   const available = useMemo(() => {
-    if (!start || !end || !data || data.itemId !== itemId) return null;
-    if (data.from > start || data.to < end) return null;
-    return !data.booked.some((b) => b.start < end && b.end > start);
-  }, [data, itemId, start, end]);
+    if (!start || !end || !currentData) return null;
+    if (currentData.from > start || currentData.to < end) return null;
+    return !currentData.booked.some((b) => b.start < end && b.end > start);
+  }, [currentData, start, end]);
 
-  useEffect(() => { onAvailabilityChange?.(available); }, [available]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onAvailabilityChange?.(available); }, [available, onAvailabilityChange]);
 
   useEffect(() => {
     if (!keyNav.current) return;
@@ -93,7 +101,7 @@ export default function AvailabilityCalendar({ itemId, value, onChange, onAvaila
     if (!delta) return;
     e.preventDefault();
     const next = addDays(day, delta);
-    if (next < today) return;
+    if (next < today || next > lastDay) return;
     keyNav.current = true;
     setFocusDay(next);
     const m = dayToMonth(next);
@@ -106,17 +114,19 @@ export default function AvailabilityCalendar({ itemId, value, onChange, onAvaila
   const cells = [...Array(lead).fill(null), ...Array.from({ length: total }, (_, i) => addDays(first, i))];
   while (cells.length % 7) cells.push(null);
   const rows = Array.from({ length: cells.length / 7 }, (_, i) => cells.slice(i * 7, i * 7 + 7));
-  const tabStop = focusDay >= first && focusDay < nextFirst ? focusDay : first;
+  const tabStop = focusDay >= first && focusDay < nextFirst && focusDay >= today
+    ? focusDay : (first < today ? today : first);
 
   const atStart = month.y === currentMonth.y && month.m === currentMonth.m;
-  const limit = shiftMonth(currentMonth, MAX_MONTHS_AHEAD);
   const atEnd = month.y === limit.y && month.m === limit.m;
+  const monthLoaded = currentData && currentData.from <= first && currentData.to >= nextFirst;
 
   const label = (day) => {
     const parts = [formatDayLong(day)];
     if (day < today) parts.push('in the past');
+    else if (!currentData || day < currentData.from || day >= currentData.to) parts.push('availability unknown');
     else if (dayState.get(day) === 'booked') parts.push('booked');
-    else if (dayState.get(day) === 'held') parts.push('on hold for another member');
+    else if (dayState.get(day) === 'held') parts.push('on hold');
     else parts.push('available');
     if (day === start) parts.push('selected pickup day');
     if (day === end) parts.push('selected return day');
@@ -133,6 +143,7 @@ export default function AvailabilityCalendar({ itemId, value, onChange, onAvaila
       </div>
 
       <Alert variant="error">{error}</Alert>
+      {!monthLoaded && !error && <Spinner />}
 
       <table className={styles.calendar} role="grid" aria-label={`Availability for ${formatMonth(month)}`} ref={gridRef}>
         <thead>

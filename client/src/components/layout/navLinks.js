@@ -19,6 +19,7 @@ export const memberLinks = [
   { to: '/catalog', label: 'Browse items' },
   { to: '/reserve', label: 'Reserve' },
   ...ifRegistered('/borrow-list', 'Borrow list'),
+  ...ifRegistered('/waitlists', 'My waitlists'),
   { to: isRegistered('/reservations') ? '/reservations' : '/my-reservations', label: 'Reservations' },
   ...ifRegistered('/damage-reports', 'Damage cases'),
   ...ifRegistered('/reviews/mine', 'My reviews'),

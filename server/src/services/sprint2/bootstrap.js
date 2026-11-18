@@ -78,8 +78,10 @@ function startSprint2Jobs() {
   const checkout = require('../reservations/checkout');
   const worker = optionalFeature('../jobs/notificationWorker');
   const reminders = optionalFeature('../jobs/reminders');
+  const waitlist = optionalFeature('waitlists/waitlist');
   worker?.startNotificationWorker?.();
   reminders?.startReminderJobs?.();
+  waitlist?.startWaitlistSweeper?.();
 
   let running = false;
   const timer = setInterval(async () => {

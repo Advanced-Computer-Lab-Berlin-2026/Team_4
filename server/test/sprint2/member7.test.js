@@ -3,7 +3,7 @@
  *   - unit tests: always run, no database needed
  *   - integration tests (availability, date filter, alternatives, waitlist promotion with M1's real holds):
  *       need TEST_MONGO_URI = a disposable replica set (same convention as member1.test.js); skipped otherwise
- *   - NFR 2 performance proof (5,000 items, < 2 s): opt-in with RUN_PERF=1 (+ TEST_MONGO_URI, or MONGO_URI from .env).
+ *   - NFR 2 performance proof (5,000 items, < 2 s): opt-in with RUN_PERF=1 and TEST_MONGO_URI.
  *       Uses its OWN throw-away database and drops it afterwards - never the team's data.
  */
 process.env.WAITLIST_SWEEPER = 'off'; // never start the background sweeper from tests
@@ -58,11 +58,10 @@ test('waitlist order: higher tier first, FIFO inside a tier', () => {
   assert.deepEqual(sortCandidates(list).map((x) => x.id), ['premium-late', 'plus', 'basic-early', 'basic-late']);
 });
 
-test('NFR 2: catalog search/filter under 2 s on 5,000 items', { skip: process.env.RUN_PERF !== '1', timeout: 300000 }, async (t) => {
+test('NFR 2: catalog search/filter under 2 s on 5,000 items', { skip: process.env.RUN_PERF !== '1' || !process.env.TEST_MONGO_URI, timeout: 300000 }, async (t) => {
   const mongoose = require('mongoose');
-  const env = require('../../src/config/env');
-  const DB = 'shareshed_perf_m7';
-  await mongoose.connect(process.env.TEST_MONGO_URI || env.MONGO_URI, { dbName: DB });
+  const DB = `shareshed_perf_m7_${process.pid}`;
+  await mongoose.connect(process.env.TEST_MONGO_URI, { dbName: DB });
   const { Item, Category, Reservation } = require('../../src/models');
   const app = require('../../src/app');
   const server = app.listen(0);
@@ -108,6 +107,7 @@ test('NFR 2: catalog search/filter under 2 s on 5,000 items', { skip: process.en
     const body = await res.json();
     results[name] = Date.now() - t0;
     assert.equal(res.status, 200, `${name}: ${JSON.stringify(body)}`);
+    assert.ok(body.total > 0, `${name} should return matching listings`);
     assert.ok(results[name] < 2000, `${name} took ${results[name]} ms`);
   }
   console.table(results);
@@ -122,7 +122,7 @@ const { describe, before, after } = test;
 describe('M7 integration (availability, filter, alternatives, waitlist)', { skip: !process.env.TEST_MONGO_URI }, () => {
   const mongoose = require('mongoose');
   process.env.JWT_SECRET = process.env.JWT_SECRET || 'disposable-member7-integration';
-  const { User, Category, Item, Reservation, ReservationHold, WaitlistEntry } = require('../../src/models');
+  const { User, Category, Item, Reservation, ReservationHold, WaitlistEntry, MembershipTier, EventOutbox } = require('../../src/models');
   const app = require('../../src/app');
   const { signToken } = require('../../src/utils/tokens');
   const waitlist = require('../../src/services/waitlists/waitlist');
@@ -154,7 +154,7 @@ describe('M7 integration (availability, filter, alternatives, waitlist)', { skip
     await mongoose.connect(process.env.TEST_MONGO_URI, { dbName: 'member7_test_' + process.pid });
     await Promise.all(Object.values(require('../../src/models')).map((m) => m.init()));
     lender = await member('lender7', { lenderStatus: 'verified' });
-    [b1, b2, b3] = [await member('b1'), await member('b2'), await member('b3')];
+    [b1, b2, b3] = [await member('borrower1'), await member('borrower2'), await member('borrower3')];
     cat = await Category.create({ name: 'Tools', slug: 'tools' });
     otherCat = await Category.create({ name: 'Garden', slug: 'garden' });
     server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
@@ -171,6 +171,8 @@ describe('M7 integration (availability, filter, alternatives, waitlist)', { skip
     const a = await newItem('Drill A', { tags: ['drill', 'cordless'] });
     const b = await newItem('Drill B', { tags: ['drill'] });
     const c = await newItem('Rake', { category: otherCat.id, tags: ['drill'] });
+    await newItem('Archived Drill', { tags: ['drill', 'cordless'], isArchived: true });
+    await newItem('Removed Drill', { tags: ['drill', 'cordless'], moderationStatus: 'removed' });
     await book(a, b1, iso(3), iso(5));
 
     const cal = await http('GET', `/api/catalog/${a.id}/availability?from=${iso(0)}&to=${iso(30)}`);
@@ -181,15 +183,22 @@ describe('M7 integration (availability, filter, alternatives, waitlist)', { skip
     assert.deepEqual(await names(`availableFrom=${iso(3)}&availableTo=${iso(5)}`), ['Drill B', 'Rake']);
     assert.ok((await names(`availableFrom=${iso(5)}&availableTo=${iso(7)}`)).includes('Drill A'), 'half-open: free again on the end day');
     assert.equal((await http('GET', '/api/catalog?availableFrom=2020-01-01&availableTo=2020-01-02')).status, 400);
+    assert.equal((await http('GET', '/api/catalog?availableFrom[x]=ignored')).status, 400);
+    assert.equal((await http('GET', `/api/catalog/${a.id}/availability?from=&to=`)).status, 400);
 
     const alts = await http('GET', `/api/catalog/${a.id}/alternatives?start=${iso(3)}&end=${iso(5)}`);
     assert.deepEqual(alts.body.items.map((i) => i.title), ['Drill B']); // same category only, never the item itself
     await book(b, b2, iso(3), iso(5));
     assert.deepEqual((await http('GET', `/api/catalog/${a.id}/alternatives?start=${iso(3)}&end=${iso(5)}`)).body.items, []);
+
+    await Category.updateOne({ _id: otherCat.id }, { $set: { isActive: false } });
+    assert.equal((await http('GET', `/api/catalog/${c.id}/availability`)).status, 404);
+    assert.equal((await http('GET', `/api/catalog/${c.id}/alternatives?start=${R.start}&end=${R.end}`)).status, 404);
+    assert.equal((await http('POST', '/api/waitlists', b2, { itemId: c.id, startDate: R.start, endDate: R.end })).status, 404);
   });
 
   test('waitlist: join rules, one winner per range, priority/FIFO, leave passes the offer on, booking fulfils', async () => {
-    const w = await newItem('Ladder W');
+    const w = await newItem('Ladder W', { depositAmount: 0 });
     const taken = await book(w, b1, R.start, R.end);
     const range = { start: new Date(R.start + 'T00:00:00.000Z'), end: new Date(R.end + 'T00:00:00.000Z') };
 
@@ -199,6 +208,7 @@ describe('M7 integration (availability, filter, alternatives, waitlist)', { skip
     const j2 = await http('POST', '/api/waitlists', b2, { itemId: w.id, startDate: R.start, endDate: R.end });
     const j3 = await http('POST', '/api/waitlists', b3, { itemId: w.id, startDate: R.start, endDate: R.end });
     assert.equal(j2.status, 201); assert.equal(j3.status, 201);
+    assert.equal((await http('DELETE', `/api/waitlists/${j2.body.entry._id}`, b3)).status, 404);
     assert.equal((await http('POST', '/api/waitlists', b2, { itemId: w.id, startDate: R.start, endDate: R.end })).status, 409, 'duplicate');
 
     await Reservation.updateOne({ _id: taken.id }, { status: 'cancelled' }); // dates freed
@@ -211,7 +221,8 @@ describe('M7 integration (availability, filter, alternatives, waitlist)', { skip
 
     const guest = await http('GET', `/api/catalog/${w.id}/availability?from=${R.start}&to=${R.end}`);
     assert.equal(guest.body.booked[0].type, 'held');
-    assert.deepEqual((await http('GET', `/api/catalog/${w.id}/availability?from=${R.start}&to=${R.end}`, b2)).body.booked, [], 'the offeree sees their own hold as free');
+    assert.equal((await http('GET', `/api/catalog/${w.id}/availability?from=${R.start}&to=${R.end}`, b2)).body.booked[0].type, 'held');
+    assert.equal(await EventOutbox.countDocuments({ eventKey: `waitlist_promoted:${first.id}`, recipients: b2.id }), 1);
 
     const left = await http('DELETE', `/api/waitlists/${first.id}`, b2);
     assert.equal(left.status, 200);
@@ -220,8 +231,97 @@ describe('M7 integration (availability, filter, alternatives, waitlist)', { skip
     assert.equal(second.status, 'promoted', 'leaving passes the offer to the next member');
     assert.equal((await http('DELETE', `/api/waitlists/${first.id}`, b2)).status, 404);
 
-    await book(w, b3, R.start, R.end, 'pending'); // the offeree books through checkout
+    const selection = { source: 'single', itemId: w.id, startDate: R.start, endDate: R.end };
+    assert.equal((await http('POST', '/api/checkout/quote', b3, selection)).status, 409);
+    assert.equal((await http('POST', '/api/checkout/quote', b2, { ...selection, holdId: second.holdId })).status, 409);
+    selection.holdId = String(second.holdId);
+    const quote = await http('POST', '/api/checkout/quote', b3, selection);
+    assert.equal(quote.status, 200, JSON.stringify(quote.body));
+    const checkout = await http('POST', '/api/checkout', b3, {
+      ...selection, quoteHash: quote.body.quote.quoteHash, method: 'wallet', operationKey: 'member7-waitlist-claim',
+    });
+    assert.equal(checkout.status, 200, JSON.stringify(checkout.body));
+    assert.equal(checkout.body.checkout.status, 'completed');
+    assert.equal(await ReservationHold.countDocuments({ _id: second.holdId }), 0);
     const mine = await http('GET', `/api/waitlists/mine?item=${w.id}`, b3);
     assert.equal(mine.body.items[0].status, 'fulfilled');
+  });
+
+  test('overlapping joins serialize and an expired offer passes to the next eligible member', async () => {
+    const w = await newItem('Concurrent waitlist');
+    const taken = await book(w, b1, R.start, iso(15));
+    const join = (user, startDate, endDate) => http('POST', '/api/waitlists', user, { itemId: w.id, startDate, endDate });
+    const joins = await Promise.all([join(b2, R.start, R.end), join(b2, iso(11), iso(13))]);
+    assert.deepEqual(joins.map(({ status }) => status).sort(), [201, 409]);
+    assert.equal((await join(b3, R.start, R.end)).status, 201);
+    await Reservation.updateOne({ _id: taken.id }, { status: 'cancelled' });
+    const [first] = await waitlist.promoteNext(w.id);
+    assert.equal(String(first.user), b2.id);
+    await ReservationHold.updateOne({ _id: first.holdId }, { expiresAt: new Date(0) });
+    await WaitlistEntry.updateOne({ _id: first.id }, { offerExpiresAt: new Date(0) });
+    assert.equal(await waitlist.sweepExpiredOffers({ itemId: w.id }), 1);
+    assert.equal((await WaitlistEntry.findById(first.id)).status, 'expired');
+    assert.equal(await WaitlistEntry.countDocuments({ item: w.id, user: b3.id, status: 'promoted' }), 1);
+  });
+
+  test('an open card checkout retains the offer and failed payment frees it for the next member', async () => {
+    const checkout = require('../../src/services/reservations/checkout');
+    const { features } = require('../../src/services/sprint2/bootstrap');
+    const w = await newItem('Card waitlist');
+    const taken = await book(w, b1, R.start, R.end);
+    const join = (user) => http('POST', '/api/waitlists', user, { itemId: w.id, startDate: R.start, endDate: R.end });
+    const first = await join(b2);
+    const second = await join(b3);
+    assert.equal(first.status, 201);
+    assert.equal(second.status, 201);
+    await Reservation.updateOne({ _id: taken.id }, { status: 'cancelled' });
+    const [offer] = await waitlist.promoteNext(w.id);
+    const deps = features();
+    deps.payment = {
+      startCardPayment: async () => ({ state: 'pending', redirectUrl: 'https://example.test/checkout' }),
+      getCardPayment: async () => ({ state: 'failed' }),
+      recordCardCheckout: async () => assert.fail('Failed payments must not be recorded as paid'),
+      refundFailedCheckout: async () => assert.fail('No payment to refund'),
+    };
+    const selection = { source: 'single', itemId: w.id, startDate: R.start, endDate: R.end, holdId: offer.holdId };
+    const quote = await checkout.preview(b2.id, selection, deps);
+    const begun = await checkout.begin(b2.id, {
+      ...selection, quoteHash: quote.quoteHash, method: 'card', operationKey: 'member7-card-checkout',
+    }, deps);
+    assert.equal(begun.status, 'awaiting_payment');
+    const pending = await http('GET', `/api/waitlists/mine?item=${w.id}`, b2);
+    assert.equal(pending.body.items[0].checkoutAttemptId, begun.id);
+    assert.equal((await http('DELETE', `/api/waitlists/${offer.id}`, b2)).status, 409);
+    assert.equal((await checkout.status(b2.id, begun.id, deps)).status, 'failed');
+    assert.equal(await waitlist.sweepExpiredOffers({ itemId: w.id }), 1);
+    assert.equal((await WaitlistEntry.findById(offer.id)).status, 'expired');
+    assert.equal((await WaitlistEntry.findById(second.body.entry._id)).status, 'promoted');
+  });
+
+  test('the background job promotes a higher-priority member after cancellation', async (t) => {
+    const { setTimeout: pause } = require('node:timers/promises');
+    const { cancel } = require('../../src/services/reservations/cancellation');
+    const w = await newItem('Automatic waitlist', { depositAmount: 0 });
+    const taken = await book(w, b1, R.start, R.end);
+    const selection = { itemId: w.id, startDate: R.start, endDate: R.end };
+    assert.equal((await http('POST', '/api/waitlists', b2, selection)).status, 201);
+    const premium = await MembershipTier.create({ name: 'Premium', waitlistPriority: 1, maxConcurrentReservations: 5 });
+    await User.updateOne({ _id: b3.id }, { membership: { tier: premium.id, status: 'active', renewsAt: day(iso(30)) } });
+    const high = await http('POST', '/api/waitlists', b3, selection);
+    assert.equal(high.status, 201);
+    process.env.WAITLIST_SWEEPER = 'on';
+    const timer = waitlist.startWaitlistSweeper({ intervalMs: 50 });
+    t.after(() => { clearInterval(timer); process.env.WAITLIST_SWEEPER = 'off'; });
+    await cancel({ actorId: b1.id, reservationId: taken.id });
+    const key = `waitlist_promoted:${high.body.entry._id}`;
+    let event;
+    for (let i = 0; !event && i < 100; i++) {
+      await pause(40);
+      event = await EventOutbox.findOne({ eventKey: key });
+    }
+    assert.ok(event, 'the scheduler must promote without a manual call');
+    assert.deepEqual(event.recipients.map(String), [b3.id]);
+    assert.equal(event.payload.link, '/waitlists');
+    assert.equal(await WaitlistEntry.countDocuments({ item: w.id, user: b2.id, status: 'waiting' }), 1);
   });
 });

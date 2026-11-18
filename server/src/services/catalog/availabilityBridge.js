@@ -7,6 +7,8 @@
  */
 const Reservation = require('../../models/Reservation');
 const ReservationHold = require('../../models/ReservationHold');
+const Item = require('../../models/Item');
+const Category = require('../../models/Category');
 const availability = require('../reservations/availability'); // Member 1: BLOCKING_STATUSES, overlapFilter, checkOverlap
 
 // Single source of truth = M1's service, so catalog, calendar, waitlists and checkout can never disagree.
@@ -45,17 +47,21 @@ const rangesOverlap = (a, b) => a.start < b.end && a.end > b.start;
 
 const overlap = (range) => availability.overlapFilter({ startDate: range.start, endDate: range.end });
 const reservationFilter = (range) => ({ status: { $in: BLOCKING_STATUSES }, ...overlap(range) });
-// Unexpired holds (checkout attempts and waitlist offers) block too; `exceptUserId` lets a member see their OWN hold as free.
-const holdFilter = (range, exceptUserId) => ({
-  expiresAt: { $gt: new Date() }, ...overlap(range),
-  ...(exceptUserId ? { borrower: { $ne: exceptUserId } } : {}),
-});
+// Ordinary checkout requires a free range. An active offer can only be used with its hold ID.
+const holdFilter = (range) => ({ expiresAt: { $gt: new Date() }, ...overlap(range) });
 
-/** Ids of every item that is booked or held (by someone else) during the range. Bulk query for the catalog filter. */
-async function unavailableItemIds(range, { exceptUserId } = {}) {
+async function findPublicItem(itemId, fields, session) {
+  const item = await Item.findOne(Item.publicFilter({ _id: itemId }))
+    .select(fields).session(session || null).lean();
+  if (!item || !(await Category.exists({ _id: item.category, isActive: true }).session(session || null))) return null;
+  return item;
+}
+
+/** Ids of every item that is booked or held during the range. Bulk query for the catalog filter. */
+async function unavailableItemIds(range) {
   const [booked, held] = await Promise.all([
     Reservation.distinct('item', reservationFilter(range)),
-    ReservationHold.distinct('item', holdFilter(range, exceptUserId)),
+    ReservationHold.distinct('item', holdFilter(range)),
   ]);
   const ids = new Map();
   [...booked, ...held].forEach((id) => ids.set(String(id), id));
@@ -63,10 +69,10 @@ async function unavailableItemIds(range, { exceptUserId } = {}) {
 }
 
 /** Booked / held intervals of one item overlapping the window, as day strings (calendar data). */
-async function blockedIntervals(itemId, range, { exceptUserId } = {}) {
+async function blockedIntervals(itemId, range) {
   const [reservations, holds] = await Promise.all([
     Reservation.find({ item: itemId, ...reservationFilter(range) }).select('startDate endDate').lean(),
-    ReservationHold.find({ item: itemId, ...holdFilter(range, exceptUserId) }).select('startDate endDate').lean(),
+    ReservationHold.find({ item: itemId, ...holdFilter(range) }).select('startDate endDate').lean(),
   ]);
   return [
     ...reservations.map((r) => ({ start: toDay(r.startDate), end: toDay(r.endDate), type: 'booked' })),
@@ -75,12 +81,12 @@ async function blockedIntervals(itemId, range, { exceptUserId } = {}) {
 }
 
 /** True when nothing blocks the item during the range (delegates to M1's checkOverlap). */
-async function isRangeFree(itemId, range) {
-  return !(await availability.checkOverlap(itemId, { startDate: range.start, endDate: range.end }));
+async function isRangeFree(itemId, range, session) {
+  return !(await availability.checkOverlap(itemId, { startDate: range.start, endDate: range.end }, null, { session }));
 }
 
 module.exports = {
   BLOCKING_STATUSES, MAX_WINDOW_DAYS,
   parseDay, parseRange, rangesOverlap, toDay, todayStart,
-  unavailableItemIds, blockedIntervals, isRangeFree,
+  findPublicItem, unavailableItemIds, blockedIntervals, isRangeFree,
 };

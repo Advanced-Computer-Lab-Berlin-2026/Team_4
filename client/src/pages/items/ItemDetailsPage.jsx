@@ -110,7 +110,8 @@ export default function ItemDetailsPage() {
                 {isMember && !isOwner && (
                   <div className="row">
                     <Link className="btn" to={reserveUrl(item._id, range.start, range.end)}>Reserve these dates</Link>
-                    <BorrowListButton itemId={item._id} ownerId={item.owner?._id} maxBorrowDays={item.rules?.maxBorrowDays} />
+                    <BorrowListButton itemId={item._id} ownerId={item.owner?._id} maxBorrowDays={item.rules?.maxBorrowDays}
+                      startDate={range.start} endDate={range.end} />
                   </div>
                 )}
               </div>

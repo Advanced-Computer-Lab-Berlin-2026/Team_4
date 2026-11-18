@@ -6,9 +6,15 @@ import BorrowListEntry from '../../src/components/sprint2/m5/BorrowListEntry';
 import ReservationDetailsPage from '../../src/pages/lifecycle/ReservationDetailsPage';
 import { getReservation } from '../../src/api/reservationLifecycle.api';
 import { getDeliveryStatus, setDeliveryStatus } from '../../src/api/delivery.api';
+import BorrowListButton from '../../src/components/sprint2/m5/BorrowListButton';
+import { getMyBorrowList } from '../../src/api/borrowLists.api';
 
 vi.mock('../../src/api/reservationLifecycle.api', () => ({ getReservation: vi.fn() }));
 vi.mock('../../src/api/delivery.api', () => ({ getDeliveryStatus: vi.fn(), setDeliveryStatus: vi.fn() }));
+vi.mock('../../src/api/borrowLists.api', () => ({ getMyBorrowList: vi.fn(), addBorrowListEntry: vi.fn() }));
+vi.mock('../../src/context/AuthContext', () => ({
+  useAuth: () => ({ user: { _id: 'member-5' }, loading: false, isMember: true }),
+}));
 
 afterEach(() => {
   cleanup();
@@ -62,4 +68,22 @@ it('shows delivery controls and refreshes the reservation for the return after h
   fireEvent.click(delivered);
   expect(await screen.findByRole('button', { name: /returned in good condition/i })).toBeTruthy();
   expect(setDeliveryStatus).toHaveBeenCalledWith('loan-5', 'delivered');
+});
+
+it('fills the borrow form with the dates the item page passes and follows changes', async () => {
+  getMyBorrowList.mockResolvedValue({ borrowList: { count: 0, max: 10, entries: [] } });
+  const view = (startDate, endDate) => (
+    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BorrowListButton itemId="item-7" ownerId="lender-1" maxBorrowDays={3} startDate={startDate} endDate={endDate} />
+    </MemoryRouter>
+  );
+  const { rerender } = render(view('2030-01-01', '2030-01-03'));
+  await screen.findByRole('button', { name: 'Add to borrow list' });
+  expect(screen.getByLabelText(/Start date/).value).toBe('2030-01-01');
+  expect(screen.getByLabelText(/End date/).value).toBe('2030-01-03');
+  rerender(view('2030-02-10', '2030-02-11'));
+  expect(screen.getByLabelText(/Start date/).value).toBe('2030-02-10');
+  expect(screen.getByLabelText(/End date/).value).toBe('2030-02-11');
+  rerender(view(undefined, undefined));
+  expect(screen.getByLabelText(/Start date/).value).toBe('');
 });

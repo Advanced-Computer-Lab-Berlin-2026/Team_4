@@ -1,7 +1,9 @@
 // BorrowListButton - Owner: Member 5 - Requirement: 46. Contract: docs/sprint2/member5.md §8.2
-// Props: { itemId, ownerId?, maxBorrowDays?, onAdded?(borrowList) }
+// Props: { itemId, ownerId?, maxBorrowDays?, startDate?, endDate?, onAdded?(borrowList) }
 // Embedded by Member 7 on ItemDetailsPage: asks for the dates and adds the item to my borrow list.
-//   <BorrowListButton itemId={item._id} ownerId={item.owner?._id} maxBorrowDays={item.rules?.maxBorrowDays} />
+// startDate / endDate (YYYY-MM-DD, optional) fill the form, e.g. with the range picked in the availability calendar.
+//   <BorrowListButton itemId={item._id} ownerId={item.owner?._id} maxBorrowDays={item.rules?.maxBorrowDays}
+//     startDate={range.start} endDate={range.end} />
 // Guests see "Log in to borrow"; admins and the item's owner see nothing (the server refuses them too).
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
@@ -15,7 +17,7 @@ import s from '../../../styles/sprint2/member5.module.css';
 
 const EMPTY = { startDate: '', endDate: '' };
 
-export default function BorrowListButton({ itemId, ownerId, maxBorrowDays, onAdded }) {
+export default function BorrowListButton({ itemId, ownerId, maxBorrowDays, startDate = '', endDate = '', onAdded }) {
   const { user, loading: authLoading, isMember } = useAuth();
   const location = useLocation();
   const isOwner = !!user && !!ownerId && String(ownerId) === String(user._id);
@@ -33,13 +35,19 @@ export default function BorrowListButton({ itemId, ownerId, maxBorrowDays, onAdd
     if (!canBorrow) return undefined;
     let ignore = false;
     setChecking(true);
-    setList(null); setDates(EMPTY); setErrors({}); setError(''); setJustAdded(false);
+    setList(null); setErrors({}); setError(''); setJustAdded(false);
     getMyBorrowList()
       .then((d) => { if (!ignore) setList(d.borrowList); })
       .catch(() => { /* the form still works: the server checks everything when adding */ })
       .finally(() => { if (!ignore) setChecking(false); });
     return () => { ignore = true; };
   }, [itemId, canBorrow, user?._id]);
+
+  // The form starts with the dates the page passes (or empty), and follows them when they change.
+  useEffect(() => {
+    setDates({ startDate: startDate || '', endDate: endDate || '' });
+    setErrors({}); setError('');
+  }, [itemId, startDate, endDate]);
 
   if (authLoading) return null;
   if (!user) {

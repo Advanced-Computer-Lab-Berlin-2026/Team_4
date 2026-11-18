@@ -1,7 +1,7 @@
 /**
  * CATALOG CONTROLLER - Owner: Member 7 (Public Catalog, Search & Item Details)
- * Requirements: 16, 17, 18, 19, 20, 35
- * Mounted at /api/catalog (see routes/catalog.routes.js). Conventions: see docs/TEAM_WORKFLOW.md
+ * Sprint 1: 16, 17, 18, 19, 20, 35.  Sprint 2: 43 (calendar data), 44 (date filter), 92 (alternatives).
+ * Mounted at /api/catalog (see routes/catalog.routes.js). Contract: docs/sprint2/member7.md
  */
 const mongoose = require('mongoose');
 const asyncHandler = require('../utils/asyncHandler');
@@ -9,6 +9,8 @@ const ApiError = require('../utils/ApiError');
 const { parsePagination, paginated } = require('../utils/pagination');
 const Item = require('../models/Item');
 const Category = require('../models/Category');
+const { parseRange, unavailableItemIds, blockedIntervals, toDay, todayStart } = require('../services/catalog/availabilityBridge');
+const { findAlternatives } = require('../services/catalog/alternatives');
 
 const SORTS = {
   newest: '-createdAt',
@@ -25,19 +27,17 @@ const asString = (v) => (typeof v === 'string' ? v.trim() : '');
 const publicPhotos = (photos = []) => photos.map((p) => ({ _id: p._id, url: p.url }));
 
 /**
- * GET /api/catalog - Req 16, 17, 18, 35 - public
- * Query: q (name search), category (id or slug), sort, page, limit
+ * GET /api/catalog - Req 16, 17, 18, 35, 44 - public
+ * Query: q (name), category (id or slug), availableFrom + availableTo (YYYY-MM-DD, Req 44), sort, page, limit
  * Returns { items, total, page, limit, pages }; each item matches the shared <ItemCard> shape.
  */
 exports.listItems = asyncHandler(async (req, res) => {
   const { page, limit, skip } = parsePagination(req.query);
   const filter = Item.publicFilter();
 
-  // Req 17 - search by name (case-insensitive, regex-escaped so user input can't inject patterns)
   const q = asString(req.query.q).slice(0, 100);
   if (q) filter.title = { $regex: escapeRegex(q), $options: 'i' };
 
-  // Req 18 - category filter (accepts an _id or a slug). Items in inactive categories are never listed.
   const categoryParam = asString(req.query.category);
   if (categoryParam) {
     const catQuery = mongoose.isValidObjectId(categoryParam)
@@ -49,6 +49,16 @@ exports.listItems = asyncHandler(async (req, res) => {
   } else {
     const activeIds = await Category.find({ isActive: true }).distinct('_id');
     filter.category = { $in: activeIds };
+  }
+
+  // Req 44 - only items free for the whole date range (same overlap rule as the calendar and waitlists)
+  const availableFrom = asString(req.query.availableFrom);
+  const availableTo = asString(req.query.availableTo);
+  if (availableFrom || availableTo) {
+    const parsed = parseRange(availableFrom, availableTo, { maxDays: 365 });
+    if (parsed.error) throw ApiError.badRequest(parsed.error);
+    const blocked = await unavailableItemIds(parsed.range, { exceptUserId: req.user?._id });
+    if (blocked.length) filter._id = { $nin: blocked };
   }
 
   const sort = SORTS[asString(req.query.sort)] || SORTS.newest;
@@ -71,9 +81,7 @@ exports.listItems = asyncHandler(async (req, res) => {
 
 /**
  * GET /api/catalog/:id - Req 19, 20, 35 - public
- * Item details + owner NAME only (no email/phone/address) + category.
- * Includes pickup / rules / manual so Member 6's <PickupInfo/> and <ManualViewer/> (wired into the
- * details page) have their data.
+ * Item details + owner name/id only (no contact details) + category.
  */
 exports.getItem = asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -92,4 +100,44 @@ exports.getItem = asyncHandler(async (req, res) => {
     item.manual = url ? { url, originalName, mimeType, uploadedAt } : undefined;
   }
   res.json({ item });
+});
+
+/**
+ * GET /api/catalog/:id/availability - Req 43 - public
+ * Query: from, to (YYYY-MM-DD, window [from, to)); default: today .. +60 days.
+ * Returns { itemId, from, to, booked: [{ start, end, type: 'booked' | 'held' }] } - dates only, never who booked.
+ */
+exports.getAvailability = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.isValidObjectId(id) || !(await Item.exists(Item.publicFilter({ _id: id })))) {
+    throw ApiError.notFound('Item not found');
+  }
+  let from = asString(req.query.from);
+  let to = asString(req.query.to);
+  if (!from && !to) {
+    from = toDay(todayStart());
+    to = toDay(new Date(todayStart().getTime() + 60 * 86400000));
+  }
+  const parsed = parseRange(from, to, { allowPast: true });
+  if (parsed.error) throw ApiError.badRequest(parsed.error);
+
+  const booked = await blockedIntervals(id, parsed.range, { exceptUserId: req.user?._id });
+  res.json({ itemId: id, from, to, booked });
+});
+
+/**
+ * GET /api/catalog/:id/alternatives - Req 92 - public
+ * Query: start, end (YYYY-MM-DD, required), limit (1-12, default 6).
+ * Similar items (category + lender tags) that are free for those dates. Same shape as the list endpoint.
+ */
+exports.getAlternatives = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.isValidObjectId(id)) throw ApiError.notFound('Item not found');
+  const parsed = parseRange(asString(req.query.start), asString(req.query.end), { maxDays: 90 });
+  if (parsed.error) throw ApiError.badRequest(parsed.error);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 6, 1), 12);
+
+  const items = await findAlternatives(id, parsed.range, { limit, userId: req.user?._id });
+  if (!items) throw ApiError.notFound('Item not found');
+  res.json({ items, total: items.length });
 });

@@ -1,0 +1,36 @@
+/* Member 7 - Sprint 2 styles (CSS module). Tokens only; see docs/UI_README.md. */
+
+/* ---- availability filter (catalog) ---- */
+.filter { display: grid; gap: .75rem; margin-bottom: 1rem; padding: .9rem 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.filter :global(.field) { margin-bottom: 0; }
+.filterActions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: end; }
+@media (min-width: 640px) { .filter { grid-template-columns: 1fr 1fr auto; align-items: start; } .filterActions { padding-top: 1.55rem; } }
+
+/* ---- calendar ---- */
+.calendarWrap { margin: .5rem 0 1rem; }
+.calendarNav { display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap; margin-bottom: .5rem; }
+.calendarNav h3 { margin: 0; }
+.calendar { table-layout: fixed; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.calendar th, .calendar td { padding: .15rem; text-align: center; border-bottom: 0; }
+.calendar th { font-size: .78rem; color: var(--muted); }
+.day { width: 100%; min-height: 2.75rem; border: 2px solid transparent; border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+.day:hover { border-color: var(--primary); }
+.past { color: var(--muted); background: var(--bg); cursor: not-allowed; }
+.past:hover { border-color: transparent; }
+.booked { text-decoration: line-through; color: var(--muted); background: repeating-linear-gradient(135deg, var(--bg), var(--bg) 4px, var(--border) 4px, var(--border) 6px); }
+.held { color: var(--muted); border: 2px dashed var(--muted); }
+.inRange { background: var(--bg); border-color: var(--primary); }
+.selected { background: var(--primary); color: var(--surface); border-color: var(--primary-dark); font-weight: 700; }
+.legend { display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; list-style: none; padding: 0; margin: .75rem 0 .25rem; font-size: .88rem; color: var(--muted); }
+.swatch { display: inline-block; width: 1rem; height: 1rem; vertical-align: -.2rem; margin-right: .3rem; border: 1px solid var(--border); border-radius: 4px; }
+.swatchFree { background: var(--surface); }
+.swatchBooked { background: repeating-linear-gradient(135deg, var(--bg), var(--bg) 3px, var(--border) 3px, var(--border) 5px); }
+.swatchHeld { border: 2px dashed var(--muted); }
+.swatchSelected { background: var(--primary); border-color: var(--primary-dark); }
+
+/* ---- details page availability block ---- */
+.availability { margin-top: 1.5rem; }
+.statusBlock { display: grid; gap: .75rem; margin-top: .5rem; }
+
+/* ---- my waitlists ---- */
+.waitlistList { list-style: none; padding: 0; margin: 0; display: grid; gap: 1rem; }

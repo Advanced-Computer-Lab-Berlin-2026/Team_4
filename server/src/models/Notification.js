@@ -4,15 +4,23 @@ const { Schema } = mongoose;
 const schema = new Schema(
   {
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    type: { type: String, required: true }, // reservation_confirmed | reservation_cancelled | waitlist_available | delivery | due_reminder | membership_renewal | favorite_available | notice ...
+    eventKey: { type: String, required: true },
+    type: { type: String, required: true },
     category: { type: String, enum: ['reservations', 'promotions', 'communityNotices', 'system'], default: 'system' },
     title: { type: String, required: true },
     message: String,
     link: String,
     readAt: Date,
-    email: { sent: { type: Boolean, default: false }, sentAt: Date }, // NFR 13: email within 1 minute
+    email: {
+      sent: { type: Boolean, default: false },
+      status: { type: String, enum: ['pending', 'sent', 'skipped', 'failed'], default: 'pending' },
+      sentAt: Date,
+      failedAt: Date,
+      lastError: String,
+    },
   },
   { timestamps: true }
 );
 schema.index({ user: 1, readAt: 1, createdAt: -1 });
+schema.index({ user: 1, eventKey: 1 }, { unique: true });
 module.exports = mongoose.model('Notification', schema);

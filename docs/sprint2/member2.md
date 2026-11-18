@@ -154,10 +154,18 @@ Client tests: `client/test/sprint2/member2.test.jsx` (Vitest + Testing Library) 
 npm run test:sprint2 --prefix client
 ```
 
-**Trying a real card payment (test mode only):**
-1. Stripe dashboard (Test mode) → Developers → API keys → put the `sk_test_…` key in `server/.env` as `STRIPE_SECRET_KEY` (never commit `.env`).
-2. `brew install stripe/stripe-cli/stripe`, `stripe login`, then `stripe listen --forward-to localhost:<PORT>/api/stripe-webhook` (`PORT` from `server/.env`, e.g. 5001 — macOS uses 5000 for AirPlay) → put the printed `whsec_…` in `server/.env` as `STRIPE_WEBHOOK_SECRET`. Restart the server.
-3. Check out with **Card**, pay with Stripe's test card `4242 4242 4242 4242` (any future date, any CVC). You return to `/checkout/status/:id`, which shows the confirmed reservation.
+### Test Stripe-hosted Checkout
+
+1. Select the ShareShed sandbox in Stripe. Enable cards in its [Payment methods settings](https://dashboard.stripe.com/settings/payment_methods). For card-only tests, use a configuration with cards enabled and other payment methods disabled.
+2. Copy an `sk_test_…` key from the sandbox API keys page into `STRIPE_SECRET_KEY` in your local `server/.env`.
+3. Run `stripe login` in the same sandbox, then start the listener. Replace `5000` with `5001` if that is the API port in `server/.env`.
+
+   ```bash
+   stripe listen --events checkout.session.completed,checkout.session.async_payment_succeeded,checkout.session.async_payment_failed,checkout.session.expired --forward-to http://localhost:5000/api/stripe-webhook
+   ```
+
+4. Copy the listener's `whsec_…` value into `STRIPE_WEBHOOK_SECRET` and restart the server. Leave the listener running.
+5. Select **Card** at checkout and use `4242 4242 4242 4242` with a future expiry and any three-digit CVC. ShareShed returns to `/checkout/status/:id` and shows the reservation request awaiting lender approval. Paid memberships return to `/membership`.
 
 **Demo data (dev only):** fills one member's wallet history and a late fee through the real services, so the Wallet and Late fees pages have something to show. Safe to run twice:
 

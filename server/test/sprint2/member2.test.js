@@ -787,7 +787,7 @@ test('Req 51: card checkout over HTTP - Stripe page, signed webhook (twice), one
   assert.equal(fake.sessions.size, 1, 'one Stripe page, never two');
   const sessionId = first.data.checkout.redirectUrl.split('/').pop();
   const created = fake.sessions.get(sessionId).params;
-  assert.deepEqual(created.payment_method_types, ['card']);
+  assert.equal(Object.hasOwn(created, 'payment_method_types'), false, 'the Stripe Dashboard controls payment methods');
   assert.equal(created.line_items[0].price_data.unit_amount, 15000); // amount from the server quote, in piastres
   assert.match(created.success_url, new RegExp(`/checkout/status/${first.data.checkout.id}$`));
 

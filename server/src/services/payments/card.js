@@ -162,7 +162,6 @@ async function startCardPayment(input) {
   // Same Stripe idempotency key on every retry: Stripe returns the SAME page instead of creating a second one.
   const session = await api.checkout.sessions.create({
     mode: 'payment',
-    payment_method_types: ['card'],
     line_items: spec.items.map((item) => ({
       quantity: 1,
       price_data: { currency: spec.currency.toLowerCase(), unit_amount: item.amountMinor, product_data: { name: (op.stripe.membershipTitle || item.name).slice(0, 200) } },

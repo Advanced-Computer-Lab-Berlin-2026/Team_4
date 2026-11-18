@@ -748,7 +748,7 @@ test('signed Stripe webhook activates a paid membership even when the browser ne
   const start = await request('POST', '/api/memberships/subscribe', user, attempt);
   assert.equal(start.status, 202);
   const [session] = stripe.sessions.values();
-  assert.deepEqual(session.params.payment_method_types, ['card']);
+  assert.equal(Object.hasOwn(session.params, 'payment_method_types'), false, 'the Stripe Dashboard controls payment methods');
   assert.match(session.params.success_url, /\/membership$/);
   assert.equal(session.amount_total, 30000);
   assert.equal(await stripe.webhook(session), 204); // unpaid event

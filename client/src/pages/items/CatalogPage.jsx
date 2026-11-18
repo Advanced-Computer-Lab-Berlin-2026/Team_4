@@ -14,6 +14,7 @@ import ItemCard from '../../components/items/ItemCard';
 import SearchBar from '../../components/catalog/SearchBar';
 import CategoryFilter from '../../components/catalog/CategoryFilter';
 import AvailabilityFilter from '../../components/sprint2/m7/AvailabilityFilter';
+import styles from '../../styles/sprint2/member7.module.css';
 import { formatDay, isDay } from '../../components/sprint2/m7/dateUtils';
 import '../../components/catalog/catalog.css';
 
@@ -70,7 +71,7 @@ export default function CatalogPage() {
   const hasFilters = q || category || from;
 
   return (
-    <div className="container">
+    <div className={`container ${styles.browse}`}>
       <h1>Catalog</h1>
 
       <div className="catalog-toolbar">

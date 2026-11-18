@@ -12,7 +12,7 @@ Errors are always `{ message, errors? }`. Dates are UTC calendar days `YYYY-MM-D
 | GET | `/api/catalog/:id/availability` | public | **43** | `from, to` (window, default today..+60 d, max 400 d) | `{ itemId, from, to, booked: [{ start, end, type: 'booked' \| 'held' }] }` - dates only, never who |
 | GET | `/api/catalog/:id/alternatives` | public | **92** | `start, end` (required, max 90 d), `limit` (1-12) | `{ items, total }` (ItemCard shape) |
 | POST | `/api/waitlists` | member | **65** | `{ itemId, startDate, endDate }` | `201 { entry }`; 409 if dates are free, already queued, or overlapping |
-| GET | `/api/waitlists/mine` | member | **66** | optional `?item=<id>` | `{ items: [entry + item{title, photos}], total }` |
+| GET | `/api/waitlists/mine` | member | **66** | optional `?item=<id>` | `{ items: [entry + item{title} + checkoutAttemptId?], total }` |
 | DELETE | `/api/waitlists/:id` | member (owner of entry) | **66** | - | `{ entry }`; leaving an open offer releases the hold and passes it on |
 
 `entry.status`: `waiting` -> `promoted` (offer: `offerExpiresAt`, `holdId`) -> `fulfilled` | `expired`; or `left`.
@@ -27,21 +27,24 @@ removed, or inactive-category items.
    with `holdId` + `offerExpiresAt` (`WAITLIST_OFFER_HOURS`, default 12) -> `waitlist_promoted` event via M9's
    `enqueueEvent` (same session, key `waitlist_promoted:<entryId>`). If M1 refuses with a 4xx (dates taken, membership
    limit, trust score, own listing, ...) that candidate is skipped and the next one is tried.
-3. The offeree books via `/checkout?source=single&itemId=&startDate=&endDate=&holdId=` (`dateUtils.offerUrl`); M1's
-   checkout consumes the hold. A booking by the offeree marks the entry `fulfilled`; a lapsed offer becomes `expired`,
-   `releaseWaitlistHold` is called and the dates go to the next member. Leaving an open offer does the same.
-4. Trigger: `startWaitlistSweeper()` runs every minute (settle offers, offer any freed dates). It starts by itself when
-   `routes/waitlists.routes.js` loads and the DB connection opens (disable with `WAITLIST_SWEEPER=off`). M1 may instead call
-   it from `startSprint2Jobs`; it is idempotent. `promoteNext(itemId, range, eventKey)` is exported for event-driven use.
+3. The offeree books via `/checkout?source=single&itemId=&startDate=&endDate=&holdId=` (`dateUtils.offerUrl`). M1's
+   checkout replaces the offer hold with either a reservation or an active card checkout hold. The latter appears as
+   **View checkout** in My waitlists. After checkout, a reservation for the offered dates marks the entry `fulfilled`.
+   An expired offer or a failed checkout releases the range for the next member. Leaving a live offer releases its hold
+   in the same transaction as the update to the entry.
+4. `startSprint2Jobs()` starts `startWaitlistSweeper()` after the database and indexes are ready. It checks every minute
+   and can be disabled with `WAITLIST_SWEEPER=off`. `promoteNext(itemId, range, eventKey)` can also run after a release.
 
 ## Availability rule (single source)
 `services/catalog/availabilityBridge.js` imports `BLOCKING_STATUSES` and `overlapFilter` from M1's
 `services/reservations/availability.js` and queries `Reservation` + unexpired `ReservationHold` (bulk for the catalog filter,
-per item for the calendar); the join check calls M1's `checkOverlap`. A member's own hold is shown as free to them.
+per item for the calendar). The join check and insert share M1's booking transaction so simultaneous overlapping joins
+are rejected. An offer appears as held in public availability. The offeree can claim it using the link in My waitlists
+or under their selected dates on the item page.
 
 ## Event emitted
-`waitlist_promoted` - recipients `[userId]`; payload `{ itemId, itemTitle, status:'offered', startDate, endDate, holdId,
-offerExpiresAt, trigger }`. M9: add a template; link to `/checkout?source=single&itemId=&startDate=&endDate=&holdId=`.
+`waitlist_promoted` goes to the offeree and includes the item title, selected dates, `holdId`, `offerExpiresAt`, and
+the `/waitlists` link. The Member 9 worker checks that the hold is still open before sending a queued offer notification.
 
 ## What M7 consumes
 | From | Used for | If missing |
@@ -49,7 +52,7 @@ offerExpiresAt, trigger }`. M9: add a template; link to `/checkout?source=single
 | M1 `availability.js`, `reservationCommands.holdForWaitlist / releaseWaitlistHold` | overlap rule, atomic claim / release | hard dependency (present on `main`) |
 | M8 `membership/entitlements.getEntitlements(userId, at)` -> `waitlistPriority` | queue order | reads the tier directly; default 3 |
 | M9 `notifications/eventOutbox.enqueueEvent(...)` | promotion notification | console warning, no notification |
-| M3 `TrustSummary({ userId })`, M5 `BorrowListButton({ itemId, startDate, endDate })` | ItemDetailsPage slots (`import.meta.glob`) | page renders without them |
+| M3 `TrustSummary`, M5 `BorrowListButton({ itemId, ownerId, maxBorrowDays })` | Item details | both are on `main` |
 
 ## Tests
 - `cd server && npm run test:sprint2` - unit tests always run; integration tests (availability / filter / alternatives /

@@ -14,7 +14,9 @@ import ItemDetailsPage from '../../src/pages/items/ItemDetailsPage';
 import ReservationDetailsPage from '../../src/pages/lifecycle/ReservationDetailsPage';
 import TrustProfilePage from '../../src/pages/reviews/TrustProfilePage';
 
-vi.mock('../../src/api/catalog.api', () => ({ getItem: vi.fn() }));
+vi.mock('../../src/api/catalog.api', () => ({
+  getItem: vi.fn(), getAvailability: vi.fn().mockResolvedValue({ booked: [] }),
+}));
 vi.mock('../../src/api/damageReports.api', () => ({
   getReport: vi.fn(), decideReport: vi.fn(), listReports: vi.fn(), resolveReport: vi.fn(),
 }));

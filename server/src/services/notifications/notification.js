@@ -1,5 +1,7 @@
 const User = require('../../models/User');
 const Reservation = require('../../models/Reservation');
+const WaitlistEntry = require('../../models/WaitlistEntry');
+const ReservationHold = require('../../models/ReservationHold');
 const { createOrDeliver } = require('./emailDelivery');
 const { rewardForFirstCompletion } = require('../referrals/referral');
 
@@ -32,8 +34,8 @@ function getDetails(event) {
   };
 }
 
-async function reminderIsCurrent(event, now) {
-  const { dueAt, renewsAt } = event.payload;
+async function eventIsCurrent(event, now) {
+  const { dueAt, renewsAt, holdId } = event.payload;
   if (event.type === 'return_reminder' && dueAt) {
     return Boolean(await Reservation.exists({
       _id: event.aggregateId, status: { $in: ['confirmed', 'active'] }, endDate: { $eq: new Date(dueAt), $gt: now },
@@ -43,6 +45,12 @@ async function reminderIsCurrent(event, now) {
     return Boolean(await User.exists({
       _id: event.aggregateId, 'membership.status': 'active', 'membership.renewsAt': { $eq: new Date(renewsAt), $gt: now },
     }));
+  }
+  if (event.type === 'waitlist_promoted' && holdId) {
+    const entry = await WaitlistEntry.exists({
+      _id: event.aggregateId, holdId, status: 'promoted', offerExpiresAt: { $gt: now },
+    });
+    return Boolean(entry && await ReservationHold.exists({ _id: holdId, expiresAt: { $gt: now } }));
   }
   return true;
 }
@@ -66,7 +74,7 @@ async function notifyRecipients(event, details) {
 
 async function processEvent(event) {
   const details = getDetails(event);
-  if (!(await reminderIsCurrent(event, new Date()))) return;
+  if (!(await eventIsCurrent(event, new Date()))) return;
   const results = await Promise.allSettled([processReferral(event), notifyRecipients(event, details)]);
   const failure = results.find((result) => result.status === 'rejected');
   if (failure) throw failure.reason;

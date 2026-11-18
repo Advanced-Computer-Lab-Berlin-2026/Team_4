@@ -7,7 +7,11 @@ export const fromDay = (s) => new Date(`${s}T00:00:00.000Z`);
 export const todayDay = () => toDay(new Date());
 export const addDays = (s, n) => toDay(new Date(fromDay(s).getTime() + n * 86400000));
 export const daysBetween = (a, b) => Math.round((fromDay(b) - fromDay(a)) / 86400000);
-export const isDay = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && toDay(fromDay(s)) === s;
+export const isDay = (s) => {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const date = fromDay(s);
+  return Number.isFinite(+date) && toDay(date) === s;
+};
 
 export const monthFirst = ({ y, m }) => `${y}-${pad(m + 1)}-01`;
 export const shiftMonth = ({ y, m }, delta) => {
@@ -33,7 +37,7 @@ export const offerUrl = (itemId, entry) => (entry.holdId
   ? `/checkout?${new URLSearchParams({
     source: 'single', itemId, startDate: toDay(entry.startDate), endDate: toDay(entry.endDate), holdId: entry.holdId,
   }).toString()}`
-  : reserveUrl(itemId, toDay(entry.startDate), toDay(entry.endDate)));
+  : null);
 
 /** Server timestamp (ISO) -> 'YYYY-MM-DD' */
 export const isoDay = (iso) => toDay(iso);

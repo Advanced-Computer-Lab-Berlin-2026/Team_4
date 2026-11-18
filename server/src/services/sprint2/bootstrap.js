@@ -79,7 +79,7 @@ function startSprint2Jobs() {
   const worker = optionalFeature('../jobs/notificationWorker');
   const reminders = optionalFeature('../jobs/reminders');
   worker?.startNotificationWorker?.();
-  reminders?.startReminders?.();
+  reminders?.startReminderJobs?.();
 
   let running = false;
   const timer = setInterval(async () => {

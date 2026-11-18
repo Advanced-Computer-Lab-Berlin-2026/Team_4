@@ -4,6 +4,7 @@ const { processEvent } = require('../services/notifications/notification');
 const MAX_ATTEMPTS = 10;
 const MAX_BACKOFF_MS = 60 * 1000;
 const LEASE_MS = 60 * 1000;
+const EVENTS_PER_POLL = 4;
 let timer = null;
 let running = false;
 
@@ -24,10 +25,20 @@ async function processNextEvent(now = new Date()) {
   );
   if (!event) return false;
 
+  const claim = { _id: event._id, status: 'processing', attempts: event.attempts };
+  const heartbeat = setInterval(async () => {
+    try {
+      await EventOutbox.updateOne(claim, { $set: { lockedAt: new Date() } });
+    } catch (error) {
+      console.error(`[notification-worker] lease refresh failed: ${error.message}`);
+    }
+  }, LEASE_MS / 3);
+  heartbeat.unref();
+
   try {
     await processEvent(event);
     await EventOutbox.updateOne(
-      { _id: event._id, status: 'processing' },
+      claim,
       { $set: { status: 'sent', sentAt: new Date(), lockedAt: null, lastError: null } }
     );
   } catch (error) {
@@ -39,8 +50,10 @@ async function processNextEvent(now = new Date()) {
     };
     if (failed) update.failedAt = new Date();
     else update.availableAt = new Date(Date.now() + retryDelay(event.attempts));
-    await EventOutbox.updateOne({ _id: event._id, status: 'processing' }, { $set: update });
+    await EventOutbox.updateOne(claim, { $set: update });
     console.error(`[notification-worker] event ${event.eventKey} ${failed ? 'failed' : 'will retry'}: ${error.message || error}`);
+  } finally {
+    clearInterval(heartbeat);
   }
   return true;
 }
@@ -51,7 +64,9 @@ function startNotificationWorker({ pollIntervalMs = 1000 } = {}) {
     if (running) return;
     running = true;
     try {
-      await processNextEvent();
+      const results = await Promise.allSettled(Array.from({ length: EVENTS_PER_POLL }, () => processNextEvent()));
+      const failure = results.find((result) => result.status === 'rejected');
+      if (failure) throw failure.reason;
     } catch (error) {
       console.error(`[notification-worker] poll failed: ${error.message || error}`);
     } finally {

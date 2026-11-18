@@ -2,7 +2,7 @@ const { sendEmail } = require('../../utils/email');
 const Notification = require('../../models/Notification');
 
 async function deliverNotification(notification, user, event) {
-  if (notification.email.status === 'sent' || notification.email.status === 'skipped') return notification;
+  if (notification.email.sent || notification.email.status === 'sent' || notification.email.status === 'skipped') return notification;
 
   const enabled = user.notificationPrefs
     ? user.notificationPrefs[notification.category] !== false

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getUnreadNotificationCount, listNotifications } from '../../../api/notifications.api';
+import { getUnreadNotificationCount, listNotifications, NOTIFICATIONS_READ } from '../../../api/notifications.api';
 import { getErrorMessage } from '../../../api/axios';
 import styles from '../../../styles/sprint2/member9.module.css';
 
@@ -11,21 +11,35 @@ export default function NotificationBell() {
   const [error, setError] = useState('');
   const root = useRef(null);
 
-  async function refresh() {
+  const refreshId = useRef(0);
+  const toggle = useRef(null);
+
+  const refresh = useCallback(async () => {
+    const id = ++refreshId.current;
     try {
       const [unread, recent] = await Promise.all([
         getUnreadNotificationCount(),
         listNotifications({ limit: 5 }),
       ]);
+      if (id !== refreshId.current) return;
       setCount(unread.count);
       setItems(recent.items || []);
       setError('');
     } catch (err) {
-      setError(getErrorMessage(err));
+      if (id === refreshId.current) setError(getErrorMessage(err));
     }
-  }
+  }, []);
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    refresh();
+    window.addEventListener(NOTIFICATIONS_READ, refresh);
+    const timer = window.setInterval(() => { if (!document.hidden) refresh(); }, 30_000);
+    return () => {
+      refreshId.current++;
+      window.removeEventListener(NOTIFICATIONS_READ, refresh);
+      window.clearInterval(timer);
+    };
+  }, [refresh]);
   useEffect(() => {
     if (!open) return undefined;
     const closeOnOutsideClick = (event) => {
@@ -36,9 +50,15 @@ export default function NotificationBell() {
   }, [open]);
 
   return (
-    <div className={styles.bell} ref={root}>
+    <div className={styles.bell} ref={root} onKeyDown={(event) => {
+      if (open && event.key === 'Escape') {
+        setOpen(false);
+        toggle.current?.focus();
+      }
+    }}>
       <button
         type="button"
+        ref={toggle}
         className={styles.bellButton}
         aria-label={`Notifications${count ? `, ${count} unread` : ''}`}
         aria-expanded={open}

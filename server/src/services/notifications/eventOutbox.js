@@ -5,17 +5,14 @@ async function enqueueEvent(type, aggregateId, recipients, payload, eventKey, se
     throw new TypeError('type, aggregateId, recipients, and eventKey are required');
   }
 
+  const createdAt = new Date();
+  const event = { type, aggregateId, recipients, payload: payload || {}, eventKey, createdAt, updatedAt: createdAt };
   try {
-    const [event] = await EventOutbox.create([{
-      type,
-      aggregateId,
-      recipients,
-      payload: payload || {},
-      eventKey,
-    }], session ? { session } : undefined);
-    return event;
+    return await EventOutbox.findOneAndUpdate(
+      { eventKey }, { $setOnInsert: event }, { upsert: true, new: true, session, timestamps: false },
+    );
   } catch (error) {
-    if (error.code !== 11000) throw error;
+    if (session?.inTransaction() || error.code !== 11000) throw error;
     const existing = await EventOutbox.findOne({ eventKey }).session(session);
     if (!existing) throw error;
     return existing;

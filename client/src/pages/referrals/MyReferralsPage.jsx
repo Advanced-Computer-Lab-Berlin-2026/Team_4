@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import Alert from '../../components/common/Alert';
 import Spinner from '../../components/common/Spinner';
 import { getErrorMessage } from '../../api/axios';
-import { captureReferral, getMyReferrals } from '../../api/referrals.api';
+import { captureReferral, getMyReferrals, recordReferralShare } from '../../api/referrals.api';
 import styles from '../../styles/sprint2/member9.module.css';
 
 export default function MyReferralsPage() {
@@ -13,6 +13,8 @@ export default function MyReferralsPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const captureAttempt = useRef(false);
+  const shareKey = useRef(null);
+  const [copying, setCopying] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -46,10 +48,20 @@ export default function MyReferralsPage() {
   }, [searchParams, navigate]);
 
   async function copyLink() {
+    setCopying(true);
+    setError('');
+    setMessage('');
     try {
       await navigator.clipboard.writeText(new URL(summary.referralLink, window.location.origin).toString());
       setMessage('Referral link copied.');
-    } catch (err) { setError(getErrorMessage(err)); }
+      shareKey.current ??= globalThis.crypto.randomUUID();
+      await recordReferralShare(shareKey.current);
+      shareKey.current = null;
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setCopying(false);
+    }
   }
 
   return (
@@ -63,7 +75,7 @@ export default function MyReferralsPage() {
         <>
           <section className={styles.referralShare}>
             <div><strong>Your referral link</strong><code>{new URL(summary.referralLink, window.location.origin).toString()}</code></div>
-            <button type="button" className={styles.primaryButton} onClick={copyLink}>Copy link</button>
+            <button type="button" className={styles.primaryButton} onClick={copyLink} disabled={copying}>Copy link</button>
           </section>
           <section className={styles.summaryGrid} aria-label="Referral summary">
             <div><span>Referrals</span><strong>{summary.total}</strong></div>

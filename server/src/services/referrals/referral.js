@@ -5,6 +5,7 @@ const User = require('../../models/User');
 const Referral = require('../../models/Referral');
 const Reservation = require('../../models/Reservation');
 const { CURRENCY } = require('../../config/constants');
+const { bookingKeys, transactBooking } = require('../reservations/bookingLock');
 
 const REWARD_MINOR = 10000;
 let walletCreditService;
@@ -53,92 +54,77 @@ async function ensureReferralCode(userId) {
   return raced.referralCode;
 }
 
+// The same borrower lock protects completion and capture from racing.
 async function captureReferral({ userId, code }) {
-  if (!code || typeof code !== 'string') throw ApiError.badRequest('Referral code is required');
-  const member = await User.findById(userId).select('_id referredBy role');
-  if (!member || member.role !== 'member') throw ApiError.forbidden('Only members can use a referral code');
+  if (typeof code !== 'string' || !code.trim()) throw ApiError.badRequest('Referral code is required');
+  return transactBooking(bookingKeys([], userId), async (session) => {
+    const member = await User.findOne({ _id: userId, role: 'member', status: 'active' }).select('referredBy').session(session);
+    if (!member) throw ApiError.forbidden('Only active members can use a referral code');
 
-  const referrer = await User.findOne({ referralCode: code.trim().toUpperCase() }).select('_id referralCode');
-  if (!referrer) throw ApiError.notFound('Referral code not found');
-  if (String(referrer._id) === String(member._id)) throw ApiError.badRequest('You cannot refer yourself');
-  if (member.referredBy) throw ApiError.conflict('This account already has a referrer');
-  if (await Reservation.exists({ borrower: member._id, status: 'completed' })) {
-    throw ApiError.badRequest('Referral rewards are only available before your first completed reservation');
-  }
-
-  try {
-    const referral = await Referral.create({
-      referrer: referrer._id,
-      referee: member._id,
-      code: referrer.referralCode,
-      status: 'registered',
-    });
-    const linked = await User.updateOne(
-      { _id: member._id, $or: [{ referredBy: { $exists: false } }, { referredBy: null }] },
-      { $set: { referredBy: referrer._id } }
-    );
-    if (!linked.modifiedCount) {
-      await Referral.deleteOne({ _id: referral._id });
+    const referrer = await User.findOne({
+      referralCode: code.trim().toUpperCase(), role: 'member', status: 'active',
+    }).select('referralCode').session(session);
+    if (!referrer) throw ApiError.notFound('Referral code not found');
+    if (referrer._id.equals(member._id)) throw ApiError.badRequest('You cannot refer yourself');
+    if (member.referredBy || await Referral.exists({ referee: member._id }).session(session)) {
       throw ApiError.conflict('This account already has a referrer');
     }
+    if (await Reservation.exists({ borrower: member._id, status: 'completed' }).session(session)) {
+      throw ApiError.badRequest('Referral rewards are only available before your first completed reservation');
+    }
+
+    const [referral] = await Referral.create([{
+      referrer: referrer._id, referee: member._id, code: referrer.referralCode, status: 'registered',
+    }], { session });
+    await User.updateOne({ _id: member._id }, { $set: { referredBy: referrer._id } }, { session });
     return referral;
-  } catch (error) {
-    if (error.code === 11000) throw ApiError.conflict('This account already has a referrer');
-    throw error;
-  }
+  });
+}
+
+async function recordReferralShare(userId, shareKey) {
+  const code = await ensureReferralCode(userId);
+  const lookup = { referrer: userId, shareKey };
+  await Referral.updateOne(lookup, { $setOnInsert: { code, status: 'sent' } }, { upsert: true });
 }
 
 async function rewardForFirstCompletion(userId, reservationId) {
   if (!mongoose.isValidObjectId(userId)) throw new TypeError('A valid member id is required');
-  const [firstCompletion] = await Reservation.aggregate([
-    {
-      $match: {
-        borrower: new mongoose.Types.ObjectId(userId),
-        status: 'completed',
-        $or: [{ completedAt: { $type: 'date' } }, { returnedAt: { $type: 'date' } }],
+  return transactBooking(bookingKeys([], userId), async (session) => {
+    const referral = await Referral.findOne({ referee: userId, status: 'registered' }).session(session);
+    if (!referral) return null;
+    if (referral.referrer.equals(referral.referee)) {
+      throw new Error(`Self-referral detected for referral ${referral._id}`);
+    }
+    const [firstCompletion] = await Reservation.aggregate([
+      {
+        $match: {
+          borrower: new mongoose.Types.ObjectId(userId),
+          status: 'completed',
+          $or: [{ completedAt: { $type: 'date' } }, { returnedAt: { $type: 'date' } }],
+        },
       },
-    },
-    { $addFields: { referralCompletionDate: { $ifNull: ['$completedAt', '$returnedAt'] } } },
-    { $sort: { referralCompletionDate: 1, _id: 1 } },
-    { $limit: 1 },
-    { $project: { _id: 1 } },
-  ]);
-  if (!firstCompletion || (reservationId && String(firstCompletion._id) !== String(reservationId))) return null;
+      { $addFields: { referralCompletionDate: { $ifNull: ['$completedAt', '$returnedAt'] } } },
+      { $sort: { referralCompletionDate: 1, _id: 1 } },
+      { $limit: 1 },
+      { $project: { _id: 1 } },
+    ]).session(session);
+    if (!firstCompletion || (reservationId && String(firstCompletion._id) !== String(reservationId))) return null;
 
-  const referral = await Referral.findOne({ referee: userId, status: 'registered' });
-  if (!referral) return null;
-  if (String(referral.referrer) === String(referral.referee)) {
-    throw new Error(`Self-referral detected for referral ${referral._id}`);
-  }
-
-  const creditReferral = getWalletCreditService().creditReferral;
-  await creditReferral({
-    userId: referral.referrer,
-    amountMinor: REWARD_MINOR,
-    currency: CURRENCY,
-    reference: `referral:${referral._id}`,
-    idempotencyKey: `referral:${referral._id}:first-completion`,
+    const creditReferral = getWalletCreditService().creditReferral;
+    await creditReferral({
+      userId: referral.referrer, amountMinor: REWARD_MINOR, currency: CURRENCY,
+      reference: `referral:${referral._id}`, idempotencyKey: `referral:${referral._id}:first-completion`,
+    }, session);
+    referral.set({ status: 'converted', creditAmount: REWARD_MINOR / 100, creditAmountMinor: REWARD_MINOR, convertedAt: new Date() });
+    return referral.save({ session });
   });
-
-  return Referral.findOneAndUpdate(
-    { _id: referral._id, status: 'registered' },
-    {
-      $set: {
-        status: 'converted',
-        creditAmount: REWARD_MINOR / 100,
-        creditAmountMinor: REWARD_MINOR,
-        convertedAt: new Date(),
-      },
-    },
-    { new: true }
-  );
 }
 
 async function getMyReferrals(userId) {
   const referralCode = await ensureReferralCode(userId);
-  const items = await Referral.find({ referrer: userId }).populate('referee', 'name username').sort({ createdAt: -1 });
+  const items = await Referral.find({ referrer: userId, status: { $in: ['registered', 'converted'] } }).populate('referee', 'name username').sort({ createdAt: -1 });
   const converted = items.filter((item) => item.status === 'converted').length;
-  const totalCreditsMinor = items.reduce((sum, item) => sum + (item.creditAmountMinor || 0), 0);
+  const totalCreditsMinor = items.reduce((sum, item) => sum + (item.creditAmountMinor || Math.round((item.creditAmount || 0) * 100)), 0);
   return {
     referralCode,
     referralLink: `/register?ref=${encodeURIComponent(referralCode)}`,
@@ -154,6 +140,7 @@ module.exports = {
   REWARD_MINOR,
   ensureReferralCode,
   captureReferral,
+  recordReferralShare,
   rewardForFirstCompletion,
   getMyReferrals,
   setWalletCreditService,

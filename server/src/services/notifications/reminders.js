@@ -9,15 +9,15 @@ async function enqueueDueReturnReminders(now = new Date()) {
   const reservations = await Reservation.find({
     status: { $in: ['confirmed', 'active'] },
     endDate: { $gt: now, $lte: until },
-  }).select('_id borrower endDate');
+  }).select('_id borrower lender endDate');
 
   for (const reservation of reservations) {
     const date = utcDate(reservation.endDate);
     await enqueueEvent(
       'return_reminder',
       reservation._id,
-      [reservation.borrower],
-      { title: 'Upcoming return reminder', message: 'Your reservation is due to be returned within 24 hours.', link: '/reservations' },
+      [reservation.borrower, reservation.lender],
+      { title: 'Upcoming return reminder', message: 'Your reservation is due to be returned within 24 hours.', link: '/reservations', dueAt: reservation.endDate },
       `reminder:return:${reservation._id}:${date}`
     );
   }
@@ -37,7 +37,7 @@ async function enqueueMembershipReminders(now = new Date()) {
       'membership_expiring',
       user._id,
       [user._id],
-      { title: 'Membership renewal reminder', message: 'Your membership renews within 7 days.', link: '/account/membership' },
+      { title: 'Membership renewal reminder', message: 'Your membership expires within 7 days. Renew it from your membership page.', link: '/account/membership', renewsAt: user.membership.renewsAt },
       `reminder:membership:${user._id}:${date}`
     );
   }

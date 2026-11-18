@@ -3,6 +3,7 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const net = require('node:net');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const mongoose = require('mongoose');
 const User = require('../../src/models/User');
@@ -13,6 +14,7 @@ const Reservation = require('../../src/models/Reservation');
 let smtpServer;
 let smtpPort;
 let rejectSmtpMessages = false;
+let rejectRecipient = null;
 let referralService;
 let eventOutbox;
 let notificationService;
@@ -37,6 +39,8 @@ function startSmtpServer() {
           }
         } else if (/^(EHLO|HELO)\b/i.test(line)) {
           socket.write('250-localhost\r\n250 SIZE 100000\r\n');
+        } else if (/^RCPT TO:/i.test(line) && rejectRecipient && line.includes(rejectRecipient)) {
+          socket.write('550 5.0.0 simulated recipient failure\r\n');
         } else if (/^MAIL FROM:/i.test(line) || /^RCPT TO:/i.test(line)) {
           socket.write('250 2.1.0 accepted\r\n');
         } else if (/^DATA$/i.test(line)) {
@@ -83,7 +87,7 @@ before(async () => {
   process.env.SMTP_PASS = '';
   process.env.EMAIL_FROM = 'ShareShed Test <test@example.test>';
   await mongoose.connect(process.env.TEST_MONGO_URI, { dbName: `member9_test_${process.pid}` });
-  await Promise.all([User.init(), Referral.init(), Notification.init(), EventOutbox.init(), Reservation.init()]);
+  await Promise.all(Object.values(require('../../src/models')).map((model) => model.init()));
   referralService = require('../../src/services/referrals/referral');
   eventOutbox = require('../../src/services/notifications/eventOutbox');
   notificationService = require('../../src/services/notifications/notification');
@@ -99,9 +103,12 @@ after(async () => {
 test('outbox deduplicates event keys and preference opt-out retains in-app notification', { skip: !process.env.TEST_MONGO_URI }, async () => {
   const member = await makeMember('101', { notificationPrefs: { promotions: false } });
   const eventKey = `test:duplicate:${member._id}`;
-  const first = await eventOutbox.enqueueEvent('availability_changed', member._id, [member._id], {}, eventKey);
-  const second = await eventOutbox.enqueueEvent('availability_changed', member._id, [member._id], {}, eventKey);
-  assert.equal(String(first._id), String(second._id));
+  await mongoose.connection.transaction(async (session) => {
+    const first = await eventOutbox.enqueueEvent('availability_changed', member._id, [member._id], {}, eventKey, session);
+    const second = await eventOutbox.enqueueEvent('availability_changed', member._id, [member._id], {}, eventKey, session);
+    assert.equal(String(first._id), String(second._id));
+    assert.ok(first.createdAt instanceof Date);
+  });
   assert.equal(await EventOutbox.countDocuments({ eventKey }), 1);
 
   await notificationService.processEvent({
@@ -271,6 +278,14 @@ test('reminder enqueue is restart-safe and SMTP delivery stores a sub-60-second 
   await reminderService.enqueueDueReturnReminders();
   const reminderKey = `reminder:return:${reservation._id}:${endDate.toISOString().slice(0, 10)}`;
   assert.equal(await EventOutbox.countDocuments({ eventKey: reminderKey }), 1);
+  const reminder = await EventOutbox.findOne({ eventKey: reminderKey });
+  assert.deepEqual(reminder.recipients.map(String).sort(), [borrower.id, lender.id].sort());
+  await Reservation.updateOne({ _id: reservation._id }, { $set: { endDate: new Date(+endDate + 86_400_000) } });
+  await notificationService.processEvent(reminder);
+  assert.equal(await Notification.countDocuments({ eventKey: reminderKey }), 0);
+  await Reservation.updateOne({ _id: reservation._id }, { $set: { endDate } });
+  await notificationService.processEvent(reminder);
+  assert.equal(await Notification.countDocuments({ eventKey: reminderKey, 'email.status': 'sent' }), 2);
 
   const startedAt = Date.now();
   await notificationService.processEvent({
@@ -294,9 +309,162 @@ test('notification retries use capped exponential backoff and event types have p
   assert.equal(retryDelay(20), 60_000);
   assert.equal(getDetails({ type: 'confirmed', payload: {} }).category, 'reservations');
   assert.equal(getDetails({ type: 'return_reminder', payload: {} }).category, 'reservations');
+  assert.equal(getDetails({ type: 'waitlist_promoted', payload: {} }).link, '/waitlists');
 });
 
 test('reminder event windows use stable UTC dates', () => {
   const { utcDate } = require('../../src/services/notifications/reminders');
   assert.equal(utcDate(new Date('2026-11-15T23:59:59.000Z')), '2026-11-15');
+});
+
+
+test('reservation notifications reach both participants and released favorites notify their subscribers', { skip: !process.env.TEST_MONGO_URI }, async () => {
+  const { Category, Favorite, Item } = require('../../src/models');
+  const { transition, advanceDelivery } = require('../../src/services/reservations/reservationCommands');
+  const { cancel } = require('../../src/services/reservations/cancellation');
+  const { processNextEvent } = require('../../src/jobs/notificationWorker');
+  await EventOutbox.updateMany({}, { $set: { status: 'sent' } });
+  const [borrower, lender] = await Promise.all([makeMember('401'), makeMember('402', { lenderStatus: 'verified' })]);
+  const category = await Category.create({ name: 'Notifications tools', slug: 'notification-tools' });
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const day = (offset) => new Date(+today + offset * 86_400_000);
+  async function makeReservation(title, status = 'pending', start = 1, fulfilment) {
+    const item = await Item.create({ title, category: category.id, owner: lender.id, description: 'Fixture item', depositAmount: 0 });
+    return Reservation.create({
+      item: item._id, borrower: borrower._id, lender: lender._id, status, fulfilment,
+      startDate: day(start), endDate: day(start + 2),
+    });
+  }
+
+  const cancelled = await makeReservation('Booked drill');
+  const subscriber = await makeMember('403');
+  await Favorite.create({ user: subscriber.id, item: cancelled.item });
+  await transition({ actorId: lender.id, reservationId: cancelled.id, action: 'confirm' });
+  await cancel({ actorId: borrower.id, reservationId: cancelled.id });
+  const rejected = await makeReservation('Declined drill');
+  await transition({ actorId: lender.id, reservationId: rejected.id, action: 'reject' });
+  const delivery = await makeReservation('Delivered drill', 'confirmed', 0, { method: 'delivery', deliveryStatus: 'preparing' });
+  for (const deliveryStatus of ['out_for_delivery', 'delivered']) {
+    await advanceDelivery({ actorId: lender.id, reservationId: delivery.id, deliveryStatus });
+  }
+
+  let processed = 0;
+  while (await processNextEvent()) processed++;
+  assert.equal(processed, 7); // five participant events and two favorite-availability events
+  const favorites = await Notification.find({ type: 'availability_changed' }).lean();
+  assert.equal(favorites.filter((note) => note.eventKey === `${cancelled.id}:availability:cancelled`).length, 1);
+  assert.ok(favorites.some((note) => String(note.user) === subscriber.id && note.email.status === 'sent'));
+  const rows = await Notification.find({ user: { $in: [borrower._id, lender._id] } }).lean();
+  assert.equal(rows.length, 10);
+  for (const account of [borrower, lender]) {
+    const own = rows.filter((note) => String(note.user) === account.id);
+    assert.deepEqual(own.map(({ type }) => type).sort(), ['cancelled', 'confirmed', 'delivery_status', 'delivery_status', 'rejected']);
+    for (const note of own) {
+      assert.equal(note.email.status, 'sent');
+      const event = await EventOutbox.findOne({ eventKey: note.eventKey });
+      assert.ok(+note.email.sentAt - +event.createdAt < 60_000);
+      if (note.type === 'delivery_status') assert.equal(note.link, '/delivery-tracking/' + delivery.id);
+    }
+  }
+});
+
+test('a failed SMTP recipient cannot block in-app or SMTP delivery to another recipient', { skip: !process.env.TEST_MONGO_URI }, async () => {
+  const [failed, healthy] = await Promise.all([makeMember('411'), makeMember('412')]);
+  const key = 'notification:recipient-failure:' + failed.id;
+  const { processNextEvent } = require('../../src/jobs/notificationWorker');
+  await eventOutbox.enqueueEvent('confirmed', new mongoose.Types.ObjectId(), [failed._id, healthy._id], {}, key);
+  rejectRecipient = failed.email;
+  try {
+    assert.equal(await processNextEvent(), true);
+    const pending = await EventOutbox.findOne({ eventKey: key });
+    assert.equal(pending.status, 'pending');
+    const badNotice = await Notification.findOne({ user: failed._id, eventKey: key });
+    const goodNotice = await Notification.findOne({ user: healthy._id, eventKey: key });
+    assert.equal(badNotice.email.status, 'failed');
+    assert.equal(goodNotice.email.status, 'sent');
+    assert.equal(badNotice.readAt, undefined);
+  } finally {
+    rejectRecipient = null;
+  }
+  assert.equal(await processNextEvent(new Date(Date.now() + 3000)), true);
+  assert.equal((await EventOutbox.findOne({ eventKey: key })).status, 'sent');
+  assert.equal(await Notification.countDocuments({ eventKey: key, 'email.status': 'sent' }), 2);
+  await EventOutbox.updateOne({ eventKey: key }, { $set: { status: 'processing', lockedAt: new Date(Date.now() - 120_000) } });
+  assert.equal(await processNextEvent(), true);
+  const recovered = await EventOutbox.findOne({ eventKey: key });
+  assert.equal(recovered.status, 'sent');
+  assert.equal(recovered.attempts, 3);
+  assert.equal(await Notification.countDocuments({ eventKey: key }), 2);
+});
+
+test('membership reminders are deduplicated and a cancellation suppresses a queued reminder', { skip: !process.env.TEST_MONGO_URI }, async () => {
+  const renewsAt = new Date(Date.now() + 3 * 86_400_000);
+  const subscriber = await makeMember('421', { membership: { status: 'active', renewsAt } });
+  await reminderService.enqueueMembershipReminders();
+  await reminderService.enqueueMembershipReminders();
+  const query = { aggregateId: subscriber._id, type: 'membership_expiring' };
+  const reminders = await EventOutbox.find(query);
+  assert.equal(reminders.length, 1);
+  assert.equal(reminders[0].payload.link, '/account/membership');
+  await notificationService.processEvent(reminders[0]);
+  assert.equal((await Notification.findOne({ user: subscriber._id, eventKey: reminders[0].eventKey })).email.status, 'sent');
+  const cancelled = await makeMember('422', { membership: { status: 'active', renewsAt } });
+  await reminderService.enqueueMembershipReminders();
+  await User.updateOne({ _id: cancelled._id }, { $set: { 'membership.status': 'cancelled' } });
+  const stale = await EventOutbox.findOne({ ...query, aggregateId: cancelled._id });
+  await notificationService.processEvent(stale);
+  assert.equal(await Notification.countDocuments({ eventKey: stale.eventKey }), 0);
+});
+
+test('notifications and referral reporting respect roles, preferences, ownership and share retries over HTTP', { skip: !process.env.TEST_MONGO_URI }, async (t) => {
+  const app = require('../../src/app');
+  const { signToken } = require('../../src/utils/tokens');
+  const server = await new Promise((resolve) => {
+    const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const [member, other, admin] = await Promise.all([makeMember('431'), makeMember('432'), makeMember('433', { role: 'admin' })]);
+  const call = async (method, url, user, data) => {
+    const res = await fetch(`http://127.0.0.1:${server.address().port}/api${url}`, {
+      method,
+      headers: { ...(user && { authorization: 'Bearer ' + signToken(user.id) }), ...(data && { 'content-type': 'application/json' }) },
+      ...(data && { body: JSON.stringify(data) }),
+    });
+    return { status: res.status, body: res.status === 204 ? null : await res.json() };
+  };
+
+  const request = { shareKey: randomUUID() };
+  assert.equal((await call('POST', '/referrals/share', null, request)).status, 401);
+  assert.equal((await call('POST', '/referrals/share', member, { shareKey: 'invalid' })).status, 400);
+  assert.equal((await call('POST', '/referrals/share', member, request)).status, 204);
+  assert.equal((await call('POST', '/referrals/share', member, request)).status, 204);
+  const mine = await call('GET', '/referrals/mine', member);
+  assert.match(mine.body.referralLink, /^\/register\?ref=/);
+  assert.equal(mine.body.total, 0);
+  assert.equal((await call('POST', '/referrals/capture', other, { code: mine.body.referralCode })).status, 201);
+  assert.equal((await call('GET', '/referrals/report', member)).status, 403);
+  const report = await call('GET', '/referrals/report?page=2&limit=1', admin);
+  assert.equal(report.body.page, 2);
+  assert.equal(report.body.items.length, 1);
+  assert.equal(report.body.totals.referralsSent, 1);
+  assert.ok(report.body.totals.signups >= 1);
+  assert.ok(report.body.totals.creditsIssuedMinor >= 10000);
+
+  assert.equal((await call('PUT', '/notification-preferences', member, { promotions: 'false' })).status, 400);
+  const prefs = await call('PUT', '/notification-preferences', member, { promotions: false });
+  assert.deepEqual(prefs.body.preferences, { reservations: true, promotions: false, communityNotices: true });
+  const records = [{ user: member._id, title: 'Legacy 1' }, { user: member._id, title: 'Legacy 2' }];
+  await Notification.collection.insertMany(records.map((row) => ({ ...row, type: 'legacy', createdAt: new Date() })));
+  const first = await call('GET', '/notifications?limit=1&unreadOnly=true', member);
+  assert.equal(first.body.pages, 2);
+  assert.equal(first.body.items.length, 1);
+  const route = '/notifications/' + first.body.items[0]._id + '/read';
+  assert.equal((await call('PATCH', route, other)).status, 404);
+  const read = await call('PATCH', route, member);
+  assert.equal(read.status, 200);
+  assert.equal((await call('PATCH', route, member)).body.notification.readAt, read.body.notification.readAt);
+  assert.equal((await call('GET', '/notifications/unread-count', member)).body.count, 1);
+  assert.equal((await call('PATCH', '/notifications/read-all', member)).body.modifiedCount, 1);
+  assert.equal((await call('GET', '/notifications/unread-count', member)).body.count, 0);
 });

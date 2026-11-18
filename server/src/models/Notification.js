@@ -22,5 +22,7 @@ const schema = new Schema(
   { timestamps: true }
 );
 schema.index({ user: 1, readAt: 1, createdAt: -1 });
-schema.index({ user: 1, eventKey: 1 }, { unique: true });
+schema.index({ user: 1, eventKey: 1 }, {
+  name: 'notification_user_event_key', unique: true, partialFilterExpression: { eventKey: { $type: 'string' } },
+});
 module.exports = mongoose.model('Notification', schema);

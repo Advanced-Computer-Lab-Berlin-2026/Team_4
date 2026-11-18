@@ -9,7 +9,7 @@ exports.list = asyncHandler(async (req, res) => {
   const filter = { user: req.user._id };
   if (req.query.unreadOnly === 'true') filter.readAt = null;
   const [items, total] = await Promise.all([
-    Notification.find(filter).sort({ createdAt: -1 }).skip(pagination.skip).limit(pagination.limit).lean(),
+    Notification.find(filter).sort({ createdAt: -1, _id: -1 }).skip(pagination.skip).limit(pagination.limit).lean(),
     Notification.countDocuments(filter),
   ]);
   res.json(paginated(items, total, pagination));
@@ -22,11 +22,11 @@ exports.unreadCount = asyncHandler(async (req, res) => {
 
 exports.markRead = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw ApiError.badRequest('Invalid notification id');
-  const notification = await Notification.findOneAndUpdate(
-    { _id: req.params.id, user: req.user._id },
-    { $set: { readAt: new Date() } },
-    { new: true }
+  const owned = { _id: req.params.id, user: req.user._id };
+  const updated = await Notification.findOneAndUpdate(
+    { ...owned, readAt: null }, { $set: { readAt: new Date() } }, { new: true },
   );
+  const notification = updated || await Notification.findOne(owned);
   if (!notification) throw ApiError.notFound('Notification not found');
   res.json({ notification });
 });

@@ -1,4 +1,5 @@
 // AdminUsersPage — Member 4 — Requirements 7, 28, 29, 39.
+import useFeedback from '../../components/feedback/useFeedback';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { listUsers, setUserStatus, removeUser } from '../../api/adminUsers.api';
@@ -9,6 +10,7 @@ import UserSearchBar from '../../components/admin/UserSearchBar';
 import UserTable from '../../components/admin/UserTable';
 
 export default function AdminUsersPage() {
+  const { confirm, toast } = useFeedback();
   // Keep list state in the URL so detail navigation, Back and reload preserve it.
   const [urlParams, setUrlParams] = useSearchParams();
   const searchParams = useMemo(() => ({
@@ -66,16 +68,23 @@ export default function AdminUsersPage() {
     finally { setBusy(false); }
   };
 
-  const handleDelete = (id) => {
-    if (!window.confirm('Remove this account? Its listings will be archived and related application and household records removed. This cannot be undone.')) return;
-    return mutate(() => removeUser(id));
+  const handleDelete = async (id) => {
+    if (!(await confirm({
+      title: 'Remove this account?',
+      description: 'Its listings will be archived and related application and household records removed. This cannot be undone.',
+      confirmLabel: 'Remove account', danger: true,
+    }))) return;
+    return mutate(async () => {
+      await removeUser(id);
+      toast('Account removed.');
+    });
   };
 
   return (
     <div className="container" style={{ paddingBlock: '2rem' }}>
       <h1>Admin User Management</h1>
       <UserSearchBar value={searchParams} onChange={setFilters} />
-      {error && <p role="alert" style={{ color: '#b91c1c' }}>{error}</p>}
+      {error && <p role="alert" className="alert alert-error">{error}</p>}
       {loading ? <p role="status">Loading registered users...</p> : (
         <>
           <p aria-live="polite">{data.total} registered users found</p>

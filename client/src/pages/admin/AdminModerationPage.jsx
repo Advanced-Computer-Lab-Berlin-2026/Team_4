@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import useFeedback from '../../components/feedback/useFeedback';
 import {
     listModerationReports,
     reviewModerationReport,
@@ -7,13 +8,14 @@ import {
 import styles from '../../styles/sprint2/member4.module.css';
 
 export default function AdminModerationPage() {
+    const { prompt, toast } = useFeedback();
     const [filters, setFilters] = useState({ status: '', targetType: '' });
     const [reports, setReports] = useState([]);
     const [page, setPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
     const [loading, setLoading] = useState(false);
+    const [applying, setApplying] = useState(false);
     const [error, setError] = useState('');
-    const [feedback, setFeedback] = useState('');
 
     // Quick intake form to flag/log a reported listing or user directly
     const [newReport, setNewReport] = useState({
@@ -45,28 +47,35 @@ export default function AdminModerationPage() {
         loadReports();
     }, [filters, page]);
 
-    const handleAction = async (reportId, action) => {
-        const adminNotes = window.prompt(`Optional admin note for "${action}" action:`);
+    const handleAction = async ({ _id: reportId, targetType }, action) => {
+        const target = targetType === 'item' ? 'listing' : 'account';
+        const actions = { flag: `Flag this ${target}?`, remove: `Remove this ${target}?`, dismiss: 'Dismiss this report?' };
+        const adminNotes = await prompt({
+            title: actions[action],
+            description: action === 'remove' ? 'The reported target will no longer be available. Existing reservations are preserved.' : undefined,
+            inputLabel: 'Admin note (optional)', maxLength: 1000, confirmLabel: 'Apply decision', danger: action === 'remove',
+        });
         if (adminNotes === null) return;
+        setApplying(true);
         setError('');
-        setFeedback('');
         try {
             await reviewModerationReport(reportId, { action, adminNotes });
-            setFeedback(`Report updated (${action}). Historical reservation records preserved.`);
-            loadReports();
+            toast(`Report updated (${action}). Historical reservation records preserved.`);
+            await loadReports();
         } catch (err) {
             setError(err.response?.data?.message || 'Failed to apply moderation action.');
+        } finally {
+            setApplying(false);
         }
     };
 
     const handleCreateReport = async (e) => {
         e.preventDefault();
         setError('');
-        setFeedback('');
         try {
             await createModerationReport(newReport);
             setNewReport({ targetType: 'item', targetId: '', reason: '', details: '' });
-            setFeedback('Moderation report logged.');
+            toast('Moderation report logged.');
             loadReports();
         } catch (err) {
             setError(err.response?.data?.message || 'Failed to create report.');
@@ -92,7 +101,6 @@ export default function AdminModerationPage() {
             </div>
 
             {error && <div className={styles.error}>{error}</div>}
-            {feedback && <div className={styles.success}>{feedback}</div>}
 
             {/* Manual / Support-Escalation Report Intake */}
             <form className={styles.card} onSubmit={handleCreateReport}>
@@ -216,24 +224,24 @@ export default function AdminModerationPage() {
                                                     <button
                                                         type="button"
                                                         className={styles.btnWarning}
-                                                        disabled={r.status !== 'open' || r.targetUser?.role === 'admin'}
-                                                        onClick={() => handleAction(r._id, 'flag')}
+                                                        disabled={applying || r.status !== 'open' || r.targetUser?.role === 'admin'}
+                                                        onClick={() => handleAction(r, 'flag')}
                                                     >
                                                         Flag
                                                     </button>
                                                     <button
                                                         type="button"
                                                         className={styles.btnDanger}
-                                                        disabled={(r.status !== 'open' && r.action !== 'flagged') || r.targetUser?.role === 'admin'}
-                                                        onClick={() => handleAction(r._id, 'remove')}
+                                                        disabled={applying || (r.status !== 'open' && r.action !== 'flagged') || r.targetUser?.role === 'admin'}
+                                                        onClick={() => handleAction(r, 'remove')}
                                                     >
                                                         Remove
                                                     </button>
                                                     <button
                                                         type="button"
                                                         className={styles.btnSecondary}
-                                                        disabled={r.status !== 'open'}
-                                                        onClick={() => handleAction(r._id, 'dismiss')}
+                                                        disabled={applying || r.status !== 'open'}
+                                                        onClick={() => handleAction(r, 'dismiss')}
                                                     >
                                                         Dismiss
                                                     </button>

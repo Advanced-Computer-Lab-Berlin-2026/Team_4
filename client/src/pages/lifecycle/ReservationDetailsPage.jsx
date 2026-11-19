@@ -4,6 +4,7 @@
 // here (Req 56), marks the pickup (Req 59) and the return (Req 60), and answers requests for more time (Req 75);
 // the borrower asks for more time here (Req 74). Messages and cancellation are Member 1's page (/my-reservations/:id).
 import { useEffect, useState } from 'react';
+import useFeedback from '../../components/feedback/useFeedback';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { getErrorMessage } from '../../api/axios';
 import { getReservation } from '../../api/reservationLifecycle.api';
@@ -37,13 +38,13 @@ const EXTENSION_FOR_LENDER = { ...EXTENSION, pending: 'Waiting for your answer',
 const HOME = { borrower: { to: '/reservations', label: 'My reservations' }, lender: { to: '/lender/reservations', label: 'Booking requests' } };
 
 export default function ReservationDetailsPage() {
+  const { toast } = useFeedback();
   const { id } = useParams();
   const location = useLocation();
   const cameFrom = typeof location.state?.from === 'string' && location.state.from.startsWith('/') ? { to: location.state.from, label: location.state.fromLabel || 'Back' } : null;
   const [r, setR] = useState(null);
   const [error, setError] = useState({ text: '', notFound: false });
   const [reloadKey, setReloadKey] = useState(0);
-  const [notice, setNotice] = useState('');
   const [problem, setProblem] = useState('');
 
   // Quiet refresh after an action was refused because the booking changed elsewhere: no loading screen, message kept.
@@ -52,7 +53,6 @@ export default function ReservationDetailsPage() {
   useEffect(() => {
     let ignore = false;
     setProblem('');
-    setNotice('');
     setR(null);
     setError({ text: '', notFound: false });
     getReservation(id)
@@ -111,14 +111,13 @@ export default function ReservationDetailsPage() {
         </ul>
       )}
 
-      <Alert variant="success">{notice}</Alert>
       <Alert variant="error">{problem}</Alert>
       {lender && (r.actions?.approve || r.actions?.reject) && (
         <section className={`card ${s.answerCard}`} aria-labelledby="res-answer-title">
           <div className="card-body">
             <h2 id="res-answer-title" className={s.cardTitle}>Answer this request</h2>
-            <RequestAnswer reservation={r} onStale={(message) => { setNotice(''); setProblem(message); refresh(); }}
-              onDone={(updated, message) => { setR(updated); setProblem(''); setNotice(message); }} />
+            <RequestAnswer reservation={r} onStale={(message) => { setProblem(message); refresh(); }}
+              onDone={(updated, message) => { setR(updated); setProblem(''); toast(message); }} />
           </div>
         </section>
       )}
@@ -127,8 +126,8 @@ export default function ReservationDetailsPage() {
         <section className={`card ${s.answerCard}`} aria-labelledby="res-pickup-title">
           <div className="card-body">
             <h2 id="res-pickup-title" className={s.cardTitle}>Pickup</h2>
-            <PickupButton reservation={r} onStale={(message) => { setNotice(''); setProblem(message); refresh(); }}
-              onDone={(updated, message) => { setR(updated); setProblem(''); setNotice(message); }} />
+            <PickupButton reservation={r} onStale={(message) => { setProblem(message); refresh(); }}
+              onDone={(updated, message) => { setR(updated); setProblem(''); toast(message); }} />
           </div>
         </section>
       )}
@@ -137,8 +136,8 @@ export default function ReservationDetailsPage() {
         <section className={`card ${s.answerCard}`} aria-labelledby="res-extanswer-title">
           <div className="card-body">
             <h2 id="res-extanswer-title" className={s.cardTitle}>Request for more time</h2>
-            <ExtensionAnswer reservation={r} onStale={(message) => { setNotice(''); setProblem(message); refresh(); }}
-              onDone={(updated, message) => { setR(updated); setProblem(''); setNotice(message); }} />
+            <ExtensionAnswer reservation={r} onStale={(message) => { setProblem(message); refresh(); }}
+              onDone={(updated, message) => { setR(updated); setProblem(''); toast(message); }} />
           </div>
         </section>
       )}
@@ -146,8 +145,8 @@ export default function ReservationDetailsPage() {
         <section className={`card ${s.answerCard}`} aria-labelledby="res-extask-title">
           <div className="card-body">
             <h2 id="res-extask-title" className={s.cardTitle}>Need it longer?</h2>
-            <ExtensionRequest reservation={r} onStale={(message) => { setNotice(''); setProblem(message); refresh(); }}
-              onDone={(updated, message) => { setR(updated); setProblem(''); setNotice(message); }} />
+            <ExtensionRequest reservation={r} onStale={(message) => { setProblem(message); refresh(); }}
+              onDone={(updated, message) => { setR(updated); setProblem(''); toast(message); }} />
           </div>
         </section>
       )}
@@ -155,8 +154,8 @@ export default function ReservationDetailsPage() {
         <section className={`card ${s.answerCard}`} aria-labelledby="res-return-title">
           <div className="card-body">
             <h2 id="res-return-title" className={s.cardTitle}>Return</h2>
-            <ReturnActions reservation={r} onStale={(message) => { setNotice(''); setProblem(message); refresh(); }}
-              onDone={(updated, message) => { setR(updated); setProblem(''); setNotice(message); }} />
+            <ReturnActions reservation={r} onStale={(message) => { setProblem(message); refresh(); }}
+              onDone={(updated, message) => { setR(updated); setProblem(''); toast(message); }} />
           </div>
         </section>
       )}

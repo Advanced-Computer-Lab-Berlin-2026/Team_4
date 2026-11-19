@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { getItem } from '../../src/api/catalog.api';
 import { getReport, decideReport } from '../../src/api/damageReports.api';
@@ -9,6 +9,7 @@ import { listPendingReviews, listUserReviews } from '../../src/api/reviews.api';
 import { getTrustProfile } from '../../src/api/trustProfiles.api';
 import { useAuth } from '../../src/context/AuthContext';
 import { adminLinks, memberLinks } from '../../src/components/layout/navLinks';
+import FeedbackProvider from '../../src/components/feedback/FeedbackProvider';
 import AdminDamageDecisionPage from '../../src/pages/admin/AdminDamageDecisionPage';
 import ItemDetailsPage from '../../src/pages/items/ItemDetailsPage';
 import ReservationDetailsPage from '../../src/pages/lifecycle/ReservationDetailsPage';
@@ -39,7 +40,7 @@ const stats = { ratingCount: 2, ratingAverage: 4.5, completedReservations: 5, on
 function mount(url, route, element) {
   return render(
     <MemoryRouter initialEntries={[url]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <Routes><Route path={route} element={element} /></Routes>
+      <FeedbackProvider><Routes><Route path={route} element={element} /></Routes></FeedbackProvider>
     </MemoryRouter>,
   );
 }
@@ -132,18 +133,32 @@ it('refuses fractional cents and submits an exact damage decision', async () => 
   getReport.mockResolvedValue({ report });
   listPhotos.mockResolvedValue({ photos: { pickup: [], return: [] }, canUpload: {}, locked: true });
   decideReport.mockResolvedValue({ report: { ...report, status: 'decided' } });
-  vi.stubGlobal('confirm', vi.fn(() => true));
-  mount('/admin/damage-reports/case-1', '/admin/damage-reports/:id', <AdminDamageDecisionPage />);
-  const amount = await screen.findByRole('spinbutton', { name: 'Amount to keep (EGP)' });
-  const note = screen.getByRole('textbox', { name: 'Note (visible to both members)' });
-  const submit = screen.getByRole('button', { name: 'Save decision' });
-  fireEvent.change(amount, { target: { value: '100.123' } });
-  fireEvent.change(note, { target: { value: 'Damage documented' } });
-  fireEvent.click(submit);
-  expect(screen.getByText('Use at most two decimal places')).toBeTruthy();
-  expect(decideReport).not.toHaveBeenCalled();
-  fireEvent.change(amount, { target: { value: '100.12' } });
-  fireEvent.click(submit);
-  expect(await screen.findByText('Decision saved.')).toBeTruthy();
-  expect(decideReport).toHaveBeenCalledWith('case-1', { forfeitAmount: 100.12, note: 'Damage documented' });
+  const prototype = window.HTMLDialogElement.prototype;
+  const showModal = prototype.showModal;
+  const close = prototype.close;
+  prototype.showModal = function () { this.setAttribute('open', ''); };
+  prototype.close = function () { this.removeAttribute('open'); };
+  try {
+    mount('/admin/damage-reports/case-1', '/admin/damage-reports/:id', <AdminDamageDecisionPage />);
+    const amount = await screen.findByRole('spinbutton', { name: 'Amount to keep (EGP)' });
+    const note = screen.getByRole('textbox', { name: 'Note (visible to both members)' });
+    const submit = screen.getByRole('button', { name: 'Save decision' });
+    fireEvent.change(amount, { target: { value: '100.123' } });
+    fireEvent.change(note, { target: { value: 'Damage documented' } });
+    fireEvent.click(submit);
+    expect(screen.getByText('Use at most two decimal places')).toBeTruthy();
+    expect(decideReport).not.toHaveBeenCalled();
+    fireEvent.change(amount, { target: { value: '100.12' } });
+    fireEvent.click(submit);
+    const dialog = await screen.findByRole('alertdialog', { name: 'Record this decision?' });
+    expect(decideReport).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Record decision' }));
+    const feedback = await screen.findByRole('region', { name: 'Recent feedback' });
+    expect(within(feedback).getByText('Decision saved.')).toBeTruthy();
+    expect(decideReport).toHaveBeenCalledWith('case-1', { forfeitAmount: 100.12, note: 'Damage documented' });
+  } finally {
+    cleanup();
+    prototype.showModal = showModal;
+    prototype.close = close;
+  }
 });

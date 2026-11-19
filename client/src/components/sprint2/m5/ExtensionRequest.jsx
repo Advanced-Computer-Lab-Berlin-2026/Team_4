@@ -2,6 +2,7 @@
 // Props: { reservation, onDone(updatedReservation, message), onStale?(message) }
 // For the borrower of an active booking: ask for a later return date, see the pending request and withdraw it, or see
 // how the last request was answered. Everything goes through Member 1's extend command.
+import useFeedback from '../../feedback/useFeedback';
 import { useState } from 'react';
 import { getErrorMessage, getFieldErrors } from '../../../api/axios';
 import { cancelExtension, requestExtension } from '../../../api/reservationLifecycle.api';
@@ -13,6 +14,7 @@ import s from '../../../styles/sprint2/member5.module.css';
 const HORIZON = 365; // longest total for an item without its own maximum (same as the borrow list)
 
 export default function ExtensionRequest({ reservation: r, onDone, onStale }) {
+  const { confirm } = useFeedback();
   const [date, setDate] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -38,7 +40,10 @@ export default function ExtensionRequest({ reservation: r, onDone, onStale }) {
     e.preventDefault();
     setError(''); setFieldError('');
     if (!isDay(date) || date <= r.endDate) { setFieldError(`Choose a date after ${showDay(r.endDate)}`); return; }
-    if (!window.confirm(`Ask to keep "${title}" until ${showDay(date)} (${dayCount(extra)} more)?`)) return;
+    if (!(await confirm({
+      title: 'Request more time?', description: `Keep "${title}" until ${showDay(date)} (${dayCount(extra)} more).`,
+      confirmLabel: 'Send request',
+    }))) return;
     setBusy('ask');
     try {
       const { reservation } = await requestExtension(r._id, date);
@@ -48,7 +53,7 @@ export default function ExtensionRequest({ reservation: r, onDone, onStale }) {
   };
 
   const withdraw = async () => {
-    if (!window.confirm('Withdraw your request for more time?')) return;
+    if (!(await confirm({ title: 'Withdraw the extension request?', confirmLabel: 'Withdraw request', danger: true }))) return;
     setBusy('withdraw'); setError('');
     try {
       const { reservation } = await cancelExtension(r._id, ext.requestId);

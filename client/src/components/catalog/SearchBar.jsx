@@ -1,6 +1,7 @@
 // SearchBar - Owner: Member 7 - Requirements: 17
 // Props: { value, onSubmit } — search by name. onSubmit(text) is called with the trimmed text ('' clears).
 import { useEffect, useState } from 'react';
+import Icon from '../common/Icon';
 import './catalog.css';
 
 export default function SearchBar({ value = '', onSubmit }) {
@@ -15,11 +16,12 @@ export default function SearchBar({ value = '', onSubmit }) {
 
   return (
     <form className="catalog-search" role="search" onSubmit={submit}>
+      <span className="catalog-search-icon"><Icon name="search" size={19} /></span>
       <input
         type="search"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder="Search items by name"
+        placeholder="Find items"
         aria-label="Search items by name"
         maxLength={100}
       />

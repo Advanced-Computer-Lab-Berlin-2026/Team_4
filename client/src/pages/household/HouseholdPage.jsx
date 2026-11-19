@@ -99,62 +99,6 @@ const HOUSEHOLD_STYLES = `
     gap: 0.5rem;
   }
 
-  .household-toast {
-    position: fixed;
-    top: 1.25rem;
-    right: 1.25rem;
-    z-index: 9999;
-    min-width: 280px;
-    max-width: 420px;
-    padding: 0.85rem 1.1rem;
-    border-radius: 8px;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.14);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    font-size: 0.92rem;
-    font-weight: 500;
-    animation: householdToastSlideIn 0.25s ease-out forwards;
-  }
-
-  .household-toast-error {
-    background-color: #fef2f2;
-    color: #991b1b;
-    border: 1px solid #f87171;
-  }
-
-  .household-toast-success {
-    background-color: #f0fdf4;
-    color: #166534;
-    border: 1px solid #4ade80;
-  }
-
-  .household-toast-close {
-    background: transparent;
-    border: none;
-    color: inherit;
-    font-size: 1.25rem;
-    line-height: 1;
-    cursor: pointer;
-    padding: 0 0.2rem;
-    opacity: 0.75;
-  }
-
-  .household-toast-close:hover {
-    opacity: 1;
-  }
-
-  @keyframes householdToastSlideIn {
-    from {
-      transform: translateY(-16px);
-      opacity: 0;
-    }
-    to {
-      transform: translateY(0);
-      opacity: 1;
-    }
-  }
 `;
 
 export default function HouseholdPage() {

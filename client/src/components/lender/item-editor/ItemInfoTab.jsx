@@ -2,8 +2,9 @@
 // Props: { item, onSaved } — core fields + photos + category + deposit
 //   item = null  -> create form: fields + photos are sent together in one request.
 //   item = {...} -> edit form: Save sends only the changed fields; photos are added/removed right away.
+import useFeedback from '../../feedback/useFeedback';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import ActionDialog from '../../feedback/ActionDialog';
 import { Link, useBlocker } from 'react-router-dom';
 import { createItem, updateItem, addPhotos, removePhoto } from '../../../api/items.api';
 import { listCategories } from '../../../api/categories.api';
@@ -91,6 +92,7 @@ function Counter({ value, max }) {
 }
 
 export default function ItemInfoTab({ item, onSaved }) {
+  const { confirm, toast } = useFeedback();
   const isEdit = !!item;
   const formRef = useRef(null);
   const savedNavigation = useRef(false);
@@ -98,7 +100,6 @@ export default function ItemInfoTab({ item, onSaved }) {
   const [form, setForm] = useState(() => toForm(item));
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState('');
-  const [success, setSuccess] = useState('');
   const [saving, setSaving] = useState(false);
   const [focusError, setFocusError] = useState(false);
 
@@ -110,7 +111,6 @@ export default function ItemInfoTab({ item, onSaved }) {
   const [newPhotos, setNewPhotos] = useState([]);
   // Photo actions (edit mode) and photo-picker problems.
   const [photoError, setPhotoError] = useState('');
-  const [photoSuccess, setPhotoSuccess] = useState('');
   const [photoBusy, setPhotoBusy] = useState('');
 
   const baseline = useMemo(() => toForm(item), [item]);
@@ -168,7 +168,6 @@ export default function ItemInfoTab({ item, onSaved }) {
     const { value } = e.target;
     setForm((f) => ({ ...f, [name]: value }));
     setErrors((errs) => (errs[name] ? { ...errs, [name]: undefined } : errs));
-    setSuccess('');
   };
 
   // ---------- tags ----------
@@ -180,7 +179,6 @@ export default function ItemInfoTab({ item, onSaved }) {
     setTagDraft('');
     setTagNotice(r.notice);
     setErrors((errs) => ({ ...errs, tags: undefined }));
-    setSuccess('');
   };
   const onTagKeyDown = (e) => {
     if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTagDraft(); } // Enter must not submit the form
@@ -189,7 +187,6 @@ export default function ItemInfoTab({ item, onSaved }) {
     setForm((f) => ({ ...f, tags: f.tags.filter((t) => t !== tag) }));
     setTagNotice('');
     setErrors((errs) => ({ ...errs, tags: undefined }));
-    setSuccess('');
   };
 
   // ---------- photos ----------
@@ -198,7 +195,6 @@ export default function ItemInfoTab({ item, onSaved }) {
     e.target.value = ''; // so the same file can be picked again
     if (!files.length) return;
     setPhotoError('');
-    setPhotoSuccess('');
     setErrors((errs) => ({ ...errs, photos: undefined }));
 
     const left = MAX_PHOTOS - photoCount;
@@ -219,7 +215,7 @@ export default function ItemInfoTab({ item, onSaved }) {
     try {
       const d = await addPhotos(item._id, fd);
       onSaved(d.item);
-      setPhotoSuccess(files.length === 1 ? 'Photo added' : `${files.length} photos added`);
+      toast(files.length === 1 ? 'Photo added' : `${files.length} photos added`);
     } catch (err) {
       setPhotoError(getErrorMessage(err));
     } finally {
@@ -237,14 +233,16 @@ export default function ItemInfoTab({ item, onSaved }) {
   };
 
   const onRemoveSaved = async (photo, index) => {
-    if (!window.confirm(`Remove photo ${index + 1}${index === 0 ? ' (the cover photo)' : ''}?`)) return;
+    if (!(await confirm({
+      title: index === 0 ? 'Remove the cover photo?' : `Remove photo ${index + 1}?`,
+      confirmLabel: 'Remove photo', danger: true,
+    }))) return;
     setPhotoError('');
-    setPhotoSuccess('');
     setPhotoBusy(photo._id);
     try {
       const d = await removePhoto(item._id, photo._id);
       onSaved(d.item);
-      setPhotoSuccess('Photo removed');
+      toast('Photo removed');
     } catch (err) {
       setPhotoError(getErrorMessage(err));
     } finally {
@@ -256,7 +254,6 @@ export default function ItemInfoTab({ item, onSaved }) {
   const onSubmit = async (e) => {
     e.preventDefault();
     setFormError('');
-    setSuccess('');
     // A tag still typed in the box (not added yet) is added now, so it isn't lost.
     let toSave = form;
     const errs = validate(form);
@@ -273,7 +270,7 @@ export default function ItemInfoTab({ item, onSaved }) {
       setFocusError(true);
       return;
     }
-    if (isEdit && toSend.length === 0) { setSuccess('No changes to save'); return; }
+    if (isEdit && toSend.length === 0) { toast('No changes to save.', 'info'); return; }
 
     setSaving(true);
     try {
@@ -283,7 +280,7 @@ export default function ItemInfoTab({ item, onSaved }) {
         onSaved(d.item);
         setForm(toForm(d.item));
         setErrors({});
-        setSuccess('Changes saved');
+        toast('Changes saved.');
       } else {
         const fd = new FormData();
         FIELDS.filter((f) => f !== 'tags').forEach((f) => fd.append(f, toSave[f].trim()));
@@ -293,6 +290,7 @@ export default function ItemInfoTab({ item, onSaved }) {
         newPhotos.forEach((p) => URL.revokeObjectURL(p.url));
         setNewPhotos([]);
         savedNavigation.current = true; // successful creation must not block its edit redirect
+        toast('Listing published.');
         onSaved(d.item); // the page then opens the edit URL of the new item
       }
     } catch (err) {
@@ -312,25 +310,10 @@ export default function ItemInfoTab({ item, onSaved }) {
 
   return (
     <form ref={formRef} className="card item-editor-form" onSubmit={onSubmit} noValidate>
-      {blocker.state === 'blocked' && createPortal(
-        <div className="item-leave-overlay">
-          <div className="card item-leave-dialog" role="alertdialog" aria-modal="true" aria-labelledby="item-leave-title" aria-describedby="item-leave-message"
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') { e.preventDefault(); blocker.reset(); }
-              if (e.key === 'Tab') {
-                const buttons = e.currentTarget.querySelectorAll('button');
-                if (e.shiftKey && document.activeElement === buttons[0]) { e.preventDefault(); buttons[1].focus(); }
-                else if (!e.shiftKey && document.activeElement === buttons[1]) { e.preventDefault(); buttons[0].focus(); }
-              }
-            }}>
-            <h2 id="item-leave-title">Leave without saving?</h2>
-            <p id="item-leave-message">Your unsaved changes will be lost.</p>
-            <div className="row">
-              <button type="button" className="btn btn-secondary" autoFocus onClick={() => blocker.reset()}>Stay and keep editing</button>
-              <button type="button" className="btn btn-danger" onClick={() => blocker.proceed()}>Leave without saving</button>
-            </div>
-          </div>
-        </div>, document.body
+      {blocker.state === 'blocked' && (
+        <ActionDialog title="Leave without saving?" description="Your unsaved changes will be lost."
+          confirmLabel="Leave without saving" cancelLabel="Stay and keep editing" danger
+          onResolve={(leave) => leave ? blocker.proceed() : blocker.reset()} />
       )}
       <div className="card-body">
         <FormField label="Title" error={errors.title}>
@@ -444,11 +427,9 @@ export default function ItemInfoTab({ item, onSaved }) {
             </>
           )}
           <Alert variant="error">{photoError}</Alert>
-          <Alert variant="success">{photoSuccess}</Alert>
         </fieldset>
 
         <Alert variant="error">{formError}</Alert>
-        <Alert variant="success">{success}</Alert>
         <div className="row item-editor-actions">
           <button type="submit" className="btn" disabled={busy}>
             {saving ? 'Saving...' : isEdit ? 'Save changes' : 'Save item'}

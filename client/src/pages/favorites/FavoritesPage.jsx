@@ -1,5 +1,6 @@
 // MY FAVORITES - Owner: Member 9 - Requirements: 38
 // Route: /favorites - Access: member
+import useFeedback from '../../components/feedback/useFeedback';
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getErrorMessage } from '../../api/axios';
@@ -9,10 +10,10 @@ import ItemCard from '../../components/items/ItemCard';
 import Spinner from '../../components/common/Spinner';
 
 export default function FavoritesPage() {
+  const { confirm, toast } = useFeedback();
   const [favorites, setFavorites] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [removingItemId, setRemovingItemId] = useState('');
 
   const loadFavorites = useCallback(async () => {
@@ -33,15 +34,14 @@ export default function FavoritesPage() {
   }, [loadFavorites]);
 
   const handleRemove = async (itemId) => {
-    if (!window.confirm('Remove this item from your favorites?')) return;
+    if (!(await confirm({ title: 'Remove from favorites?', confirmLabel: 'Remove favorite', danger: true }))) return;
 
     setRemovingItemId(itemId);
     setError('');
-    setSuccess('');
     try {
       await removeFavorite(itemId);
       setFavorites((current) => current.filter((favorite) => favorite.itemId !== itemId));
-      setSuccess('Item removed from your favorites.');
+      toast('Item removed from your favorites.');
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -55,7 +55,6 @@ export default function FavoritesPage() {
     <div className="container">
       <h1>My favorites</h1>
       <Alert variant="error">{error}</Alert>
-      <Alert variant="success">{success}</Alert>
 
       {error && (
         <button type="button" className="btn btn-secondary" onClick={loadFavorites}>

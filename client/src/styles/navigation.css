@@ -1,0 +1,55 @@
+.navbar { position: sticky; top: 0; z-index: 30; border-bottom: 1px solid var(--border); background: var(--surface); }
+.navbar-inner { position: relative; display: flex; align-items: center; justify-content: space-between; gap: clamp(.65rem, 2.6vw, 2rem); min-height: 68px; max-width: var(--page-width); margin-inline: auto; padding-inline: var(--gutter); }
+.brand { flex: 0 0 auto; display: inline-flex; align-items: center; gap: .62rem; color: var(--text); font: 760 1.34rem/1 var(--font-display); letter-spacing: -.04em; }
+.brand:hover { color: var(--primary); text-decoration: none; }
+.brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 11px; color: var(--lime); background: var(--forest); }
+.nav-desktop, .nav-guest, .nav-account { display: none; }
+.navbar-actions { display: flex; align-items: center; justify-content: flex-end; gap: .4rem; }
+.nav-icon-button { display: grid; place-items: center; width: 42px; height: 42px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 11px; cursor: pointer; }
+.nav-icon-button:is(:hover, [aria-expanded='true']) { color: var(--primary-dark); background: var(--surface-alt); }
+.nav-disclosure { position: relative; }
+.nav-link, .nav-account-button { display: inline-flex; align-items: center; gap: .35rem; padding: .55rem .66rem; min-height: 40px; background: none; border: 1px solid transparent; border-radius: 9px; color: var(--muted); font-weight: 650; white-space: nowrap; cursor: pointer; }
+.nav-link:hover, .nav-link.active, .nav-link.is-active, .nav-link[aria-expanded='true'], .nav-account-button:is(:hover, .is-active, [aria-expanded='true']) { background: var(--surface-alt); color: var(--primary-dark); text-decoration: none; }
+.nav-join { white-space: nowrap; }
+.nav-account-button { color: var(--text); padding: .3rem .45rem; }
+.nav-account-name { max-width: 122px; overflow: hidden; text-overflow: ellipsis; }
+.nav-avatar { display: grid; place-items: center; width: 31px; height: 31px; border-radius: 50%; background: var(--surface-alt); color: var(--primary-dark); font-weight: 750; }
+.nav-popover, .nav-mobile {
+  position: absolute; top: calc(100% + .55rem); z-index: 5; min-width: 210px; max-height: min(70dvh, 580px); overflow: auto;
+  padding: .45rem; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-float);
+  animation: menu-in .18s ease-out both;
+}
+@keyframes menu-in { from { opacity: 0; translate: 0 -4px; } to { opacity: 1; translate: 0; } }
+.nav-desktop .nav-popover { left: 0; }
+.nav-theme-popover, .nav-account-popover { right: 0; }
+.nav-theme-popover { min-width: 162px; }
+.nav-menu-link { display: flex; width: 100%; align-items: center; gap: .55rem; padding: .55rem .7rem; min-height: 40px; text-align: left; border: 0; border-radius: 8px; color: var(--text); background: none; font-weight: 610; cursor: pointer; }
+.nav-menu-link:is(:hover, .active, [aria-pressed='true']) { background: var(--surface-alt); color: var(--primary-dark); text-decoration: none; }
+.nav-menu-caption, .nav-menu-group > p { margin: .3rem .65rem; color: var(--muted); font-size: .78rem; font-weight: 700; }
+.nav-menu-group + .nav-menu-group, .nav-sign-out { margin-top: .3rem; padding-top: .45rem; border-top: 1px solid var(--border); }
+.nav-sign-out { color: var(--danger); }
+.nav-option-check { margin-left: auto; }
+.nav-mobile { inset: 100% var(--gutter) auto; }
+.nav-mobile summary { list-style: none; justify-content: space-between; }
+.nav-mobile summary::-webkit-details-marker { display: none; }
+.nav-mobile details[open] > summary .icon { rotate: 180deg; }
+.nav-nested { padding: .1rem 0 .35rem .85rem; }
+.navbar > .container .alert { margin-block: .45rem; }
+
+.footer { border-top: 1px solid var(--border); background: var(--surface); }
+.footer-inner { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 1.5rem; padding-block: 1.4rem; }
+.footer nav { display: flex; flex-wrap: wrap; gap: 1.35rem; }
+.footer nav a, .footer small { color: var(--muted); font-size: .88rem; }
+.footer .brand-mark { width: 32px; height: 32px; }
+@media (min-width: 960px) {
+  .nav-desktop, .nav-guest, .nav-account { display: flex; align-items: center; gap: .3rem; }
+  .nav-desktop { margin-right: auto; }
+  .nav-mobile, .nav-toggle { display: none; }
+}
+@media (max-width: 440px) {
+  .navbar-inner { --gutter: .9rem; min-height: 60px; }
+  .navbar-actions { gap: .3rem; }
+  .nav-icon-button { width: 38px; height: 38px; }
+  .nav-theme-popover { right: -2.6rem; }
+  .brand-mark { width: 34px; height: 34px; }
+}

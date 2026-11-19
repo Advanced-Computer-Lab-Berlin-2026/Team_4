@@ -5,6 +5,7 @@
 //  - delivery: no pickup step. Member 1's pickup refuses deliveries; the booking starts when Member 6's delivery
 //    tracking marks it delivered, so this links there ("Update delivery").
 // After a missed pickup it shows nothing (the "Pickup missed" label says why).
+import useFeedback from '../../feedback/useFeedback';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getErrorMessage } from '../../../api/axios';
@@ -18,6 +19,7 @@ import s from '../../../styles/sprint2/member5.module.css';
 const hasDeliveryPage = routes.some((route) => route.path.startsWith('/delivery-tracking'));
 
 export default function PickupButton({ reservation: r, onDone, onStale }) {
+  const { confirm } = useFeedback();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   if (r.role !== 'lender' || r.status !== 'confirmed' || r.flags?.pickupMissed) return null;
@@ -45,7 +47,11 @@ export default function PickupButton({ reservation: r, onDone, onStale }) {
   }
 
   const mark = async () => {
-    if (!window.confirm(`Mark "${title}" as picked up by ${who}? The return date is ${showDay(r.endDate)}.`)) return;
+    if (!(await confirm({
+      title: 'Mark this item as picked up?',
+      description: `${who} will return "${title}" on ${showDay(r.endDate)}.`,
+      confirmLabel: 'Mark picked up',
+    }))) return;
     setBusy(true);
     setError('');
     try {

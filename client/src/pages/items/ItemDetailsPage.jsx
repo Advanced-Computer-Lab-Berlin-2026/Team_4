@@ -81,15 +81,71 @@ export default function ItemDetailsPage() {
 
   return (
     <div className={`container ${styles.browse}`}>
-      <p className="muted"><Link to="/catalog">Catalog</Link>
+      <nav className="catalog-breadcrumb" aria-label="Breadcrumb"><Link to="/catalog">Catalog</Link>
         {item.category?.slug && <> / <Link to={`/categories/${item.category.slug}`}>{item.category.name}</Link></>}
-      </p>
-      <h1>{item.title} <FavoriteButton itemId={item._id} /></h1>
+      </nav>
+      <div className="catalog-item-heading">
+        <h1>{item.title}</h1>
+        <FavoriteButton itemId={item._id} />
+      </div>
 
       <div className="catalog-details">
-        <div>
-          <ItemGallery photos={item.photos} title={item.title} />
+        <ItemGallery photos={item.photos} title={item.title} />
 
+        <aside className="catalog-booking" aria-label="Borrow this item">
+          <div className="card">
+            <div className="card-body">
+              <dl className="catalog-facts">
+                <div><dt>Deposit</dt><dd>{formatMoney(item.depositAmount)}</dd></div>
+                <div><dt>Category</dt><dd>{item.category?.name}</dd></div>
+                <div><dt>Lender</dt><dd>{item.owner?.name || 'Unknown'}</dd></div>
+              </dl>
+              {item.owner?._id && <TrustSummary userId={item.owner._id} compact hideLink={!user} />}
+
+              {/* Req 35: guests may browse but must register to reserve */}
+              {!authLoading && !user && (
+                <Alert variant="info">
+                  Want to borrow this? <Link to="/register">Register</Link> or <Link to="/login">log in</Link> to reserve it.
+                </Alert>
+              )}
+            </div>
+          </div>
+          <div className="card card-body catalog-availability">
+            <section className={styles.availability} aria-labelledby="availability-heading">
+              <h2 id="availability-heading">Availability</h2>
+              <AvailabilityCalendar key={item._id} itemId={item._id} value={range} onChange={setRange}
+                onAvailabilityChange={onAvailabilityChange} refreshKey={calendarVersion} />
+
+              {hasRange && available === true && (
+                <div className={styles.statusBlock}>
+                  <Alert variant="success">These dates are available.</Alert>
+                  {isMember && !isOwner && (
+                    <div className="row">
+                      <Link className="btn" to={reserveUrl(item._id, range.start, range.end)}>Reserve these dates</Link>
+                      <BorrowListButton itemId={item._id} ownerId={item.owner?._id} maxBorrowDays={item.rules?.maxBorrowDays}
+                        startDate={range.start} endDate={range.end} />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {hasRange && available === false && (
+                <div className={styles.statusBlock}>
+                  <Alert variant="info">Part or all of this range is booked or on hold.</Alert>
+                  {canWaitlist ? (
+                    <>
+                      {!isOwner && <WaitlistButton itemId={item._id} start={range.start} end={range.end}
+                        onChange={() => setCalendarVersion((version) => version + 1)} />}
+                      <AlternativeItems itemId={item._id} start={range.start} end={range.end} />
+                    </>
+                  ) : <p>Choose a range of up to 90 days to join a waitlist or find alternatives.</p>}
+                </div>
+              )}
+            </section>
+          </div>
+        </aside>
+
+        <section className="card card-body catalog-story" aria-label="Item details">
           <h2>Description</h2>
           <p className="catalog-text">{item.description}</p>
 
@@ -98,57 +154,7 @@ export default function ItemDetailsPage() {
 
           <PickupInfo item={item} />
           <ManualViewer item={item} />
-
-          <section className={styles.availability} aria-labelledby="availability-heading">
-            <h2 id="availability-heading">Availability</h2>
-            <AvailabilityCalendar key={item._id} itemId={item._id} value={range} onChange={setRange}
-              onAvailabilityChange={onAvailabilityChange} refreshKey={calendarVersion} />
-
-            {hasRange && available === true && (
-              <div className={styles.statusBlock}>
-                <Alert variant="success">These dates are available.</Alert>
-                {isMember && !isOwner && (
-                  <div className="row">
-                    <Link className="btn" to={reserveUrl(item._id, range.start, range.end)}>Reserve these dates</Link>
-                    <BorrowListButton itemId={item._id} ownerId={item.owner?._id} maxBorrowDays={item.rules?.maxBorrowDays}
-                      startDate={range.start} endDate={range.end} />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {hasRange && available === false && (
-              <div className={styles.statusBlock}>
-                <Alert variant="info">Part or all of this range is booked or on hold.</Alert>
-                {canWaitlist ? (
-                  <>
-                    {!isOwner && <WaitlistButton itemId={item._id} start={range.start} end={range.end}
-                      onChange={() => setCalendarVersion((version) => version + 1)} />}
-                    <AlternativeItems itemId={item._id} start={range.start} end={range.end} />
-                  </>
-                ) : <p>Choose a range of up to 90 days to join a waitlist or find alternatives.</p>}
-              </div>
-            )}
-          </section>
-        </div>
-
-        <aside className="card">
-          <div className="card-body">
-            <dl className="catalog-facts">
-              <div><dt>Deposit</dt><dd>{formatMoney(item.depositAmount)}</dd></div>
-              <div><dt>Category</dt><dd>{item.category?.name}</dd></div>
-              <div><dt>Lender</dt><dd>{item.owner?.name || 'Unknown'}</dd></div>
-            </dl>
-            {item.owner?._id && <TrustSummary userId={item.owner._id} compact hideLink={!user} />}
-
-            {/* Req 35: guests may browse but must register to reserve */}
-            {!authLoading && !user && (
-              <Alert variant="info">
-                Want to borrow this? <Link to="/register">Register</Link> or <Link to="/login">log in</Link> to reserve it.
-              </Alert>
-            )}
-          </div>
-        </aside>
+        </section>
       </div>
     </div>
   );

@@ -1,21 +1,21 @@
 .section {
-  max-width: 48rem;
+  max-width: 64rem;
   margin-inline: auto;
   padding: 1rem;
-  background: #fff;
-  color: #172723;
-  border: 1px solid #a1b6ad;
-  border-radius: 0.75rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   overflow-wrap: anywhere;
 }
 
 .section a {
-  color: #155447;
+  color: var(--primary);
   text-decoration: underline;
 }
 
 .section :is(a, input, button, select, textarea):focus-visible {
-  outline: 3px solid #145849;
+  outline: 3px solid var(--focus);
   outline-offset: 3px;
 }
 
@@ -33,9 +33,9 @@
   box-sizing: border-box;
   padding: 0.6rem;
   color: inherit;
-  background: #fff;
-  border: 1px solid #58736a;
-  border-radius: 0.35rem;
+  background: var(--surface);
+  border: 1px solid var(--control-border);
+  border-radius: 10px;
 }
 
 .form textarea {
@@ -55,10 +55,10 @@
   max-width: 100%;
   min-height: 2.75rem;
   padding: 0.5rem 0.8rem;
-  color: #fff;
-  background: #155447;
-  border: 1px solid #155447;
-  border-radius: 0.4rem;
+  color: var(--action-text);
+  background: var(--action);
+  border: 1px solid var(--action);
+  border-radius: 10px;
   cursor: pointer;
 }
 
@@ -68,9 +68,25 @@
 }
 
 .error {
-  color: #a01828;
+  color: var(--danger);
 }
 
 .list {
   padding-inline-start: 1.3rem;
+}
+
+.checkoutPage { max-width: 1120px; }
+.checkoutGrid { display: grid; gap: 1.1rem; align-items: start; }
+.checkoutForm { display: grid; gap: 1rem; min-width: 0; }
+.checkoutForm > button:last-child { justify-self: start; font-weight: 700; }
+.checkoutSummary { min-width: 0; }
+.checkoutSummary h2 { margin-top: 0; }
+.summaryList { display: grid; gap: .9rem; margin: 0; padding: 0; list-style: none; }
+.summaryList li { padding-bottom: .75rem; border-bottom: 1px solid var(--border); }
+.summaryList li > div { color: var(--muted); font-size: .9rem; }
+.checkoutTotal { display: flex; justify-content: space-between; gap: .5rem; margin: .9rem 0 0; color: var(--primary-dark); font-size: 1.14rem; }
+@media (min-width: 860px) {
+  .checkoutGrid { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); }
+  .checkoutForm { grid-column: 1; grid-row: 1; }
+  .checkoutSummary { grid-column: 2; grid-row: 1; position: sticky; top: 5.5rem; max-height: calc(100dvh - 6.5rem); overflow: auto; }
 }

@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import FeedbackProvider from '../../src/components/feedback/FeedbackProvider';
 import AppRoutes from '../../src/routes/AppRoutes';
 import ReportFilters from '../../src/components/sprint2/m4/ReportFilters';
 import SupportThread from '../../src/components/sprint2/m4/SupportThread';
@@ -42,7 +43,7 @@ afterEach(cleanup);
 function page(path, role) {
   Object.assign(auth, { isAdmin: role === 'admin', isMember: role === 'member', user: { role } });
   return render(<MemoryRouter initialEntries={[path]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-    <AppRoutes />
+    <FeedbackProvider><AppRoutes /></FeedbackProvider>
   </MemoryRouter>);
 }
 

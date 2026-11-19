@@ -5,6 +5,7 @@
 import { useEffect, useId, useState } from 'react';
 import Alert from '../../common/Alert';
 import FormField from '../../common/FormField';
+import Icon from '../../common/Icon';
 import { getErrorMessage, getFieldErrors } from '../../../api/axios';
 import { createReview, listPendingReviews } from '../../../api/reviews.api';
 import { formatDate } from '../../../utils/format';
@@ -74,7 +75,9 @@ export default function ReviewForm({ reservationId, otherPartyName, pending: pen
         {[1, 2, 3, 4, 5].map((n) => (
           <label key={n} className={`${styles.ratingOption} ${rating === n ? styles.ratingOptionChecked : ''}`}>
             <input type="radio" name={`${groupId}-rating`} value={n} checked={rating === n} onChange={() => setRating(n)} />
-            <span aria-hidden="true">{'★'.repeat(n)}</span>
+            <span className={styles.stars} aria-hidden="true">
+              {Array.from({ length: n }, (_, index) => <Icon key={index} name="star" size={13} filled />)}
+            </span>
             <span>{n} · {LABELS[n]}</span>
           </label>
         ))}

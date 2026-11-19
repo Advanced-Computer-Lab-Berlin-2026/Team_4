@@ -1,6 +1,7 @@
 // DocumentUploader - Owner: Member 3 - Requirements: 3
 // Props: { type, label, documents, onUploaded, onRemoved, disabled } — upload/remove one doc type
 //   onUploaded(application) / onRemoved(application) receive the updated application from the server.
+import useFeedback from '../feedback/useFeedback';
 import { useId, useState } from 'react';
 import Alert from '../common/Alert';
 import { getErrorMessage } from '../../api/axios';
@@ -11,6 +12,7 @@ import DocumentPreview, { DOC_NOUNS, formatSize } from './DocumentPreview';
 import './lender.css';
 
 export default function DocumentUploader({ type, label, documents = [], onUploaded, onRemoved, disabled = false }) {
+  const { confirm, toast } = useFeedback();
   const inputId = useId();
   const [progress, setProgress] = useState(null);
   const [removing, setRemoving] = useState(false);
@@ -39,11 +41,12 @@ export default function DocumentUploader({ type, label, documents = [], onUpload
   };
 
   const handleRemove = async () => {
-    if (!window.confirm(`Remove your ${DOC_NOUNS[type] || label}?`)) return;
+    if (!(await confirm({ title: `Remove your ${DOC_NOUNS[type] || label}?`, confirmLabel: 'Remove document', danger: true }))) return;
     setRemoving(true);
     setError('');
     try {
       const { application } = await removeDocument(doc._id);
+      toast('Document removed.');
       onRemoved?.(application);
     } catch (err) {
       setError(getErrorMessage(err));

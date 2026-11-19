@@ -2,6 +2,7 @@
 // Props: { reservation, onDone(updatedReservation, message), onStale?(message) }
 // For the lender: a pending request for more time, with Approve new date (only when it can still work) / Decline (Member 1's extend command, which
 // re-checks that the extra days are still free before moving the return date).
+import useFeedback from '../../feedback/useFeedback';
 import { useState } from 'react';
 import { getErrorMessage } from '../../../api/axios';
 import { answerExtension } from '../../../api/reservationLifecycle.api';
@@ -10,6 +11,7 @@ import { dayCount, daysBetween, showDay } from './borrowDates';
 import s from '../../../styles/sprint2/member5.module.css';
 
 export default function ExtensionAnswer({ reservation: r, onDone, onStale }) {
+  const { confirm } = useFeedback();
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   if (r.role !== 'lender' || !r.actions?.decideExtension) return null;
@@ -23,7 +25,10 @@ export default function ExtensionAnswer({ reservation: r, onDone, onStale }) {
     const q = decision === 'approve'
       ? `Let ${who} keep "${title}" until ${showDay(ext.requestedEndDate)} (${more} more)?`
       : `Decline the request for more time? ${who} returns "${title}" on ${showDay(r.endDate)} as planned.`;
-    if (!window.confirm(q)) return;
+    if (!(await confirm({
+      title: decision === 'approve' ? 'Approve the extension?' : 'Decline the extension?',
+      description: q, confirmLabel: decision === 'approve' ? 'Approve extension' : 'Decline extension', danger: decision !== 'approve',
+    }))) return;
     setBusy(decision); setError('');
     try {
       const { reservation } = await answerExtension(r._id, decision, ext.requestId);

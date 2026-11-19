@@ -3,6 +3,7 @@
 // Shows ALL my items (incl. archived, Req 21) with a filter, and Archive / Unarchive on each one (Req 15).
 // Sprint 2: "Dashboard" (/lender/dashboard, Req 106) and "Booking requests" (/lender/reservations, Req 56-60).
 // The filter and page are kept in the address (?status=archived&page=2) so reload and the Back arrow keep them.
+import useFeedback from '../../components/feedback/useFeedback';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { listMyItems, archiveItem, unarchiveItem } from '../../api/items.api';
@@ -26,6 +27,7 @@ const countText = (total, status) => {
 };
 
 export default function MyItemsPage() {
+  const { confirm, toast } = useFeedback();
   const [params, setParams] = useSearchParams();
   const status = FILTERS.some((f) => f.key === params.get('status')) ? params.get('status') : 'all';
   const page = Math.max(1, parseInt(params.get('page'), 10) || 1);
@@ -67,12 +69,16 @@ export default function MyItemsPage() {
 
   const onArchiveToggle = async (item) => {
     const archiving = !item.isArchived;
-    if (archiving && !window.confirm(`Archive "${item.title}"? It will be hidden from the catalog. You can unarchive it at any time.`)) return;
+    if (archiving && !(await confirm({
+      title: 'Archive this listing?',
+      description: `"${item.title}" will be hidden from the catalog until you unarchive it.`,
+      confirmLabel: 'Archive listing',
+    }))) return;
     setMessage({ variant: '', text: '' });
     setBusyId(item._id);
     try {
       await (archiving ? archiveItem(item._id) : unarchiveItem(item._id));
-      setMessage({ variant: 'success', text: `"${item.title}" ${archiving ? 'archived' : 'unarchived'}` });
+      toast(archiving ? 'Listing archived.' : 'Listing restored to the catalog.');
     } catch (e) {
       setMessage({ variant: 'error', text: getErrorMessage(e) });
     } finally {

@@ -1,4 +1,5 @@
 // Small display helpers shared by Member 3's pages and components (Sprint 2).
+import Icon from '../../common/Icon';
 import styles from '../../../styles/sprint2/member3.module.css';
 
 /** Read-only star rating with a text alternative (colour/shape is never the only signal). */
@@ -6,8 +7,9 @@ export function Stars({ value }) {
   const n = Math.round(Number(value) || 0);
   return (
     <span className={styles.stars} role="img" aria-label={`${n} out of 5 stars`}>
-      {'★'.repeat(n)}
-      <span className={styles.starsMuted} aria-hidden="true">{'★'.repeat(5 - n)}</span>
+      {[1, 2, 3, 4, 5].map((rating) => (
+        <Icon key={rating} name="star" size={15} filled={rating <= n} />
+      ))}
     </span>
   );
 }

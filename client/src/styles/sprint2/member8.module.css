@@ -239,7 +239,7 @@
 
 .bar {
   height: 0.75rem;
-  background: #e8edf2;
+  background: var(--surface-alt);
   border-radius: 999px;
   overflow: hidden;
 }

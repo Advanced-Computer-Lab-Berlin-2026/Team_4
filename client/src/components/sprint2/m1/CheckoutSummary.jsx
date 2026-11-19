@@ -8,7 +8,7 @@ export default function CheckoutSummary({ quote }) {
   return (
     <>
       <h2>Reservation summary</h2>
-      <ul className={styles.list}>{quote.lines.map((line) => (
+      <ul className={styles.summaryList}>{quote.lines.map((line) => (
         <li key={line.entryId ?? (line.itemId + ':' + line.startDate)}>
           <strong>{line.title}</strong>
           <div>{line.startDate.slice(0, 10)} to {line.endDate.slice(0, 10)}</div>
@@ -21,7 +21,7 @@ export default function CheckoutSummary({ quote }) {
           )}
         </li>
       ))}</ul>
-      <p><strong>Total {money(quote.amountMinor, quote.currency)}</strong></p>
+      <p className={styles.checkoutTotal}><strong>Total</strong><strong>{money(quote.amountMinor, quote.currency)}</strong></p>
     </>
   );
 }

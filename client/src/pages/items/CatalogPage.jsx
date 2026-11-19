@@ -6,6 +6,7 @@ import { useSearchParams } from 'react-router-dom';
 import { listItems } from '../../api/catalog.api';
 import { listCategories } from '../../api/categories.api';
 import { getErrorMessage } from '../../api/axios';
+import Icon from '../../components/common/Icon';
 import Alert from '../../components/common/Alert';
 import Spinner from '../../components/common/Spinner';
 import Pagination from '../../components/common/Pagination';
@@ -74,24 +75,40 @@ export default function CatalogPage() {
     <div className={`container ${styles.browse}`}>
       <h1>Catalog</h1>
 
-      <div className="catalog-toolbar">
-        <SearchBar value={q} onSubmit={(text) => update({ q: text })} />
-        <CategoryFilter categories={categories} value={category} onChange={(id) => update({ category: id })} />
-        <FormField label="Sort by">
-          <select value={sort} onChange={(e) => update({ sort: e.target.value === 'newest' ? '' : e.target.value })}>
-            {SORT_OPTIONS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
-          </select>
-        </FormField>
-      </div>
+      <section className="card catalog-filters" aria-label="Catalog filters">
+        <div className="catalog-toolbar">
+          <SearchBar value={q} onSubmit={(text) => update({ q: text })} />
+          <CategoryFilter categories={categories} value={category} onChange={(id) => update({ category: id })} />
+          <FormField label="Sort by">
+            <select value={sort} onChange={(e) => update({ sort: e.target.value === 'newest' ? '' : e.target.value })}>
+              {SORT_OPTIONS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+            </select>
+          </FormField>
+        </div>
 
-      <AvailabilityFilter from={from} to={to} onChange={(r) => update({ from: r.from, to: r.to })} />
+        <AvailabilityFilter from={from} to={to} onChange={(r) => update({ from: r.from, to: r.to })} />
+
+        {hasFilters && (
+          <div className="catalog-active-filters" aria-label="Active filters">
+            {q && <button type="button" className="catalog-filter-chip" aria-label="Clear search" onClick={() => update({ q: '' })}>
+              {q}<Icon name="close" size={13} />
+            </button>}
+            {category && <button type="button" className="catalog-filter-chip" aria-label="Clear category" onClick={() => update({ category: '' })}>
+              {categories.find(({ _id, slug }) => _id === category || slug === category)?.name || 'Category'}<Icon name="close" size={13} />
+            </button>}
+            {from && <button type="button" className="catalog-filter-chip" aria-label="Clear availability filter" onClick={() => update({ from: '', to: '' })}>
+              {formatDay(from)} to {formatDay(to)}<Icon name="close" size={13} />
+            </button>}
+          </div>
+        )}
+      </section>
 
       <Alert variant="error">{error}</Alert>
       {loading && <Spinner />}
 
       {!loading && !error && (
         items.length === 0 ? (
-          <div className="catalog-empty">
+          <div className="empty-state catalog-empty">
             <p className="muted">{hasFilters ? 'No items match your search.' : 'No items are listed yet.'}</p>
             {hasFilters && <button className="btn btn-secondary" onClick={() => setParams({})}>Clear search and filters</button>}
           </div>

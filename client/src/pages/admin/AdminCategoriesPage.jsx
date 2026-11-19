@@ -95,7 +95,7 @@ function Categories() {
               {categories.map((category) => (
                 <tr key={category._id}>
                   <td>
-                    <strong>{category.icon ? `${category.icon} ` : ''}{category.name}</strong>
+                    <strong>{category.name}</strong>
                     <div className="muted">{category.slug}</div>
                   </td>
                   <td>{category.description || <span className="muted">No description</span>}</td>

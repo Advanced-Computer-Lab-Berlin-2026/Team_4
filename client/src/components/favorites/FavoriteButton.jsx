@@ -1,6 +1,8 @@
 // FavoriteButton - Owner: Member 9 - Requirements: 37, 38
 // Props: { itemId } - renders null for guests/admins
 import { useEffect, useState } from 'react';
+import Icon from '../common/Icon';
+import useFeedback from '../feedback/useFeedback';
 import { useAuth } from '../../context/AuthContext';
 import { getErrorMessage } from '../../api/axios';
 import { addFavorite, listFavoriteIds, removeFavorite } from '../../api/favorites.api';
@@ -20,6 +22,7 @@ function loadFavoriteIds(userId) {
 }
 
 export default function FavoriteButton({ itemId }) {
+  const { toast } = useFeedback();
   const { user, isMember } = useAuth();
   const [isFavorite, setIsFavorite] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -60,12 +63,14 @@ export default function FavoriteButton({ itemId }) {
       if (isFavorite) {
         await removeFavorite(itemId);
         setIsFavorite(false);
+        toast('Removed from your favorites.');
       } else {
         await addFavorite(itemId);
         setIsFavorite(true);
+        toast('Added to your favorites.');
       }
     } catch (err) {
-      setError(getErrorMessage(err));
+      toast(getErrorMessage(err), 'error');
     } finally {
       setBusy(false);
     }
@@ -75,7 +80,7 @@ export default function FavoriteButton({ itemId }) {
     <>
       <button
         type="button"
-        className="btn btn-small"
+        className="favorite-toggle"
         onClick={toggleFavorite}
         disabled={loading || busy}
         aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
@@ -83,7 +88,7 @@ export default function FavoriteButton({ itemId }) {
         title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
         aria-busy={loading || busy}
       >
-        {isFavorite ? '\u2665' : '\u2661'}
+        <Icon name="heart" size={18} filled={isFavorite} />
       </button>
       {error && <span role="alert" className="field-error">{error}</span>}
     </>

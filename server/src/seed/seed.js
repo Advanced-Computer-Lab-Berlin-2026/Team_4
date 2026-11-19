@@ -1,6 +1,6 @@
 /**
  * Seed the database with demo data so every member can work independently from day 1.
- *   npm run seed          -> insert missing demo data (safe to re-run)
+ *   npm run seed          -> insert missing fixtures and update default demo names (safe to re-run)
  *   npm run seed:reset    -> DROP the whole database first, then seed  (careful!)
  *
  * All seeded users share the password:  Passw0rd!
@@ -22,9 +22,18 @@ const HOME = { street: '12 Nile Corniche', city: 'Cairo', state: 'Cairo', postal
 const OTHER = { street: '5 Palm Street', city: 'Giza', state: 'Giza', postalCode: '12611', country: 'Egypt' };
 const PLACEHOLDER = { url: '/uploads/placeholder.svg' };
 
-async function upsertUser(data) {
+async function upsertUser(data, previousName) {
   let u = await User.findOne({ username: data.username });
-  if (u) return u;
+  if (u) {
+    if (previousName && u.name === previousName && u.email === data.email) {
+      await User.updateOne(
+        { _id: u._id, name: previousName, email: data.email },
+        { $set: { name: data.name } },
+        { runValidators: true },
+      );
+    }
+    return u;
+  }
   const { password, ...rest } = data;
   u = new User(rest);
   await u.setPassword(password || PASSWORD);
@@ -32,12 +41,7 @@ async function upsertUser(data) {
   return u;
 }
 
-(async () => {
-  await connectDB();
-  if (process.argv.includes('--reset')) {
-    await mongoose.connection.dropDatabase();
-    console.log('Database dropped.');
-  }
+async function seedBase() {
   await Promise.all(Object.values(require('../models')).map((m) => m.init())); // build indexes
 
   // ---- Membership tiers (spec: Basic / Plus / Premium) -------------------------------------------
@@ -62,10 +66,10 @@ async function upsertUser(data) {
 
   // ---- Users --------------------------------------------------------------------------------------
   await upsertUser({ username: 'admin', name: 'Site Admin', email: 'admin@shareshed.local', phone: '+201000000001', address: HOME, role: 'admin' });
-  const member1 = await upsertUser({ username: 'member1', name: 'Mona Member', email: 'member1@shareshed.local', phone: '+201000000002', address: HOME });
-  const member2 = await upsertUser({ username: 'member2', name: 'Karim Member', email: 'member2@shareshed.local', phone: '+201000000003', address: HOME });
-  const lender = await upsertUser({ username: 'lender1', name: 'Layla Lender', email: 'lender1@shareshed.local', phone: '+201000000004', address: OTHER, lenderStatus: 'verified', trustScore: 80 });
-  await upsertUser({ username: 'applicant', name: 'Adam Applicant', email: 'applicant@shareshed.local', phone: '+201000000005', address: OTHER });
+  const member1 = await upsertUser({ username: 'member1', name: 'Alice Carter', email: 'member1@shareshed.local', phone: '+201000000002', address: HOME }, 'Mona Member');
+  const member2 = await upsertUser({ username: 'member2', name: 'Robert Carter', email: 'member2@shareshed.local', phone: '+201000000003', address: HOME }, 'Karim Member');
+  const lender = await upsertUser({ username: 'lender1', name: 'Laura Bennett', email: 'lender1@shareshed.local', phone: '+201000000004', address: OTHER, lenderStatus: 'verified', trustScore: 80 }, 'Layla Lender');
+  await upsertUser({ username: 'applicant', name: 'Andrew Davis', email: 'applicant@shareshed.local', phone: '+201000000005', address: OTHER }, 'Adam Applicant');
   const admin = await User.findOne({ username: 'admin' });
 
   // ---- Items (owned by lender1) -------------------------------------------------------------------
@@ -127,7 +131,26 @@ async function upsertUser(data) {
     await Notice.create({ title: 'Welcome to ShareShed!', body: 'Borrow before you buy. Be kind, return items on time, and report any damage honestly.', postedBy: admin._id, pinned: true });
   }
 
-  console.log('\nSeed complete. Login (password for all: ' + PASSWORD + ')');
-  console.log('  admin | member1 | member2 | lender1 (verified lender) | applicant');
-  await mongoose.disconnect();
-})().catch((e) => { console.error(e); process.exit(1); });
+  return { categories: cat, admin };
+}
+
+async function run() {
+  try {
+    await connectDB();
+    if (process.argv.includes('--reset')) {
+      await mongoose.connection.dropDatabase();
+      console.log('Database dropped.');
+    }
+    await seedBase();
+    console.log('\nSeed complete. Login (password for all: ' + PASSWORD + ')');
+    console.log('  admin | member1 | member2 | lender1 (verified lender) | applicant');
+  } finally {
+    await mongoose.disconnect();
+  }
+}
+
+if (require.main === module) {
+  run().catch((error) => { console.error(error); process.exitCode = 1; });
+}
+
+module.exports = seedBase;

@@ -1,6 +1,7 @@
 // APPLICATION DETAIL - Owner: Member 3 - Requirements: 8, 9
 // Route: /admin/lender-applications/:id   Access: admin   (already registered in src/routes/routeConfig.jsx - do NOT edit that file)
 // API calls: src/api/*.api.js   Shared UI: src/components/common/*
+import useFeedback from '../../components/feedback/useFeedback';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import Alert from '../../components/common/Alert';
@@ -16,11 +17,11 @@ import '../../components/lender/lender.css';
 const formatAddress = (a = {}) => [a.street, a.city, a.state, a.postalCode, a.country].filter(Boolean).join(', ');
 
 export default function AdminLenderApplicationDetailPage() {
+  const { confirm, toast } = useFeedback();
   const { id } = useParams();
   const [application, setApplication] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [reason, setReason] = useState('');
   const [reasonError, setReasonError] = useState('');
   const [deciding, setDeciding] = useState('');
@@ -34,7 +35,6 @@ export default function AdminLenderApplicationDetailPage() {
 
   const decide = async (decision) => {
     setError('');
-    setSuccess('');
     setReasonError('');
     if (decision === 'reject' && reason.trim().length < 3) {
       setReasonError('Please give a reason for the rejection (at least 3 characters)');
@@ -44,13 +44,16 @@ export default function AdminLenderApplicationDetailPage() {
     const question = decision === 'approve'
       ? `Approve ${name} as a verified lender?`
       : `Reject the application from ${name}?`;
-    if (!window.confirm(question)) return;
+    if (!(await confirm({
+      title: decision === 'approve' ? 'Approve this application?' : 'Reject this application?',
+      description: question, confirmLabel: decision === 'approve' ? 'Approve lender' : 'Reject application', danger: decision !== 'approve',
+    }))) return;
 
     setDeciding(decision);
     try {
       const data = await decideApplication(id, { decision, ...(decision === 'reject' ? { reason: reason.trim() } : {}) });
       setApplication(data.application);
-      setSuccess(decision === 'approve'
+      toast(decision === 'approve'
         ? `${name} is now a verified lender.`
         : 'The application was rejected. The applicant can see your reason and resubmit.');
     } catch (err) {
@@ -124,7 +127,6 @@ export default function AdminLenderApplicationDetailPage() {
         <DocumentViewer applicationId={application._id} documents={application.documents} />
       </div>
 
-      <Alert variant="success">{success}</Alert>
 
       {pending && user && (
         <section className="card lender-section">

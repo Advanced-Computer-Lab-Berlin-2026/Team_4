@@ -3,6 +3,7 @@
 //   /damage-reports                         member  - my damage reports (as lender or borrower)
 //   /damage-reports/new?reservation=:id     lender  - return an active reservation as damaged (Req 61)
 //   /damage-reports/:id                     member  - view a case; the borrower can dispute the decision (Req 63)
+import useFeedback from '../../components/feedback/useFeedback';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import Alert from '../../components/common/Alert';
@@ -76,6 +77,7 @@ function NewReport({ reservationId }) {
 }
 
 function DisputeForm({ report, onDisputed }) {
+  const { confirm } = useFeedback();
   const [reason, setReason] = useState('');
   const [errors, setErrors] = useState({});
   const [error, setError] = useState('');
@@ -85,7 +87,7 @@ function DisputeForm({ report, onDisputed }) {
     e.preventDefault();
     setError('');
     if (reason.trim().length < 10) return setErrors({ reason: 'Explain your dispute in at least 10 characters' });
-    if (!window.confirm('Send this dispute? You can dispute a decision only once.')) return undefined;
+    if (!(await confirm({ title: 'Send this dispute?', description: 'You can dispute a decision only once.', confirmLabel: 'Send dispute' }))) return undefined;
     setErrors({});
     setSaving(true);
     try {

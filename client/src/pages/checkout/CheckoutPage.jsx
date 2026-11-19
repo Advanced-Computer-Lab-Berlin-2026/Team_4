@@ -4,6 +4,7 @@ import { getCheckoutQuote, getCheckoutStatus, submitCheckout } from '../../api/c
 import { getErrorMessage } from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
 import routes from '../../routes/routeConfig';
+import Icon from '../../components/common/Icon';
 import CheckoutSummary from '../../components/sprint2/m1/CheckoutSummary';
 import FulfilmentSelector from '../../components/sprint2/m6/FulfilmentSelector';
 import PromoCodeInput from '../../components/sprint2/m6/PromoCodeInput';
@@ -169,45 +170,53 @@ function CheckoutForm({ selection }) {
 
   return (
     <>
-      <h1>{cart ? 'Checkout borrow list' : 'Review reservation'}</h1>
-      <Link to="/reserve">Browse reservable items</Link>
+      <div className="workspace-heading">
+        <h1>{cart ? 'Checkout borrow list' : 'Review reservation'}</h1>
+        <Link to="/reserve" className="text-link">Browse reservable items <Icon name="arrow" size={16} /></Link>
+      </div>
       {loading && <p role="status">Checking availability and pricing…</p>}
       {missingAddress && <p role="status">Enter or select a delivery address to update checkout.</p>}
       {error && <p className={styles.error} role="alert">{error}</p>}
-      {quote && <CheckoutSummary quote={quote} />}
       {quote && !quote.paymentMethods.length && <p role="status">Payment is temporarily unavailable for this checkout.</p>}
-      {response?.lines?.length > 0 && (
-        <form className={styles.form} onSubmit={submit}>
-          {response.lines.map((line) => (
-            <FulfilmentSelector key={line.entryId ?? line.itemId} itemIds={[line.itemId]} savedAddress={user?.address}
-              label={cart ? line.title + ' · ' + line.startDate.slice(0, 10) : undefined}
-              value={cart ? byEntry[line.entryId] ?? pickup : fulfilment}
-              onChange={(choice) => changeFulfilment(line, choice)} disabled={submitting} />
-          ))}
-          <PromoCodeInput value={promoCode} onApply={(code) => { setPromoCode(code); setSubmitError(''); }}
-            discount={discount} disabled={submitting} />
-          {quote?.amountMinor > 0 && quote.paymentMethods.length > 0 && (PaymentMethodPicker ? (
-            <PaymentMethodPicker
-              amountMinor={quote.amountMinor} methods={quote.paymentMethods} value={method}
-              onChange={setMethod} disabled={submitting}
-            />
-          ) : (
-            <fieldset>
-              <legend>Payment method</legend>
-              <div className={styles.actions}>{quote.paymentMethods.map((choice) => (
-                <label key={choice}>
-                  <input type="radio" name="method" value={choice} checked={method === choice}
-                    onChange={() => setMethod(choice)} disabled={submitting} />
-                  {choice === 'wallet' ? 'Wallet' : 'Card (Stripe)'}
-                </label>
-              ))}</div>
-            </fieldset>
-          ))}
-          <button className={styles.button} disabled={submitting || !quote?.paymentMethods.includes(method)}>
-            {submitting ? 'Submitting…' : 'Submit reservation requests'}
-          </button>
-        </form>
-      )}
+      <div className={styles.checkoutGrid}>
+        {quote && (
+          <aside className={'card card-body ' + styles.checkoutSummary} aria-label="Reservation summary">
+            <CheckoutSummary quote={quote} />
+          </aside>
+        )}
+        {response?.lines?.length > 0 && (
+          <form className={'card card-body ' + styles.checkoutForm} onSubmit={submit}>
+            {response.lines.map((line) => (
+              <FulfilmentSelector key={line.entryId ?? line.itemId} itemIds={[line.itemId]} savedAddress={user?.address}
+                label={cart ? line.title + ' · ' + line.startDate.slice(0, 10) : undefined}
+                value={cart ? byEntry[line.entryId] ?? pickup : fulfilment}
+                onChange={(choice) => changeFulfilment(line, choice)} disabled={submitting} />
+            ))}
+            <PromoCodeInput value={promoCode} onApply={(code) => { setPromoCode(code); setSubmitError(''); }}
+              discount={discount} disabled={submitting} />
+            {quote?.amountMinor > 0 && quote.paymentMethods.length > 0 && (PaymentMethodPicker ? (
+              <PaymentMethodPicker
+                amountMinor={quote.amountMinor} methods={quote.paymentMethods} value={method}
+                onChange={setMethod} disabled={submitting}
+              />
+            ) : (
+              <fieldset>
+                <legend>Payment method</legend>
+                <div className={styles.actions}>{quote.paymentMethods.map((choice) => (
+                  <label key={choice}>
+                    <input type="radio" name="method" value={choice} checked={method === choice}
+                      onChange={() => setMethod(choice)} disabled={submitting} />
+                    {choice === 'wallet' ? 'Wallet' : 'Card (Stripe)'}
+                  </label>
+                ))}</div>
+              </fieldset>
+            ))}
+            <button className={styles.button} disabled={submitting || !quote?.paymentMethods.includes(method)}>
+              {submitting ? 'Submitting…' : 'Submit reservation requests'}
+            </button>
+          </form>
+        )}
+      </div>
       {error && !submitting && <button className={styles.button} onClick={() => {
         setSubmitError(''); setRefresh((count) => count + 1);
       }}>Refresh checkout quote</button>}
@@ -221,7 +230,7 @@ export default function CheckoutPage() {
   const serialized = params.toString();
   const selection = useMemo(() => readSelection(new URLSearchParams(serialized)), [serialized]);
   return (
-    <section className={styles.section}>
+    <section className={checkoutId ? 'container ' + styles.section : 'container ' + styles.checkoutPage}>
       {checkoutId ? <CheckoutResult key={checkoutId} id={checkoutId} /> : <CheckoutForm key={serialized} selection={selection} />}
     </section>
   );

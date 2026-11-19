@@ -15,7 +15,7 @@ export default function CategoryFilter({ categories = [], value = '', onChange }
         <option value="">All categories</option>
         {value && !selectedCategory && <option value={value} disabled>Unavailable category</option>}
         {categories.map((c) => (
-          <option key={c._id} value={c._id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>
+          <option key={c._id} value={c._id}>{c.name}</option>
         ))}
       </select>
     </FormField>

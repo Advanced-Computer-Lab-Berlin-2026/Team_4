@@ -1,6 +1,8 @@
 // LinkRequestForm - Owner: Member 8 - Requirements: 24
 // Props: { onSent } — email/phone + relation form
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import Alert from '../common/Alert';
+import useFeedback from '../feedback/useFeedback';
 import { sendRequest } from '../../api/household.api';
 import { getErrorMessage } from '../../api/axios';
 import { isValidEmail } from '../../utils/validators';
@@ -13,23 +15,12 @@ const RELATIONS = [
 ];
 
 export default function LinkRequestForm({ onSent }) {
+  const { toast } = useFeedback();
   const [contact, setContact] = useState('');
   const [relation, setRelation] = useState('spouse');
   const [fieldErrors, setFieldErrors] = useState({});
   const [serverError, setServerError] = useState('');
-  const [successMsg, setSuccessMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
-
-  // Auto-dismiss toast notifications after 4 seconds
-  useEffect(() => {
-    if (serverError || successMsg) {
-      const timer = setTimeout(() => {
-        setServerError('');
-        setSuccessMsg('');
-      }, 4000);
-      return () => clearTimeout(timer);
-    }
-  }, [serverError, successMsg]);
 
   const validateForm = () => {
     const errs = {};
@@ -56,7 +47,6 @@ export default function LinkRequestForm({ onSent }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setServerError('');
-    setSuccessMsg('');
 
     if (!validateForm()) return;
 
@@ -71,7 +61,7 @@ export default function LinkRequestForm({ onSent }) {
     try {
       setSubmitting(true);
       const res = await sendRequest(payload);
-      setSuccessMsg(res.message || 'Household link request sent.');
+      toast(res.message || 'Household link request sent.');
       setContact('');
       setRelation('spouse');
       setFieldErrors({});
@@ -135,33 +125,7 @@ export default function LinkRequestForm({ onSent }) {
           </button>
         </form>
 
-        {serverError && (
-          <div className="household-toast household-toast-error" role="alert">
-            <span>{serverError}</span>
-            <button
-              type="button"
-              className="household-toast-close"
-              onClick={() => setServerError('')}
-              aria-label="Close notification"
-            >
-              &times;
-            </button>
-          </div>
-        )}
-
-        {successMsg && (
-          <div className="household-toast household-toast-success" role="status">
-            <span>{successMsg}</span>
-            <button
-              type="button"
-              className="household-toast-close"
-              onClick={() => setSuccessMsg('')}
-              aria-label="Close notification"
-            >
-              &times;
-            </button>
-          </div>
-        )}
+        <Alert variant="error">{serverError}</Alert>
       </div>
     </article>
   );

@@ -5,6 +5,7 @@
 // Entries the server marks with a problem are shown first and are left out of the trip totals.
 // Checkout (Req 49) is Member 1's page (/checkout). It books every entry at once, so it stays disabled while any
 // entry needs attention or the list goes over the membership's limit on open bookings.
+import useFeedback from '../../components/feedback/useFeedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getErrorMessage } from '../../api/axios';
@@ -35,6 +36,7 @@ function groupByLender(entries) {
 }
 
 export default function BorrowListPage() {
+  const { confirm, toast } = useFeedback();
   const [list, setList] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -68,7 +70,7 @@ export default function BorrowListPage() {
       const { borrowList } = await updateBorrowListEntry(entry._id, dates);
       setList(borrowList);
       setEditingId('');
-      setMessage({ variant: 'success', text: `"${titleOf(entry)}" is now ${showRange(dates.startDate, dates.endDate)}.` });
+      toast(`"${titleOf(entry)}" is now ${showRange(dates.startDate, dates.endDate)}.`);
     } catch (err) {
       if (err?.response?.status === 404) setMessage({ variant: 'error', text: getErrorMessage(err) });
       refreshIfGone(err);
@@ -79,13 +81,13 @@ export default function BorrowListPage() {
   };
 
   const onRemove = async (entry) => {
-    if (!window.confirm(`Remove "${titleOf(entry)}" from your borrow list?`)) return;
+    if (!(await confirm({ title: 'Remove from borrow list?', description: titleOf(entry), confirmLabel: 'Remove item', danger: true }))) return;
     setMessage({ variant: '', text: '' });
     setBusy({ id: entry._id, action: 'remove' });
     try {
       const { borrowList } = await removeBorrowListEntry(entry._id);
       setList(borrowList);
-      setMessage({ variant: 'success', text: `"${titleOf(entry)}" removed from your borrow list.` });
+      toast(`"${titleOf(entry)}" removed from your borrow list.`);
       headingRef.current?.focus(); // the button that had focus is gone
     } catch (err) {
       setMessage({ variant: 'error', text: getErrorMessage(err) });

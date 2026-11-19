@@ -1,8 +1,7 @@
 /* Member 3 (Sprint 2) - reviews, trust, damage reports. Tokens only (docs/UI_README.md). */
 
 /* ---- stars */
-.stars { color: var(--warn); letter-spacing: .05em; white-space: nowrap; }
-.starsMuted { color: var(--border); }
+.stars { display: inline-flex; align-items: center; gap: .12rem; color: var(--warn); vertical-align: middle; }
 
 /* ---- trust summary */
 .trust { display: flex; flex-wrap: wrap; gap: .75rem 1.25rem; align-items: center; }
@@ -22,7 +21,7 @@
 .ratingGroup { display: flex; flex-wrap: wrap; gap: .5rem; border: 0; padding: 0; margin: 0 0 1rem; }
 .ratingGroup legend { font-weight: 600; margin-bottom: .35rem; padding: 0; }
 .ratingOption { display: inline-flex; align-items: center; gap: .3rem; padding: .45rem .7rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); cursor: pointer; min-height: 40px; }
-.ratingOptionChecked { border-color: var(--primary); background: #e6f0ff; font-weight: 600; }
+.ratingOptionChecked { border-color: var(--primary); background: var(--surface-alt); font-weight: 600; }
 .fullWidth { width: 100%; }
 
 /* ---- shared page layout */
@@ -43,7 +42,7 @@
 .photo { margin: 0; display: grid; gap: .3rem; justify-items: start; }
 .photo a { display: block; width: 100%; }
 .photoImg, .photoPlaceholder {
-  width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border: 1px solid var(--border); border-radius: 8px; background: #e8eef3;
+  width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-alt);
 }
 .photoPlaceholder { display: flex; align-items: center; justify-content: center; font-size: .85rem; color: var(--muted); }
 .photo figcaption { font-size: .8rem; }

@@ -29,8 +29,8 @@
 .picker { border: 1px solid var(--border); border-radius: var(--radius); padding: .75rem 1rem; margin: 0 0 1rem; }
 .picker legend { font-weight: 600; padding: 0 .25rem; }
 .option { display: flex; align-items: flex-start; gap: .6rem; padding: .6rem; border-radius: 8px; cursor: pointer; }
-.option:hover { background: #eef4ff; }
+.option:hover { background: var(--surface-alt); }
 .option input { margin-top: .3rem; width: 1.1rem; height: 1.1rem; flex: none; }
-.option:has(input:checked) { background: #eef4ff; outline: 2px solid var(--primary); }
+.option:has(input:checked) { background: var(--surface-alt); outline: 2px solid var(--primary); }
 .optionDisabled { cursor: not-allowed; color: var(--muted); } /* muted colour, not opacity: text keeps readable contrast */
 .optionDisabled:hover { background: none; }

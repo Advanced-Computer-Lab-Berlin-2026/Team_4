@@ -4,6 +4,7 @@
 // The lender's Approve / Decline for a pending request. Shown only when the server says the lender may use them
 // (reservation.actions). Both go through Member 1's command; refunds and events happen there.
 // Decline opens a short form with an optional reason (shown to the borrower). Both ask for confirmation first.
+import useFeedback from '../../feedback/useFeedback';
 import { useState } from 'react';
 import { getErrorMessage, getFieldErrors } from '../../../api/axios';
 import { approveReservation, rejectReservation } from '../../../api/reservationLifecycle.api';
@@ -16,6 +17,7 @@ import s from '../../../styles/sprint2/member5.module.css';
 const MAX = 500;
 
 export default function RequestAnswer({ reservation: r, onDone, onStale }) {
+  const { confirm } = useFeedback();
   const [declining, setDeclining] = useState(false);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState('');
@@ -54,17 +56,22 @@ export default function RequestAnswer({ reservation: r, onDone, onStale }) {
     }
   };
 
-  const approve = () => {
-    if (!window.confirm(`Approve the request from ${who} for "${title}", ${when}?`)) return;
+  const approve = async () => {
+    if (!(await confirm({
+      title: 'Approve this reservation?', description: `${who} requested "${title}" for ${when}.`, confirmLabel: 'Approve request',
+    }))) return;
     const handover = r.fulfilment?.method === 'delivery'
       ? `Arrange delivery for "${title}" from ${showDay(r.startDate)}.`
       : `${who} can pick up "${title}" from ${showDay(r.startDate)}.`;
     run('approve', () => approveReservation(r._id), `Approved. ${handover}`);
   };
-  const decline = (e) => {
+  const decline = async (e) => {
     e.preventDefault();
     if (reason.trim().length > MAX) { setReasonError(`Keep the reason under ${MAX} characters`); return; }
-    if (!window.confirm(`Decline the request from ${who} for "${title}"?${refund}`)) return;
+    if (!(await confirm({
+      title: 'Decline this reservation?', description: `${who} requested "${title}".${refund}`,
+      confirmLabel: 'Decline request', danger: true,
+    }))) return;
     run('reject', () => rejectReservation(r._id, reason.trim() || undefined), `Declined the request for "${title}".${refund}`);
   };
 

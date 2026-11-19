@@ -3,6 +3,7 @@
 // For the lender of an active booking: "Returned in good condition" through Member 1's return command (it completes the
 // booking, releases the deposit and charges any late fee through Member 2), and "Report damage", a link to Member 3's
 // form, shown only once that page is part of the app (so it is never a broken link).
+import useFeedback from '../../feedback/useFeedback';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getErrorMessage } from '../../../api/axios';
@@ -17,6 +18,7 @@ const DAMAGE_FORM = '/damage-reports/new';
 const hasDamageForm = routes.some((route) => route.path === DAMAGE_FORM);
 
 export default function ReturnActions({ reservation: r, onDone, onStale }) {
+  const { confirm } = useFeedback();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   if (r.role !== 'lender' || r.status !== 'active') return null;
@@ -36,7 +38,7 @@ export default function ReturnActions({ reservation: r, onDone, onStale }) {
   };
 
   const mark = async () => {
-    if (!window.confirm(confirmText())) return;
+    if (!(await confirm({ title: 'Confirm the return?', description: confirmText(), confirmLabel: 'Mark returned' }))) return;
     setBusy(true);
     setError('');
     try {

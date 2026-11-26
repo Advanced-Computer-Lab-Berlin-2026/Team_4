@@ -8,7 +8,7 @@ process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'disposable-member5-integration';
 const mongoose = require('mongoose');
 const app = require('../../src/app');
-const { User, Category, Item, Reservation, ReservationHold, BorrowList, DamageReport } = require('../../src/models');
+const { User, Category, Item, Reservation, ReservationHold, BorrowList, DamageReport, MembershipTier } = require('../../src/models');
 const { signToken } = require('../../src/utils/tokens');
 
 let server, base, category, lender, borrower, other, admin;
@@ -96,6 +96,25 @@ test('borrow list: the end date is the return day; limits and refusals', async (
   await Item.updateOne({ _id: ladder.id }, { isArchived: true });
   const list = await request('GET', '/api/borrow-lists/mine', borrower);
   assert.equal(list.body.borrowList.entries.find((e) => e.item._id === ladder.id).problem, 'unavailable');
+});
+
+test('borrow-list estimates use the same category and membership pricing as pickup checkout', async () => {
+  const plus = await MembershipTier.create({ name: 'Plus', annualFee: 150, depositDiscountPercent: 10, waitlistPriority: 2 });
+  const member = await user('checkout_estimate');
+  await User.updateOne({ _id: member.id }, {
+    $set: { membership: { tier: plus.id, status: 'active', renewsAt: day(30) } },
+  });
+  const ladders = await Category.create({ name: 'Pricing ladders', slug: 'pricing-ladders', depositMultiplier: 10 });
+  const ladder = await item('Pricing ladder', { category: ladders.id, depositAmount: 300 });
+  const added = await request('POST', '/api/borrow-lists/mine/entries', member, {
+    itemId: ladder.id, startDate: ymd(1), endDate: ymd(3),
+  });
+  assert.equal(added.status, 201, JSON.stringify(added.body));
+  const price = await request('POST', '/api/checkout/quote', member, { source: 'borrowList' });
+  assert.equal(price.status, 200, JSON.stringify(price.body));
+  assert.equal(price.body.quote.amountMinor, 270000);
+  assert.equal(added.body.borrowList.entries[0].estimatedDepositMinor, price.body.quote.amountMinor);
+  assert.deepEqual(price.body.quote.membershipDiscount, { tierName: 'Plus', source: 'self' });
 });
 
 test('my reservations: status and date filters, only my own', async () => {

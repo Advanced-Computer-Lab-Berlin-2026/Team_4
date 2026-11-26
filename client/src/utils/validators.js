@@ -17,3 +17,5 @@ export const isValidPhone = (v) => /^\+?[0-9\s-]{7,15}$/.test(v || '');
 
 export const ALLOWED_FILE_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
 export const MAX_UPLOAD_MB = 5;
+
+export const ADDRESS_MAX_LENGTH = { street: 200, city: 100, state: 100, postalCode: 100, country: 100 };

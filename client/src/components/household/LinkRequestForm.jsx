@@ -32,8 +32,12 @@ export default function LinkRequestForm({ onSent }) {
       if (!isValidEmail(trimmed)) {
         errs.contact = 'Enter a valid email address.';
       }
-    } else if (!/^\+?\d{7,15}$/.test(trimmed.replace(/[\s-]/g, ''))) {
-      errs.contact = 'Enter a valid phone number (7–15 digits).';
+    } else if (/^[+\d\s-]+$/.test(trimmed)) {
+      if (!/^\+?\d{7,15}$/.test(trimmed.replace(/[\s-]/g, ''))) {
+        errs.contact = 'Enter a valid phone number (7–15 digits).';
+      }
+    } else {
+      errs.contact = 'Enter a valid email address or phone number.';
     }
 
     if (!RELATIONS.some((r) => r.value === relation)) {
@@ -103,7 +107,7 @@ export default function LinkRequestForm({ onSent }) {
           </FormField>
 
           <FormField
-            label="Relation"
+            label="Their relation to you"
             error={fieldErrors.relation}
             hint="Limited to immediate household relations (spouse, child, or parent)."
           >

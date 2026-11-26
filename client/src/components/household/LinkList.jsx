@@ -8,6 +8,8 @@ import { getErrorMessage } from '../../api/axios';
 import { formatDate } from '../../utils/format';
 import StatusBadge from '../common/StatusBadge';
 
+const reciprocalRelation = { child: 'parent', parent: 'child' };
+
 const formatRelation = (rel = '') =>
   rel ? rel.charAt(0).toUpperCase() + rel.slice(1) : '';
 
@@ -85,6 +87,8 @@ export default function LinkList({ links = [], currentUserId, onChanged }) {
 
   const renderCard = (link, type) => {
     const other = getOtherMember(link);
+    const isRecipient = String(link.recipient?._id || link.recipient) === uid;
+    const relation = isRecipient ? reciprocalRelation[link.relation] || link.relation : link.relation;
     const isBusy = busyId === link._id;
 
     return (
@@ -95,7 +99,7 @@ export default function LinkList({ links = [], currentUserId, onChanged }) {
             <StatusBadge status={link.status} />
           </div>
           <div className="household-link-meta">
-            Relation: <strong>{formatRelation(link.relation)}</strong>
+            Relation: <strong>{formatRelation(relation)}</strong>
             {other?.email ? ` · ${other.email}` : ''}
             {other?.phone ? ` · ${other.phone}` : ''}
           </div>

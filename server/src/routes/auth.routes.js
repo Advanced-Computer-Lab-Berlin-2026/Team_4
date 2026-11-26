@@ -5,6 +5,7 @@ const c = require('../controllers/auth.controller');
 const { protect } = require('../middleware/auth');
 const validate = require('../middleware/validate');
 const { usernameRule, newPasswordRules } = require('./auth.validation');
+const { addressRules } = require('./address.validation');
 
 router.post('/register', [
   usernameRule(), ...newPasswordRules(),
@@ -14,8 +15,7 @@ router.post('/register', [
   body('ref').optional().isString().withMessage('Referral code must be text').bail()
     .trim().isLength({ max: 64 }).withMessage('Referral code is too long'),
   body('address').isObject({ strict: true }).withMessage('Home address is required'),
-  ...['street', 'city'].map((field) => body(`address.${field}`).isString().bail().trim().notEmpty().withMessage(`${field} is required`)),
-  ...['state', 'postalCode', 'country'].map((field) => body(`address.${field}`).optional().isString().bail().trim()),
+  ...addressRules({ registration: true }),
 ], validate, c.register);
 router.post('/login', [usernameRule(),
   body('password').isString().bail().notEmpty().withMessage('Password is required'),

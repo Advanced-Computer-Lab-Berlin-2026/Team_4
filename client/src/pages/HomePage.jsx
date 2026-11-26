@@ -47,7 +47,7 @@ export default function HomePage() {
           </div>
         </div>
         <img className="catalog-hero-photo" src={workshop} alt="A cordless drill and hand tools at a neighbourhood workbench"
-          width="1320" height="880" fetchPriority="high" />
+          width="1320" height="880" fetchpriority="high" />
       </section>
 
       {categories.length > 0 && (

@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { updateProfile } from '../../api/account.api';
 import { getErrorMessage, getFieldErrors } from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
-import { isValidPhone } from '../../utils/validators';
+import { ADDRESS_MAX_LENGTH, isValidPhone } from '../../utils/validators';
 import FormField from '../../components/common/FormField';
 import Alert from '../../components/common/Alert';
 import '../../components/account/account.css';
@@ -68,7 +68,7 @@ export default function ProfilePage() {
       </FormField>
       {ADDRESS_FIELDS.map(([key, label, autoComplete, required]) =>
         <FormField key={key} label={label} error={errors[key]}>
-          <input name={key} type="text" autoComplete={autoComplete} required={required} value={values[key]} onChange={change} />
+          <input name={key} type="text" autoComplete={autoComplete} required={required} maxLength={ADDRESS_MAX_LENGTH[key]} value={values[key]} onChange={change} />
         </FormField>)}
       <button className="btn" disabled={busy || !dirty}>{busy ? 'Saving…' : 'Save changes'}</button>
     </form>

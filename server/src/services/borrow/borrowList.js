@@ -149,19 +149,12 @@ async function isBooked(entry, userId) {
  * The membership limit on open bookings that Member 1's checkout enforces (bookingRules.assertCapacity):
  * { limit, used, left }, or null when my membership has no limit. My own holds count as used, like checkout does.
  */
-async function capacityOf(user) {
-  if (!user) return null;
-  let entitlements;
-  try {
-    entitlements = await getEntitlements(user, new Date(), null, features());
-  } catch {
-    return null; // no membership information: checkout decides
-  }
+async function capacityOf(userId, entitlements) {
   const limit = entitlements?.maxConcurrentReservations;
   if (limit == null || !Number.isInteger(limit) || limit < 0) return null;
   const [bookings, holds] = await Promise.all([
-    Reservation.countDocuments({ borrower: user._id, status: { $in: BLOCKING_STATUSES } }),
-    ReservationHold.countDocuments({ borrower: user._id, expiresAt: { $gt: new Date() } }),
+    Reservation.countDocuments({ borrower: userId, status: { $in: BLOCKING_STATUSES } }),
+    ReservationHold.countDocuments({ borrower: userId, expiresAt: { $gt: new Date() } }),
   ]);
   const used = bookings + holds;
   return { limit, used, left: Math.max(0, limit - used) };
@@ -175,20 +168,35 @@ async function getList(userId) {
   ]);
   const entries = list?.entries || [];
   const items = await Item.find({ _id: { $in: entries.map((e) => e.item) } }).select(ITEM_FIELDS)
-    .populate('category', 'name slug').populate('owner', 'name role lenderStatus status').lean();
+    .populate('category', 'name slug depositMultiplier').populate('owner', 'name role lenderStatus status').lean();
   const byId = new Map(items.map((i) => [String(i._id), i]));
   const base = { userId, checkLender: true, trustScore: me?.trustScore ?? 0 };
-  // Availability is only worth asking for entries that have no other problem.
-  const [booked, capacity] = await Promise.all([
+  const deps = features();
+  const [booked, entitlements] = await Promise.all([
     Promise.all(entries.map((e) => (problemOf(e, byId.get(String(e.item)), base) ? false : isBooked(e, userId)))),
-    capacityOf(me),
+    me ? getEntitlements(me, new Date(), null, deps).catch(() => null) : null,
+  ]);
+  const [capacity, pricedEntries] = await Promise.all([
+    capacityOf(userId, entitlements),
+    Promise.all(entries.map(async (entry, index) => {
+      const item = byId.get(String(entry.item));
+      const result = toEntryDto(entry, item, { ...base, booked: booked[index] });
+      let estimatedDepositMinor = null;
+      if (!result.problem && entitlements && deps.pricing?.quote) {
+        const quote = await deps.pricing.quote(item, entry, entitlements, null, { method: 'pickup' }, {
+          borrowerId: String(userId),
+        }).catch(() => null);
+        estimatedDepositMinor = quote?.amountMinor ?? null;
+      }
+      return { ...result, estimatedDepositMinor };
+    })),
   ]);
   return {
     _id: list?._id || null,
     max: MAX_ENTRIES,
     count: entries.length,
     capacity, // null = no membership limit
-    entries: entries.map((e, n) => toEntryDto(e, byId.get(String(e.item)), { ...base, booked: booked[n] })),
+    entries: pricedEntries,
   };
 }
 

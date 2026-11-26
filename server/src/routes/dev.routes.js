@@ -21,9 +21,9 @@ router.get('/users', asyncHandler(async (req, res) => {
 router.post('/login-as', asyncHandler(async (req, res) => {
   const username = SEEDED[req.body.role];
   if (!username) throw ApiError.badRequest(`role must be one of: ${Object.keys(SEEDED).join(', ')}`);
-  const user = await User.findOne({ username });
+  const user = await User.findOne({ username }).select('+passwordChangedAt');
   if (!user) throw ApiError.notFound('Seeded user not found - run "npm run seed" in /server');
-  setAuthCookie(res, user._id);
+  setAuthCookie(res, user._id, user.passwordChangedAt);
   res.json({ user });
 }));
 

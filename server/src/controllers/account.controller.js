@@ -10,6 +10,7 @@ const PasswordResetOtp = require('../models/PasswordResetOtp');
 const { CURRENCY } = require('../config/constants');
 const { toMinor, fromMinor } = require('../services/payments/money');
 const lateFee = require('../services/payments/lateFee');
+const { setAuthCookie } = require('../utils/tokens');
 
 const ADDRESS_KEYS = ['street', 'city', 'state', 'postalCode', 'country'];
 
@@ -19,8 +20,7 @@ const ADDRESS_KEYS = ['street', 'city', 'state', 'postalCode', 'country'];
  */
 exports.changePassword = asyncHandler(async (req, res) => {
   const { currentPassword, newPassword } = req.body;
-  // protect loads the user without passwordHash (select:false), so load it again with the hash.
-  const user = await User.findById(req.user._id).select('+passwordHash');
+  const user = await User.findById(req.user._id).select('+passwordHash +passwordChangedAt');
   if (!user) throw ApiError.unauthorized();
 
   if (!(await user.checkPassword(currentPassword))) {
@@ -30,10 +30,11 @@ exports.changePassword = asyncHandler(async (req, res) => {
     throw ApiError.badRequest('New password must be different from the current one', [{ field: 'newPassword', message: 'New password must be different from the current one' }]);
   }
 
-  await user.setPassword(newPassword);
-  await user.save();
+  const changedAt = await user.replacePassword(newPassword);
+  if (!changedAt) throw ApiError.conflict('The password changed while you were editing. Sign in again.');
   // Any reset code requested before this change is now stale.
   await PasswordResetOtp.deleteMany({ user: user._id });
+  setAuthCookie(res, user._id, changedAt);
   res.json({ message: 'Password changed successfully' });
 });
 

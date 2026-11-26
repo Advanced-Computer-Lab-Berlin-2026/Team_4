@@ -19,6 +19,7 @@ async function getEntitlements(actor, now, session, deps) {
   return {
     maxConcurrentReservations: tier?.maxConcurrentReservations,
     discountPercent: tier?.depositDiscountPercent || 0,
+    tier: tier ? { id: String(tier._id), name: tier.name } : null,
   };
 }
 

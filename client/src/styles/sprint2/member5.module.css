@@ -61,8 +61,8 @@
 .problem { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .5rem; margin: .4rem 0 0; }
 .problemText { color: var(--text); font-size: .92rem; margin: 0; }
 .facts { margin: .75rem 0 0; display: grid; gap: .25rem; }
-.facts > div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: .5rem; align-items: baseline; }
-.facts dt { color: var(--muted); font-size: .92rem; }
+.facts > div { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: .5rem; align-items: baseline; }
+.facts dt { color: var(--muted); font-size: .92rem; overflow-wrap: normal; }
 .facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
 .days { white-space: nowrap; }
 .entryActions { margin-top: .9rem; }
@@ -95,7 +95,7 @@
 .labels { list-style: none; margin: .45rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: .35rem; }
 .resFacts { margin: .5rem 0 0; display: flex; flex-wrap: wrap; gap: .2rem 1.25rem; }
 .resFacts > div { display: flex; gap: .4rem; align-items: baseline; min-width: 0; }
-.resFacts dt { color: var(--muted); font-size: .92rem; }
+.resFacts dt { color: var(--muted); font-size: .92rem; flex-shrink: 0; overflow-wrap: normal; }
 .resFacts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
 
 /* ---------- Reservation details ---------- */

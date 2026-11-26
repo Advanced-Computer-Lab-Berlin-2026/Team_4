@@ -22,7 +22,13 @@ async function loadUser(req) {
   } catch (e) {
     return null;
   }
-  return User.findById(payload.id);
+  const user = await User.findById(payload.id).select('+passwordChangedAt');
+  const changedAt = user?.passwordChangedAt?.getTime();
+  if (changedAt != null && (
+    !Number.isInteger(payload.iat) || payload.iat < Math.floor(changedAt / 1000) ||
+    payload.passwordChangedAt !== changedAt
+  )) return null;
+  return user;
 }
 
 /** NFR 5: requires a logged-in user. Sets req.user. Rejects suspended accounts. */

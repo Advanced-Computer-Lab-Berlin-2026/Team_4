@@ -1,12 +1,14 @@
 const assert = require('node:assert/strict');
 const { before, after, test } = require('node:test');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const { randomUUID } = require('node:crypto');
 
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'disposable-member1-integration';
 const mongoose = require('mongoose');
 const app = require('../../src/app');
-const { User, Category, Item, Reservation, ReservationHold, CheckoutAttempt, BorrowList, MembershipTier, DamageReport } = require('../../src/models');
+const { User, Category, Item, Reservation, ReservationHold, CheckoutAttempt, BorrowList, MembershipTier, DamageReport, PasswordResetOtp } = require('../../src/models');
 const checkout = require('../../src/services/reservations/checkout');
 const { cancel } = require('../../src/services/reservations/cancellation');
 const { features } = require('../../src/services/sprint2/bootstrap');
@@ -24,12 +26,12 @@ async function request(method, path, user, input) {
   const response = await fetch(base + path, {
     method,
     headers: {
-      ...(user && { authorization: 'Bearer ' + signToken(user.id) }),
+      ...(user?.cookie ? { cookie: user.cookie } : user && { authorization: 'Bearer ' + (user.token || signToken(user.id)) }),
       ...(input && { 'content-type': 'application/json' }),
     },
     ...(input && { body: JSON.stringify(input) }),
   });
-  return { status: response.status, body: await response.json() };
+  return { status: response.status, body: await response.json(), cookie: response.headers.get('set-cookie')?.split(';')[0] };
 }
 
 async function user(username, role = 'member', lenderStatus = 'none') {
@@ -97,6 +99,69 @@ test('signup accepts an optional referral code without making it a condition of 
   assert.equal(unknown.status, 201, JSON.stringify(unknown.body));
   assert.equal(unknown.body.referralCapture, features().referral ? 'invalid' : 'unavailable');
   assert.equal((await User.findById(unknown.body.user._id)).referredBy, undefined);
+});
+
+test('password changes and OTP resets revoke older sessions, including tokens issued in the same second', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Math.floor(Date.now() / 1000) * 1000 + 250 });
+  const input = signupInput('session_test', { phone: '01212345914' });
+  const signup = await request('POST', '/api/auth/register', null, input);
+  assert.equal(signup.status, 201);
+  const login = (password) => request('POST', '/api/auth/login', null, { username: input.username, password });
+  const older = await login(input.password);
+  const oldToken = older.cookie.split('=')[1];
+  const changed = await request('PUT', '/api/account/password', signup, {
+    currentPassword: input.password, newPassword: 'Changed9!',
+  });
+  assert.equal(changed.status, 200, JSON.stringify(changed.body));
+  const newToken = changed.cookie.split('=')[1];
+  assert.equal(jwt.decode(newToken).iat, jwt.decode(oldToken).iat);
+  assert.equal((await request('GET', '/api/auth/me', older)).status, 401);
+  assert.equal((await request('GET', '/api/auth/me', { token: oldToken })).status, 401);
+  assert.equal((await request('GET', '/api/auth/me', changed)).status, 200);
+  assert.equal((await login(input.password)).status, 401);
+  assert.equal((await login('Changed9!')).status, 200);
+
+  const otp = '658134';
+  await PasswordResetOtp.create({
+    user: signup.body.user._id, email: input.email, otpHash: await bcrypt.hash(otp, 4),
+    expiresAt: new Date(Date.now() + 60000),
+  });
+  const reset = await request('POST', '/api/password-reset/confirm', null, { email: input.email, otp, newPassword: 'Different9!' });
+  assert.equal(reset.status, 200, JSON.stringify(reset.body));
+  assert.equal((await request('GET', '/api/auth/me', changed)).status, 401);
+  const fresh = await login('Different9!');
+  assert.equal((await request('GET', '/api/auth/me', fresh)).status, 200);
+  assert.equal(fresh.body.user.passwordChangedAt, undefined);
+});
+
+test('admin-assisted resets revoke the target admin’s existing sessions', async () => {
+  const target = new User({ username: 'admin_recovery', role: 'admin', name: 'Admin recovery' });
+  await target.setPassword('OldAdmin9!');
+  await target.save();
+  const oldToken = signToken(target.id);
+  const reset = await request('POST', '/api/password-reset/admin', admin, { username: target.username, newPassword: 'NewAdmin9!' });
+  assert.equal(reset.status, 200, JSON.stringify(reset.body));
+  assert.equal((await request('GET', '/api/auth/me', { token: oldToken })).status, 401);
+  const login = await request('POST', '/api/auth/login', null, { username: target.username, password: 'NewAdmin9!' });
+  assert.equal((await request('GET', '/api/auth/me', login)).status, 200);
+});
+
+test('profile address limits return field-specific messages and still allow partial updates', async () => {
+  const names = {
+    street: 'Street', city: 'City', state: 'State', postalCode: 'Postal code', country: 'Country',
+  };
+  const oversized = Object.fromEntries(Object.keys(names).map((field) => [field, 'x'.repeat(5000)]));
+  const result = await request('PUT', '/api/account/profile', borrower, { address: oversized });
+  assert.equal(result.status, 400);
+  assert.deepEqual(result.body.errors, Object.entries(names).map(([field, label]) => ({
+    field: 'address.' + field, message: label + ' must be at most ' + (field === 'street' ? 200 : 100) + ' characters',
+  })));
+  const types = await request('PUT', '/api/account/profile', borrower, { address: { state: 7, postalCode: 42 } });
+  assert.equal(types.status, 400);
+  assert.deepEqual(types.body.errors.map(({ message }) => message), ['State must be text', 'Postal code must be text']);
+  const ok = await request('PUT', '/api/account/profile', borrower, { address: { postalCode: ' 12345 ' } });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.user.address.postalCode, '12345');
 });
 
 test('signup from a referral link pays once after completion and notifies the item’s favorites', async (t) => {

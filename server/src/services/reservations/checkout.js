@@ -159,6 +159,10 @@ async function price(borrower, sourceLines, selectedOptions, deps, session, hold
   if (!Number.isSafeInteger(amountMinor)) throw new Error('Invalid checkout total');
   return {
     lines, amountMinor, currency: CURRENCY,
+    membershipDiscount: entitlements.discountPercent > 0 ? {
+      tierName: entitlements.discountSource?.tierName ?? entitlements.tier?.name ?? null,
+      source: entitlements.discountSource?.type ?? 'self',
+    } : null,
     quoteHash: digest(lines.map((line) => [publicLine(line), line.entryId, line.lender, line.promoCode])),
   };
 }

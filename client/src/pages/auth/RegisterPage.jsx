@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { register } from '../../api/auth.api';
 import { getErrorMessage, getFieldErrors } from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
-import { isValidPassword, PASSWORD_HINT } from '../../utils/validators';
+import { ADDRESS_MAX_LENGTH, isValidPassword, PASSWORD_HINT } from '../../utils/validators';
 import AuthFormLayout from '../../components/auth/AuthFormLayout';
 import CredentialsFields from '../../components/auth/CredentialsFields';
 import FormField from '../../components/common/FormField';
@@ -48,7 +48,7 @@ export default function RegisterPage() {
         ['country', 'Country', 'text', 'country-name']].map(([key, label, type, autoComplete]) =>
         <FormField key={key} label={label} error={errors[key] || errors[`address.${key}`]}>
           <input name={key} type={type} autoComplete={autoComplete} value={values[key]} onChange={change}
-            required={!['state', 'postalCode'].includes(key)} maxLength={key === 'name' ? 100 : undefined} />
+            required={!['state', 'postalCode'].includes(key)} maxLength={key === 'name' ? 100 : ADDRESS_MAX_LENGTH[key]} />
         </FormField>)}
       <p><label><input type="checkbox" checked={lend} onChange={(e) => setLend(e.target.checked)} /> I also want to lend</label></p>
       <button className="btn" disabled={busy}>{busy ? 'Creating account…' : 'Create account'}</button>

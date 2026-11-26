@@ -5,7 +5,7 @@
 // the borrower asks for more time here (Req 74). Messages and cancellation are Member 1's page (/my-reservations/:id).
 import { useEffect, useState } from 'react';
 import useFeedback from '../../components/feedback/useFeedback';
-import { Link, useLocation, useParams } from 'react-router-dom';
+import { Link, useLocation, useOutletContext, useParams } from 'react-router-dom';
 import { getErrorMessage } from '../../api/axios';
 import { getReservation } from '../../api/reservationLifecycle.api';
 import { formatDate, formatMoney } from '../../utils/format';
@@ -46,6 +46,14 @@ export default function ReservationDetailsPage() {
   const [error, setError] = useState({ text: '', notFound: false });
   const [reloadKey, setReloadKey] = useState(0);
   const [problem, setProblem] = useState('');
+  const setLenderBookingPath = useOutletContext();
+  const lenderBookingPath = r?.role === 'lender' ? location.pathname : null;
+
+  useEffect(() => {
+    if (!setLenderBookingPath || !lenderBookingPath) return;
+    setLenderBookingPath(lenderBookingPath);
+    return () => setLenderBookingPath(null);
+  }, [lenderBookingPath, setLenderBookingPath]);
 
   // Quiet refresh after an action was refused because the booking changed elsewhere: no loading screen, message kept.
   const refresh = () => { getReservation(id).then((d) => setR(d.reservation)).catch((e) => setProblem(getErrorMessage(e))); };

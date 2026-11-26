@@ -4,7 +4,7 @@ const path = require('node:path');
 const mongoose = require('mongoose');
 const env = require('../config/env');
 const connectDB = require('../config/db');
-const { User, Item, Favorite, Notice, Report, Reservation } = require('../models');
+const { User, Item, Category, Favorite, Notice, Report, Reservation } = require('../models');
 const seedBase = require('./seed');
 const listings = require('./demoListings');
 
@@ -192,6 +192,13 @@ async function run() {
   try {
     await connectDB();
     const { categories, admin } = await seedBase();
+    if (process.argv.includes('--repair-ladders-multiplier')) {
+      const result = await Category.updateOne(
+        { _id: categories['ladders-access']._id, depositMultiplier: 10 },
+        { $set: { depositMultiplier: 1 } },
+      );
+      if (result.modifiedCount) console.log('Restored the demo Ladders & Access deposit multiplier to ×1.');
+    }
     await seedAccounts();
     const count = await seedListings(categories);
     await seedActivity(admin);

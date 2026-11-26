@@ -53,6 +53,21 @@ describe('PaymentMethodPicker (Req 50, 51)', () => {
     expect(onChange).toHaveBeenCalledWith('card');
   });
 
+  it('surfaces wallet and policy failures and allows the details to be retried', async () => {
+    getWallet.mockRejectedValueOnce(new Error('Wallet temporarily unavailable')).mockResolvedValueOnce({ balanceMinor: 50000 });
+    getPolicy.mockRejectedValueOnce(new Error('Policy temporarily unavailable')).mockResolvedValueOnce(POLICY);
+    const onChange = vi.fn();
+    render(<PaymentMethodPicker amountMinor={15000} methods={['wallet', 'card']} value="wallet" onChange={onChange} />);
+
+    await screen.findByText(/Could not load your wallet balance.*Could not load the refund and late-fee policy/);
+    expect(screen.getByRole('radio', { name: /Wallet/ }).disabled).toBe(true);
+    expect(onChange).toHaveBeenCalledWith('card');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry payment details' }));
+    expect(await screen.findByText(/Balance .*500/)).toBeTruthy();
+    expect(await screen.findByText(/Free cancellation up to 48 hours/)).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /Wallet/ }).disabled).toBe(false);
+  });
+
   it('says so when no payment method is available', () => {
     getWallet.mockResolvedValue({ balanceMinor: 0 });
     getPolicy.mockResolvedValue(POLICY);

@@ -90,7 +90,10 @@ export default function BorrowListEntry({ entry, showLocation = true, editing, b
           <div><dt>Dates</dt><dd>{entry.days == null ? 'Dates needed' : (
             <>{showRange(entry.startDate, entry.endDate)} <span className={s.days}>· {dayCount(entry.days)}</span></>
           )}</dd></div>
-          {item && <div><dt>Deposit</dt><dd>{formatMoney(item.depositAmount)}</dd></div>}
+          {item && !problem && (
+            <div><dt>Est. deposit</dt><dd>{Number.isSafeInteger(entry.estimatedDepositMinor)
+              ? formatMoney(entry.estimatedDepositMinor / 100) : 'Calculated at checkout'}</dd></div>
+          )}
           {item && problem && <div><dt>Lender</dt><dd>{item.owner?.name || 'Unknown'}</dd></div>}
           {item && showLocation && <div><dt>Pickup</dt><dd>{item.pickup?.location || 'The lender has not set a pickup location yet'}</dd></div>}
         </dl>

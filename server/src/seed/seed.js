@@ -56,7 +56,7 @@ async function seedBase() {
   const cats = [
     { name: 'Power Tools', slug: 'power-tools', icon: '🔌', depositMultiplier: 1.5, description: 'Drills, saws, sanders and more.' },
     { name: 'Hand Tools', slug: 'hand-tools', icon: '🔧', description: 'Hammers, wrenches, screwdriver sets.' },
-    { name: 'Ladders & Access', slug: 'ladders-access', icon: '🪜', description: 'Ladders, scaffolds and steps.' },
+    { name: 'Ladders & Access', slug: 'ladders-access', icon: '🪜', depositMultiplier: 1, description: 'Ladders, scaffolds and steps.' },
     { name: 'Camping & Outdoors', slug: 'camping-outdoors', icon: '⛺', description: 'Tents, stoves, sleeping bags.' },
     { name: 'Cleaning Equipment', slug: 'cleaning-equipment', icon: '🧽', description: 'Pressure washers, steam cleaners, vacuums.' },
     { name: 'Garden', slug: 'garden', icon: '🌱', description: 'Lawn mowers, trimmers, hoses.' },

@@ -84,6 +84,10 @@
 .summaryList { display: grid; gap: .9rem; margin: 0; padding: 0; list-style: none; }
 .summaryList li { padding-bottom: .75rem; border-bottom: 1px solid var(--border); }
 .summaryList li > div { color: var(--muted); font-size: .9rem; }
+.depositBreakdown { display: grid; gap: .3rem; margin: .5rem 0 0; font-size: .9rem; }
+.depositBreakdown > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .1rem .5rem; }
+.depositBreakdown dt { color: var(--muted); }
+.depositBreakdown dd { margin: 0; font-variant-numeric: tabular-nums; }
 .checkoutTotal { display: flex; justify-content: space-between; gap: .5rem; margin: .9rem 0 0; color: var(--primary-dark); font-size: 1.14rem; }
 @media (min-width: 860px) {
   .checkoutGrid { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); }

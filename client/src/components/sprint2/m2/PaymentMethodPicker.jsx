@@ -16,35 +16,59 @@ const egp = (minor) => formatMoney(minor / 100);
 export default function PaymentMethodPicker({ amountMinor, methods = ['wallet', 'card'], value, onChange, disabled = false, name, showReservationPolicy = true }) {
   const id = useId();
   const groupName = name || `payment-method-${id}`;
+  const hasWallet = methods.includes('wallet');
+  const hasCard = methods.includes('card');
+  const needsPolicy = showReservationPolicy && (hasWallet || hasCard);
   const [balanceMinor, setBalanceMinor] = useState(null);
   const [policy, setPolicy] = useState(null);
+  const [walletFailed, setWalletFailed] = useState(false);
+  const [policyFailed, setPolicyFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    if (!hasWallet) return;
     let ignore = false;
-    getWallet().then((w) => { if (!ignore) setBalanceMinor(w.balanceMinor); }).catch(() => { if (!ignore) setBalanceMinor(null); });
-    if (showReservationPolicy) {
-      getPolicy().then((p) => { if (!ignore) setPolicy(p.policy); }).catch(() => {});
-    }
+    setWalletFailed(false);
+    setBalanceMinor(null);
+    getWallet()
+      .then(({ balanceMinor: balance }) => {
+        if (!Number.isSafeInteger(balance) || balance < 0) throw new Error('Invalid wallet balance');
+        if (!ignore) setBalanceMinor(balance);
+      })
+      .catch(() => { if (!ignore) setWalletFailed(true); });
     return () => { ignore = true; };
-  }, [showReservationPolicy]);
+  }, [hasWallet, attempt]);
+
+  useEffect(() => {
+    if (!needsPolicy) return;
+    let ignore = false;
+    setPolicyFailed(false);
+    getPolicy()
+      .then(({ policy: rules }) => {
+        if (!rules?.cancellation || !rules?.lateFee) throw new Error('Invalid payment policy');
+        if (!ignore) setPolicy(rules);
+      })
+      .catch(() => { if (!ignore) setPolicyFailed(true); });
+    return () => { ignore = true; };
+  }, [needsPolicy, attempt]);
 
   const walletTooLow = balanceMinor !== null && balanceMinor < amountMinor;
+  const walletUnavailable = walletFailed || walletTooLow;
   const options = [
-    methods.includes('wallet') && {
+    hasWallet && {
       value: 'wallet',
       label: 'Wallet',
-      hint: balanceMinor === null ? 'Checking your balance…'
+      hint: walletFailed ? 'Wallet balance unavailable.'
+        : balanceMinor === null ? 'Checking your balance…'
         : walletTooLow ? `Not enough balance (you have ${egp(balanceMinor)})` : `Balance ${egp(balanceMinor)}`,
-      unavailable: walletTooLow,
+      unavailable: walletUnavailable,
     },
-    methods.includes('card') && { value: 'card', label: 'Card', hint: 'Paid on Stripe’s secure page. Card details never reach ShareShed.' },
+    hasCard && { value: 'card', label: 'Card', hint: 'Paid on Stripe’s secure page. Card details never reach ShareShed.' },
   ].filter(Boolean);
 
-  // If the selected option becomes unavailable (balance loaded and too low), move to the next usable one.
   useEffect(() => {
-    const selected = options.find((o) => o.value === value);
-    if (selected?.unavailable) onChange?.(options.find((o) => !o.unavailable)?.value || '');
-  }, [walletTooLow]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (hasWallet && walletUnavailable && value === 'wallet') onChange?.(hasCard ? 'card' : '');
+  }, [hasWallet, hasCard, walletUnavailable, value, onChange]);
 
   if (!options.length) return <p role="status">Payment is temporarily unavailable.</p>;
 
@@ -64,7 +88,7 @@ export default function PaymentMethodPicker({ amountMinor, methods = ['wallet', 
           </span>
         </label>
       ))}
-      {showReservationPolicy && policy && (
+      {needsPolicy && policy && !policyFailed && (
         <p className={styles.meta}>
           Free cancellation up to {policy.cancellation.freeCancellationHours} hours before pickup;
           after that, {policy.cancellation.partialRefundPercent}% of the deposit is refunded to your wallet.
@@ -72,6 +96,17 @@ export default function PaymentMethodPicker({ amountMinor, methods = ['wallet', 
           Late returns cost {policy.lateFee.percentOfDepositPerDay}% of the deposit per day
           (up to {policy.lateFee.capPercentOfDeposit}% of it).
         </p>
+      )}
+      {((hasWallet && walletFailed) || (needsPolicy && policyFailed)) && (
+        <div>
+          <p role="status" className={styles.meta}>
+            {hasWallet && walletFailed && 'Could not load your wallet balance. '}
+            {needsPolicy && policyFailed && 'Could not load the refund and late-fee policy.'}
+          </p>
+          <button type="button" className="btn btn-secondary btn-small" onClick={() => setAttempt((n) => n + 1)}>
+            Retry payment details
+          </button>
+        </div>
       )}
     </fieldset>
   );

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Link, matchPath, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { getErrorMessage } from '../../api/axios';
 import Alert from '../common/Alert';
@@ -43,13 +43,19 @@ function getNavigation(user, isAdmin, isVerifiedLender) {
   };
 }
 
-function RouteLinks({ links, onNavigate, className }) {
-  return links.map(({ to, label }) => (
-    <NavLink key={to} to={to} end={to === '/admin'} className={className} onClick={onNavigate}>{label}</NavLink>
-  ));
+const matchesNav = (pathname, to) => !!matchPath({ path: to, end: to === '/admin' }, pathname);
+
+function RouteLinks({ links, activePath, onNavigate, className }) {
+  return links.map(({ to, label }) => {
+    const active = matchesNav(activePath, to);
+    return (
+      <Link key={to} to={to} className={className + (active ? ' active' : '')}
+        aria-current={active ? 'page' : undefined} onClick={onNavigate}>{label}</Link>
+    );
+  });
 }
 
-export default function Navbar() {
+export default function Navbar({ activePath }) {
   const { pathname } = useLocation();
   const { user, isAdmin, isVerifiedLender, logout } = useAuth();
   const { preference, chooseTheme } = useTheme();
@@ -62,7 +68,8 @@ export default function Navbar() {
   const navigate = useNavigate();
   const { primary, sections, account } = getNavigation(user, isAdmin, isVerifiedLender);
   const currentTheme = themeOptions.find(({ value }) => value === preference);
-  const isActive = (links) => links.some(({ to }) => pathname === to || (to !== '/admin' && pathname.startsWith(to + '/')));
+  const navPath = activePath ?? pathname;
+  const isActive = (links) => links.some(({ to }) => matchesNav(navPath, to));
 
   useEffect(() => {
     setOpen('');
@@ -124,7 +131,7 @@ export default function Navbar() {
       <div className="navbar-inner">
         <Brand onClick={() => closeMenu()} />
         <nav className="nav-desktop" aria-label="Main navigation">
-          <RouteLinks links={primary} className="nav-link" onNavigate={() => closeMenu()} />
+          <RouteLinks activePath={navPath} links={primary} className="nav-link" onNavigate={() => closeMenu()} />
           {(isAdmin ? sections : [{ label: 'Explore', links: sections.flatMap(({ links }) => links) }])
             .filter(({ links }) => links.length > 0)
             .map(({ label, links }) => {
@@ -139,9 +146,9 @@ export default function Navbar() {
                       {name === 'explore' ? sections.filter(({ links: items }) => items.length).map((section) => (
                         <div className="nav-menu-group" key={section.label}>
                           <p>{section.label}</p>
-                          <RouteLinks links={section.links} className="nav-menu-link" onNavigate={() => closeMenu()} />
+                          <RouteLinks activePath={navPath} links={section.links} className="nav-menu-link" onNavigate={() => closeMenu()} />
                         </div>
-                      )) : <RouteLinks links={links} className="nav-menu-link" onNavigate={() => closeMenu()} />}
+                      )) : <RouteLinks activePath={navPath} links={links} className="nav-menu-link" onNavigate={() => closeMenu()} />}
                     </div>
                   )}
                 </div>
@@ -181,7 +188,7 @@ export default function Navbar() {
               {open === 'account' && (
                 <div className="nav-popover nav-account-popover" id={id + '-account'}>
                   <p className="nav-menu-caption">{user.name || user.username}</p>
-                  <RouteLinks links={account} className="nav-menu-link" onNavigate={() => closeMenu()} />
+                  <RouteLinks activePath={navPath} links={account} className="nav-menu-link" onNavigate={() => closeMenu()} />
                   {signOut}
                 </div>
               )}
@@ -198,12 +205,12 @@ export default function Navbar() {
         </div>
         {open === 'mobile' && (
           <nav id={id + '-mobile'} className="nav-mobile" aria-label="Mobile navigation">
-            <RouteLinks links={primary} className="nav-menu-link" onNavigate={() => closeMenu()} />
+            <RouteLinks activePath={navPath} links={primary} className="nav-menu-link" onNavigate={() => closeMenu()} />
             {sections.filter(({ links }) => links.length).map(({ label, links }) => (
               <details key={label} open={isActive(links) || undefined}>
                 <summary className="nav-menu-link">{label}<Icon name="chevron" size={15} /></summary>
                 <div className="nav-nested">
-                  <RouteLinks links={links} className="nav-menu-link" onNavigate={() => closeMenu()} />
+                  <RouteLinks activePath={navPath} links={links} className="nav-menu-link" onNavigate={() => closeMenu()} />
                 </div>
               </details>
             ))}
@@ -211,11 +218,11 @@ export default function Navbar() {
               <details open={isActive(account) || undefined}>
                 <summary className="nav-menu-link">Account<Icon name="chevron" size={15} /></summary>
                 <div className="nav-nested">
-                  <RouteLinks links={account} className="nav-menu-link" onNavigate={() => closeMenu()} />
+                  <RouteLinks activePath={navPath} links={account} className="nav-menu-link" onNavigate={() => closeMenu()} />
                   {signOut}
                 </div>
               </details>
-            ) : <RouteLinks links={account} className="nav-menu-link" onNavigate={() => closeMenu()} />}
+            ) : <RouteLinks activePath={navPath} links={account} className="nav-menu-link" onNavigate={() => closeMenu()} />}
           </nav>
         )}
       </div>

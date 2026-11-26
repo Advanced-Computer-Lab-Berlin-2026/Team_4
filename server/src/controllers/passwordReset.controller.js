@@ -91,7 +91,7 @@ exports.requestOtp = asyncHandler(async (req, res) => {
  */
 exports.confirmReset = asyncHandler(async (req, res) => {
   const { email, otp, newPassword } = req.body;
-  const user = await User.findOne({ email, role: 'member' });
+  const user = await User.findOne({ email, role: 'member' }).select('+passwordHash +passwordChangedAt');
   if (!user) throw ApiError.badRequest(INVALID_RESET);
 
   // The TTL index only deletes expired docs about once a minute, so also check expiresAt here.
@@ -118,8 +118,7 @@ exports.confirmReset = asyncHandler(async (req, res) => {
   );
   if (!claimed) throw ApiError.badRequest(INVALID_RESET);
 
-  await user.setPassword(newPassword);
-  await user.save();
+  if (!(await user.replacePassword(newPassword))) throw ApiError.badRequest(INVALID_RESET);
   await PasswordResetOtp.deleteOne({ _id: counted._id });
   res.json({ message: 'Password reset successfully. You can now log in.' });
 });
@@ -131,15 +130,16 @@ exports.confirmReset = asyncHandler(async (req, res) => {
  */
 exports.adminResetPassword = asyncHandler(async (req, res) => {
   const { username, newPassword } = req.body;
-  const target = await User.findOne({ username, role: 'admin' });
+  const target = await User.findOne({ username, role: 'admin' }).select('+passwordHash +passwordChangedAt');
   if (!target) throw ApiError.notFound('Admin account not found');
 
   if (target._id.equals(req.user._id)) {
     throw ApiError.badRequest('Use change password to update your own password');
   }
 
-  await target.setPassword(newPassword);
-  await target.save();
+  if (!(await target.replacePassword(newPassword))) {
+    throw ApiError.conflict('This admin’s password was just updated. Try again.');
+  }
   await PasswordResetOtp.deleteMany({ user: target._id });
 
   res.json({ message: `Password reset for admin ${target.username}` });

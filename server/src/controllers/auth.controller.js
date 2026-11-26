@@ -34,14 +34,14 @@ exports.register = asyncHandler(async (req, res) => {
 });
 
 exports.login = asyncHandler(async (req, res) => {
-  const user = await User.findOne({ username: req.body.username }).select('+passwordHash');
+  const user = await User.findOne({ username: req.body.username }).select('+passwordHash +passwordChangedAt');
   if (!user || !(await user.checkPassword(req.body.password))) {
     throw ApiError.unauthorized('Invalid username or password');
   }
   if (user.status === USER_STATUS.SUSPENDED) {
     throw ApiError.forbidden('Your account has been suspended');
   }
-  setAuthCookie(res, user._id);
+  setAuthCookie(res, user._id, user.passwordChangedAt);
   res.json({ user });
 });
 

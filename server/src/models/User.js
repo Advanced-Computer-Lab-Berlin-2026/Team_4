@@ -30,6 +30,7 @@ const userSchema = new Schema(
       country: { type: String, trim: true, default: 'Egypt' },
     },
     passwordHash: { type: String, required: true, select: false },
+    passwordChangedAt: { type: Date, select: false },
 
     role: { type: String, enum: Object.values(ROLES), default: ROLES.MEMBER, index: true },
     lenderStatus: { type: String, enum: Object.values(LENDER_STATUS), default: LENDER_STATUS.NONE, index: true },
@@ -79,6 +80,19 @@ userSchema.methods.setPassword = async function setPassword(plain) {
   this.passwordHash = await bcrypt.hash(plain, 10);
 };
 
+/** Replace an existing password and revoke sessions in the same write. Load both private fields first. */
+userSchema.methods.replacePassword = async function replacePassword(plain) {
+  if (!this.passwordHash) throw new Error('Password hash must be selected before replacing it');
+  const passwordHash = await bcrypt.hash(plain, 10);
+  const passwordChangedAt = new Date(Math.max(Date.now(), (this.passwordChangedAt?.getTime() ?? 0) + 1));
+  const { modifiedCount } = await this.constructor.updateOne(
+    { _id: this._id, passwordHash: this.passwordHash },
+    { $set: { passwordHash, passwordChangedAt } },
+    { runValidators: true }
+  );
+  return modifiedCount === 1 ? passwordChangedAt : null;
+};
+
 /** NOTE: passwordHash is select:false -> load with  User.findOne(...).select('+passwordHash')  */
 userSchema.methods.checkPassword = function checkPassword(plain) {
   return bcrypt.compare(plain, this.passwordHash);
@@ -89,7 +103,7 @@ userSchema.methods.isVerifiedLender = function isVerifiedLender() {
 };
 
 userSchema.set('toJSON', {
-  transform: (doc, ret) => { delete ret.passwordHash; delete ret.__v; return ret; },
+  transform: (doc, ret) => { delete ret.passwordHash; delete ret.passwordChangedAt; delete ret.__v; return ret; },
 });
 
 module.exports = mongoose.model('User', userSchema);

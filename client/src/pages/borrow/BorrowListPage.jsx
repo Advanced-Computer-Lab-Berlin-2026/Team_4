@@ -103,11 +103,12 @@ export default function BorrowListPage() {
     const starts = ready.map((e) => e.startDate).sort();
     const ends = ready.map((e) => e.endDate).sort();
     const groups = groupByLender(ready);
+    const depositMinor = ready.reduce((sum, entry) => sum + (entry.estimatedDepositMinor ?? NaN), 0);
     return {
       ready,
       groups,
       problems: entries.filter((e) => e.problem || !e.item),
-      deposit: ready.reduce((sum, e) => sum + Number(e.item.depositAmount || 0), 0),
+      depositMinor: Number.isSafeInteger(depositMinor) ? depositMinor : null,
       firstPickup: starts[0] || '',
       lastReturn: ends[ends.length - 1] || '',
       startDays: new Set(starts).size,
@@ -168,7 +169,10 @@ export default function BorrowListPage() {
                     <div><dt>Lenders to visit</dt><dd>{trip.groups.length}</dd></div>
                     <div><dt>First pickup</dt><dd>{showDay(trip.firstPickup)}</dd></div>
                     <div><dt>Last return</dt><dd>{showDay(trip.lastReturn)}</dd></div>
-                    <div className={s.summaryTotal}><dt>Total deposit</dt><dd>{formatMoney(trip.deposit)}</dd></div>
+                    <div className={s.summaryTotal}>
+                      <dt>Estimated deposit</dt>
+                      <dd>{trip.depositMinor === null ? 'Calculated at checkout' : formatMoney(trip.depositMinor / 100)}</dd>
+                    </div>
                   </dl>
                   <p className={`muted ${s.tripNote}`}>
                     {trip.startDays === 1
@@ -181,6 +185,11 @@ export default function BorrowListPage() {
               )}
               {trip.problems.length > 0 && trip.ready.length > 0 && (
                 <p className={`muted ${s.tripNote}`}>{plural(trip.problems.length, 'item')} that {trip.problems.length === 1 ? 'needs' : 'need'} attention {trip.problems.length === 1 ? 'is' : 'are'} not counted.</p>
+              )}
+              {trip.ready.length > 0 && (
+                <p className={`muted ${s.tripNote}`}>
+                  The pickup estimate includes category multipliers and membership discounts. Any promo codes or delivery fees are applied at checkout.
+                </p>
               )}
               <p className={`muted ${s.tripNote}`}>Deposits are held when you check out. Your list doesn&apos;t reserve the items, so availability is checked again then.</p>
               {capacity && (

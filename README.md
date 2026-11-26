@@ -83,12 +83,6 @@ In dev, the **DEV** button (bottom-right) logs you in as any of them in one clic
 ## Team docs
 `docs/OWNERSHIP.md` (who edits what) · `docs/API_CONTRACT.md` (all endpoints) · `docs/SCHEMA.md` (database) · `docs/TEAM_WORKFLOW.md` (Git + conventions)
 
-## Project report
-- **Team name / Scrum Master:** _TODO_
-- **Members & contributions:** _TODO (link to OWNERSHIP.md)_
-- **Sprint 1 summary / screenshots:** _TODO_
-- **Known issues:** _TODO_
-
 ## Sprint 2 reservation development
 
 Reservation writes require MongoDB Atlas or a MongoDB replica set with transaction support. Run the regular seed to create a no-deposit listing for checking the reservation workflow. See [Member 1's setup and test commands](docs/sprint2/member1.md), [integration contracts](docs/SPRINT2_CONTRACT.md), and [ownership](docs/SPRINT2_OWNERSHIP.md).

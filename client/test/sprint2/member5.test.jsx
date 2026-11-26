@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { lenderLinks, memberLinks } from '../../src/components/layout/navLinks';
+import FeedbackProvider from '../../src/components/feedback/FeedbackProvider';
 import BorrowListEntry from '../../src/components/sprint2/m5/BorrowListEntry';
 import ReservationDetailsPage from '../../src/pages/lifecycle/ReservationDetailsPage';
 import { getReservation } from '../../src/api/reservationLifecycle.api';
@@ -60,7 +61,7 @@ it('shows delivery controls and refreshes the reservation for the return after h
   setDeliveryStatus.mockResolvedValue({ ...delivery, deliveryStatus: 'delivered', canUpdate: false });
   render(
     <MemoryRouter initialEntries={['/reservations/loan-5']} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <Routes><Route path="/reservations/:id" element={<ReservationDetailsPage />} /></Routes>
+      <FeedbackProvider><Routes><Route path="/reservations/:id" element={<ReservationDetailsPage />} /></Routes></FeedbackProvider>
     </MemoryRouter>,
   );
   const delivered = await screen.findByRole('button', { name: 'Mark delivered' });
@@ -74,7 +75,7 @@ it('fills the borrow form with the dates the item page passes and follows change
   getMyBorrowList.mockResolvedValue({ borrowList: { count: 0, max: 10, entries: [] } });
   const view = (startDate, endDate) => (
     <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <BorrowListButton itemId="item-7" ownerId="lender-1" maxBorrowDays={3} startDate={startDate} endDate={endDate} />
+      <FeedbackProvider><BorrowListButton itemId="item-7" ownerId="lender-1" maxBorrowDays={3} startDate={startDate} endDate={endDate} /></FeedbackProvider>
     </MemoryRouter>
   );
   const { rerender } = render(view('2030-01-01', '2030-01-03'));

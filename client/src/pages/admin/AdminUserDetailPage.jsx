@@ -1,62 +1,54 @@
-// AdminUserDetailPage page - Owner: Member 4
-import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
 import { getErrorMessage } from '../../api/axios';
 import { getUser } from '../../api/adminUsers.api';
+import Alert from '../../components/common/Alert';
+import Spinner from '../../components/common/Spinner';
+import StatusBadge from '../../components/common/StatusBadge';
 
 export default function AdminUserDetailPage() {
-    const { id } = useParams();
-    const navigate = useNavigate();
-    const [user, setUser] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
+  const { id } = useParams();
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-    useEffect(() => {
-        let ignore = false;
-        setLoading(true);
-        setError('');
-        setUser(null);
-        const loadDetails = async () => {
-            try {
-                const res = await getUser(id);
-                if (!ignore) setUser(res.data);
-            } catch (err) {
-                if (!ignore) setError(getErrorMessage(err));
-            } finally {
-                if (!ignore) setLoading(false);
-            }
-        };
-        loadDetails();
-        return () => { ignore = true; };
-    }, [id]);
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
+    setUser(null);
+    getUser(id)
+      .then(({ data }) => { if (active) setUser(data); })
+      .catch((err) => { if (active) setError(getErrorMessage(err)); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [id]);
 
-    if (loading) return <div style={{ padding: '2rem' }}>Loading user details...</div>;
-    if (error) return <div style={{ padding: '2rem', color: 'red' }}>{error}</div>;
-    if (!user) return <div style={{ padding: '2rem' }}>User not found.</div>;
-
-    return (
-        <div style={{ padding: '2rem', maxWidth: '800px', margin: '0 auto', overflowWrap: 'anywhere' }}>
-            <button
-                onClick={() => navigate(-1)}
-                style={{ marginBottom: '1.5rem', padding: '6px 12px', background: '#6c757d', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-            >
-                &larr; Back
-            </button>
-
-            <div style={{ background: '#fff', padding: '2rem', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                <h2>User Basic Information</h2>
-                <hr style={{ margin: '1rem 0', border: '0', borderTop: '1px solid #eee' }} />
-
-                <p><strong>Full Name:</strong> {user.name}</p>
-                <p><strong>Username:</strong> {user.username}</p>
-                <p><strong>Email Address:</strong> {user.email}</p>
-                <p><strong>Phone Number:</strong> {user.phone || 'N/A'}</p>
-                <p><strong>Home Address:</strong> {[user.address?.street, user.address?.city, user.address?.state, user.address?.postalCode, user.address?.country].filter(Boolean).join(', ') || 'N/A'}</p>
-                <p><strong>System Role:</strong> {user.role}</p>
-                <p><strong>Lender Status:</strong> {user.lenderStatus || 'Standard'}</p>
-                <p><strong>Account Status:</strong> <span style={{ color: user.status === 'suspended' ? 'red' : 'green', fontWeight: 'bold' }}>{user.status || 'active'}</span></p>
-                <p><strong>Registered On:</strong> {new Date(user.createdAt).toLocaleDateString()}</p>
-            </div>
-        </div>
-    );
+  return (
+    <div className="container">
+      <div className="workspace-heading">
+        <h1>User details</h1>
+        <Link to="/admin/users" className="btn btn-secondary">Back to users</Link>
+      </div>
+      {loading && <Spinner label="Loading user details..." />}
+      <Alert variant="error">{error}</Alert>
+      {!loading && !error && !user && <p className="empty-state">User not found.</p>}
+      {user && (
+        <section className="card card-body admin-user-info" aria-label="User information">
+          <dl>
+            <dt>Full name</dt><dd>{user.name}</dd>
+            <dt>Username</dt><dd>{user.username}</dd>
+            <dt>Email address</dt><dd>{user.email}</dd>
+            <dt>Phone number</dt><dd>{user.phone || 'N/A'}</dd>
+            <dt>Home address</dt>
+            <dd>{[user.address?.street, user.address?.city, user.address?.state, user.address?.postalCode, user.address?.country].filter(Boolean).join(', ') || 'N/A'}</dd>
+            <dt>System role</dt><dd>{user.role}</dd>
+            <dt>Lender status</dt><dd><StatusBadge status={user.lenderStatus || 'Standard'} /></dd>
+            <dt>Account status</dt><dd><StatusBadge status={user.status || 'active'} /></dd>
+            <dt>Registered on</dt><dd>{new Date(user.createdAt).toLocaleDateString()}</dd>
+          </dl>
+        </section>
+      )}
+    </div>
+  );
 }

@@ -1,15 +1,16 @@
 // ItemManualTab - Owner: Member 6 - Requirements: 32
 // Props: { item, onSaved } - upload / replace / remove manual
+import useFeedback from '../../feedback/useFeedback';
 import { useRef, useState } from 'react';
 import { getErrorMessage } from '../../../api/axios';
 import { removeManual, uploadManual } from '../../../api/itemPolicies.api';
 import Alert from '../../common/Alert';
 
 export default function ItemManualTab({ item, onSaved }) {
+  const { confirm, toast } = useFeedback();
   const busyRef = useRef(false);
   const [file, setFile] = useState(null);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState('');
 
   if (!item?._id) return <Alert variant="info">Save the item details before uploading a usage manual.</Alert>;
@@ -26,7 +27,6 @@ export default function ItemManualTab({ item, onSaved }) {
     const formElement = event.currentTarget || event.target;
     setSubmitting('upload');
     setError('');
-    setSuccess('');
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -34,7 +34,7 @@ export default function ItemManualTab({ item, onSaved }) {
       onSaved?.(data.item);
       setFile(null);
       formElement.reset();
-      setSuccess('Usage manual uploaded.');
+      toast('Usage manual uploaded.');
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -44,16 +44,15 @@ export default function ItemManualTab({ item, onSaved }) {
   };
 
   const handleRemove = async () => {
-    if (busyRef.current || !window.confirm('Remove this usage manual?')) return;
+    if (busyRef.current || !(await confirm({ title: 'Remove the usage manual?', confirmLabel: 'Remove manual', danger: true }))) return;
     busyRef.current = true;
 
     setSubmitting('remove');
     setError('');
-    setSuccess('');
     try {
       const data = await removeManual(item._id);
       onSaved?.(data.item);
-      setSuccess('Usage manual removed.');
+      toast('Usage manual removed.');
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -68,7 +67,6 @@ export default function ItemManualTab({ item, onSaved }) {
         <h2>Usage manual</h2>
         <p className="muted">Upload one manual so borrowers can review safe setup and operating steps before reserving.</p>
         <Alert variant="error">{error}</Alert>
-        <Alert variant="success">{success}</Alert>
 
         {item.manual?.url ? (
           <p>

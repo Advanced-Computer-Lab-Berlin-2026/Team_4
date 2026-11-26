@@ -27,6 +27,9 @@ if (env.NODE_ENV !== 'test') app.use(morgan('dev'));
 
 // Public uploads only (item photos, manuals). private/ is intentionally NOT exposed.
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads', 'public')));
+if (['development', 'test'].includes(env.NODE_ENV)) {
+  app.use('/uploads/demo-catalog', express.static(path.join(__dirname, 'seed', 'assets', 'demo-catalog')));
+}
 
 // All /api routes are auto-mounted from src/routes/*.routes.js (see routes/index.js)
 app.use('/api', routes);

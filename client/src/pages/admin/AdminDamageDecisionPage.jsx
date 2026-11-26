@@ -3,6 +3,7 @@
 //   /admin/damage-reports        admin - work queue by status
 //   /admin/damage-reports/:id    admin - evidence + decide the forfeit (Req 62) or resolve a dispute (Req 64)
 // Member 4's cross-platform damage report (Req 96) links its rows to /admin/damage-reports/:id.
+import useFeedback from '../../components/feedback/useFeedback';
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import Alert from '../../components/common/Alert';
@@ -20,6 +21,7 @@ const STATUS_FILTERS = [['open', 'Open - needs a decision'], ['disputed', 'Dispu
 
 /** Amount form used for both the decision and the resolution. */
 function AmountForm({ title, intro, amountLabel, max, submitLabel, confirmText, onSubmit }) {
+  const { confirm } = useFeedback();
   const [amount, setAmount] = useState(max === 0 ? '0' : '');
   const [note, setNote] = useState('');
   const [errors, setErrors] = useState({});
@@ -36,7 +38,7 @@ function AmountForm({ title, intro, amountLabel, max, submitLabel, confirmText, 
     else if (value > max) next.amount = `At most ${formatMoney(max)}`;
     if (note.trim().length < 3) next.note = 'Add a note of at least 3 characters';
     setErrors(next);
-    if (Object.keys(next).length || !window.confirm(confirmText(value))) return;
+    if (Object.keys(next).length || !(await confirm({ title: 'Record this decision?', description: confirmText(value), confirmLabel: 'Record decision' }))) return;
 
     setSaving(true);
     try {
@@ -69,9 +71,9 @@ function AmountForm({ title, intro, amountLabel, max, submitLabel, confirmText, 
 }
 
 function CaseView({ id }) {
+  const { toast } = useFeedback();
   const [report, setReport] = useState(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
 
   useEffect(() => {
     getReport(id).then((d) => setReport(d.report)).catch((err) => setError(getErrorMessage(err)));
@@ -85,7 +87,6 @@ function CaseView({ id }) {
 
   return (
     <>
-      <Alert variant="success">{notice}</Alert>
       <DamageReportDetails report={report} />
 
       {report.status === 'open' && (
@@ -101,7 +102,7 @@ function CaseView({ id }) {
           onSubmit={async (forfeitAmount, note) => {
             const d = await decideReport(id, { forfeitAmount, note });
             setReport(d.report);
-            setNotice('Decision saved.');
+            toast('Decision saved.');
           }}
         />
       )}
@@ -117,7 +118,7 @@ function CaseView({ id }) {
           onSubmit={async (finalForfeitAmount, note) => {
             const d = await resolveReport(id, { finalForfeitAmount, note });
             setReport(d.report);
-            setNotice('Dispute resolved.');
+            toast('Dispute resolved.');
           }}
         />
       )}

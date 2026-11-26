@@ -11,6 +11,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { getErrorMessage, getFieldErrors } from '../../../api/axios';
 import { addBorrowListEntry, getMyBorrowList } from '../../../api/borrowLists.api';
 import Alert from '../../common/Alert';
+import useFeedback from '../../feedback/useFeedback';
 import BorrowDateFields from './BorrowDateFields';
 import { checkDates, dateErrorsFrom, dayCount, showRange } from './borrowDates';
 import s from '../../../styles/sprint2/member5.module.css';
@@ -18,6 +19,7 @@ import s from '../../../styles/sprint2/member5.module.css';
 const EMPTY = { startDate: '', endDate: '' };
 
 export default function BorrowListButton({ itemId, ownerId, maxBorrowDays, startDate = '', endDate = '', onAdded }) {
+  const { toast } = useFeedback();
   const { user, loading: authLoading, isMember } = useAuth();
   const location = useLocation();
   const isOwner = !!user && !!ownerId && String(ownerId) === String(user._id);
@@ -28,14 +30,13 @@ export default function BorrowListButton({ itemId, ownerId, maxBorrowDays, start
   const [dates, setDates] = useState(EMPTY);
   const [errors, setErrors] = useState({});
   const [error, setError] = useState('');
-  const [justAdded, setJustAdded] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!canBorrow) return undefined;
     let ignore = false;
     setChecking(true);
-    setList(null); setErrors({}); setError(''); setJustAdded(false);
+    setList(null); setErrors({}); setError('');
     getMyBorrowList()
       .then((d) => { if (!ignore) setList(d.borrowList); })
       .catch(() => { /* the form still works: the server checks everything when adding */ })
@@ -73,7 +74,7 @@ export default function BorrowListButton({ itemId, ownerId, maxBorrowDays, start
     try {
       const { borrowList } = await addBorrowListEntry({ itemId, startDate: dates.startDate, endDate: dates.endDate });
       setList(borrowList);
-      setJustAdded(true);
+      toast('Added to your borrow list.');
       if (onAdded) onAdded(borrowList);
     } catch (err) {
       const fieldErrors = dateErrorsFrom(getFieldErrors(err));
@@ -91,7 +92,6 @@ export default function BorrowListButton({ itemId, ownerId, maxBorrowDays, start
   if (entry) {
     return (
       <section className={s.addBox} aria-label="Borrow list">
-        <Alert variant="success">{justAdded ? 'Added to your borrow list.' : ''}</Alert>
         <Alert variant="error">{error}</Alert>
         <p className={s.addState}>
           <span className={`badge badge-green ${s.badge}`}>In your borrow list</span>

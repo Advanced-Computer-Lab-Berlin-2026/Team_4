@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "test:sprint2": "node --test test/sprint2/*.test.js",
     "seed": "node src/seed/seed.js",
+    "seed:demo": "node src/seed/demo.js",
     "seed:reset": "node src/seed/seed.js --reset"
   },
   "dependencies": {

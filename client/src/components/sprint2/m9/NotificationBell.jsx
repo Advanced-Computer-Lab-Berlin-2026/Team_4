@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getUnreadNotificationCount, listNotifications, NOTIFICATIONS_READ } from '../../../api/notifications.api';
 import { getErrorMessage } from '../../../api/axios';
+import Icon from '../../common/Icon';
 import styles from '../../../styles/sprint2/member9.module.css';
 
 export default function NotificationBell() {
@@ -64,7 +65,7 @@ export default function NotificationBell() {
         aria-expanded={open}
         onClick={() => { setOpen((value) => !value); if (!open) refresh(); }}
       >
-        Notifications {count > 0 && <span className={styles.badge}>{count > 99 ? '99+' : count}</span>}
+        <Icon name="bell" size={20} />{count > 0 && <span className={styles.badge}>{count > 99 ? '99+' : count}</span>}
       </button>
       {open && (
         <div className={styles.bellPanel} role="dialog" aria-label="Recent notifications">

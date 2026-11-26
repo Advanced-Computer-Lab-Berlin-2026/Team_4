@@ -2,6 +2,7 @@
 // Props: { reservationId, readOnly?, onChange?(photos) }
 // Member 5 embeds it on the lender's reservation page; Member 3's damage pages use it read-only as the before/after evidence.
 // The server decides who may upload/remove (canUpload / canRemove); photos are private, so they are fetched as blobs.
+import useFeedback from '../../feedback/useFeedback';
 import { useCallback, useEffect, useId, useState } from 'react';
 import Alert from '../../common/Alert';
 import Spinner from '../../common/Spinner';
@@ -19,6 +20,7 @@ const IMAGE_TYPES = ['image/jpeg', 'image/png'];
 const PER_UPLOAD = 5;
 
 function Thumb({ reservationId, photo, label, canRemove, onRemove }) {
+  const { confirm } = useFeedback();
   const [url, setUrl] = useState('');
   const [failed, setFailed] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -33,7 +35,7 @@ function Thumb({ reservationId, photo, label, canRemove, onRemove }) {
   }, [reservationId, photo._id]);
 
   const remove = async () => {
-    if (!window.confirm(`Remove ${photo.originalName}?`)) return;
+    if (!(await confirm({ title: 'Remove condition photo?', description: photo.originalName, confirmLabel: 'Remove photo', danger: true }))) return;
     setRemoving(true);
     try { await onRemove(photo); } finally { setRemoving(false); }
   };

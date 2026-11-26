@@ -5,6 +5,7 @@
 // Every booking of my items. "Needs my answer" shows pending requests and open extension requests, oldest first.
 // Filters (tab, item, dates, page) are kept in the address, so reload and the Back arrow keep them.
 import { useEffect, useState } from 'react';
+import useFeedback from '../../components/feedback/useFeedback';
 import { Link, useSearchParams } from 'react-router-dom';
 import { getErrorMessage, getFieldErrors } from '../../api/axios';
 import { listLendingItems, listLendingReservations } from '../../api/reservationLifecycle.api';
@@ -42,6 +43,7 @@ function waitingText({ requests, extensions }) {
 }
 
 export default function LenderReservationsPage() {
+  const { toast } = useFeedback();
   const [params, setParams] = useSearchParams();
   const tabKey = TABS.some((t) => t.key === params.get('tab')) ? params.get('tab') : 'all';
   const itemId = /^[a-f0-9]{24}$/i.test(params.get('item') || '') ? params.get('item') : '';
@@ -56,7 +58,6 @@ export default function LenderReservationsPage() {
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
   const [reloadKey, setReloadKey] = useState(0);
-  const [notice, setNotice] = useState('');
   const [problem, setProblem] = useState('');
 
   const go = (next, replace = false) => {
@@ -116,8 +117,8 @@ export default function LenderReservationsPage() {
   else if (from) rangeText = ` from ${showDay(from)} on`;
   else if (to) rangeText = ` until ${showDay(to)}`;
 
-  const stale = (message) => { setNotice(''); setProblem(message); setReloadKey((k) => k + 1); };
-  const done = (_, message) => { setProblem(''); setNotice(message); setReloadKey((k) => k + 1); window.scrollTo(0, 0); };
+  const stale = (message) => { setProblem(message); setReloadKey((k) => k + 1); };
+  const done = (_, message) => { setProblem(''); toast(message); setReloadKey((k) => k + 1); window.scrollTo(0, 0); };
 
   const section = (key, title, note, rows) => rows.length > 0 && (
     <section aria-labelledby={`lend-${key}-title`}>
@@ -157,7 +158,7 @@ export default function LenderReservationsPage() {
       <div className="tabs" role="group" aria-label="Show bookings">
         {TABS.map((t) => (
           <button key={t.key} type="button" className={`tab ${tabKey === t.key ? 'active' : ''}`} aria-pressed={tabKey === t.key}
-            onClick={() => { setNotice(''); setProblem(''); go({ tab: t.key, page: 1 }); }}>
+            onClick={() => { setProblem(''); go({ tab: t.key, page: 1 }); }}>
             {t.label}{t.key === 'action' && data && hasWaiting ? ` (${waiting.requests + waiting.extensions})` : ''}
           </button>
         ))}
@@ -188,7 +189,6 @@ export default function LenderReservationsPage() {
         </div>
       </fieldset>
 
-      <Alert variant="success">{notice}</Alert>
       <Alert variant="error">{problem}</Alert>
 
       {loading && !data && !rangeError && <Spinner label="Loading bookings..." />}

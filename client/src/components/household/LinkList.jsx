@@ -1,6 +1,8 @@
 // LinkList - Owner: Member 8 - Requirements: 25, 26, 27
 // Props: { links, currentUserId, onChanged } — incoming/outgoing/accepted lists
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import Alert from '../common/Alert';
+import useFeedback from '../feedback/useFeedback';
 import { respondToRequest, removeLink } from '../../api/household.api';
 import { getErrorMessage } from '../../api/axios';
 import { formatDate } from '../../utils/format';
@@ -10,22 +12,11 @@ const formatRelation = (rel = '') =>
   rel ? rel.charAt(0).toUpperCase() + rel.slice(1) : '';
 
 export default function LinkList({ links = [], currentUserId, onChanged }) {
+  const { confirm, toast } = useFeedback();
   const [busyId, setBusyId] = useState(null);
   const [actionError, setActionError] = useState('');
-  const [actionSuccess, setActionSuccess] = useState('');
 
   const uid = String(currentUserId || '');
-
-  // Auto-dismiss toast notifications after 4 seconds
-  useEffect(() => {
-    if (actionError || actionSuccess) {
-      const timer = setTimeout(() => {
-        setActionError('');
-        setActionSuccess('');
-      }, 4000);
-      return () => clearTimeout(timer);
-    }
-  }, [actionError, actionSuccess]);
 
   // Partition links into clear groups (exclude declined unless needed, or show active/pending)
   const incomingPending = links.filter(
@@ -43,16 +34,17 @@ export default function LinkList({ links = [], currentUserId, onChanged }) {
 
   const handleRespond = async (linkId, action) => {
     if (action === 'decline') {
-      const ok = window.confirm('Decline this household link request?');
+      const ok = await confirm({
+        title: 'Decline this household request?', confirmLabel: 'Decline request', danger: true,
+      });
       if (!ok) return;
     }
 
     setActionError('');
-    setActionSuccess('');
     try {
       setBusyId(linkId);
       const res = await respondToRequest(linkId, { action });
-      setActionSuccess(
+      toast(
         res.message ||
           (action === 'accept'
             ? 'Household link request accepted.'
@@ -69,18 +61,17 @@ export default function LinkList({ links = [], currentUserId, onChanged }) {
   const handleRemove = async (link, isPendingCancel = false) => {
     const other = getOtherMember(link);
     const label = other?.name || other?.username || 'this member';
-    const confirmText = isPendingCancel
-      ? `Cancel your pending household request to ${label}?`
-      : `Remove this household link with ${label}?`;
-
-    if (!window.confirm(confirmText)) return;
+    if (!(await confirm({
+      title: isPendingCancel ? 'Cancel this household request?' : 'Remove this household link?',
+      description: isPendingCancel ? `Your request to ${label} will be withdrawn.` : `Your link with ${label} will be removed.`,
+      confirmLabel: isPendingCancel ? 'Withdraw request' : 'Remove link', danger: true,
+    }))) return;
 
     setActionError('');
-    setActionSuccess('');
     try {
       setBusyId(link._id);
       const res = await removeLink(link._id);
-      setActionSuccess(
+      toast(
         res.message ||
           (isPendingCancel ? 'Household link request cancelled.' : 'Household link removed.')
       );
@@ -166,33 +157,7 @@ export default function LinkList({ links = [], currentUserId, onChanged }) {
 
   return (
     <div>
-      {actionError && (
-        <div className="household-toast household-toast-error" role="alert">
-          <span>{actionError}</span>
-          <button
-            type="button"
-            className="household-toast-close"
-            onClick={() => setActionError('')}
-            aria-label="Close notification"
-          >
-            &times;
-          </button>
-        </div>
-      )}
-
-      {actionSuccess && (
-        <div className="household-toast household-toast-success" role="status">
-          <span>{actionSuccess}</span>
-          <button
-            type="button"
-            className="household-toast-close"
-            onClick={() => setActionSuccess('')}
-            aria-label="Close notification"
-          >
-            &times;
-          </button>
-        </div>
-      )}
+      <Alert variant="error">{actionError}</Alert>
 
       {/* Incoming Pending Requests (Req 25) */}
       <section className="household-section" aria-labelledby="incoming-heading">
